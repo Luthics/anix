@@ -29,6 +29,7 @@ fn take_artifact(path: &Path, extension: &str) -> Vec<u8> {
     bytes
 }
 
+// RFC §7.1
 #[test]
 fn nul_probe_is_exactly_8192_bytes_utf8_validation_covers_the_entire_stream() {
     for (offset, byte, suppressed) in [
@@ -59,6 +60,7 @@ fn nul_probe_is_exactly_8192_bytes_utf8_validation_covers_the_entire_stream() {
     }
 }
 
+// RFC §7.1
 #[test]
 fn ansi_csi_final_byte_range_osc_terminators_and_carriage_return_overwrites() {
     for final_byte in 0x40..=0x7e {
@@ -86,6 +88,7 @@ fn folded_file(summary: &str) -> PathBuf {
     PathBuf::from(format!("/tmp/msh_{id}.log"))
 }
 
+// RFC §7.1
 #[test]
 fn line_limit_is_inclusive_and_fold_preserves_exact_head_tail_count_and_full_text() {
     for count in [199, 200, 201, 403] {
@@ -126,6 +129,7 @@ fn line_limit_is_inclusive_and_fold_preserves_exact_head_tail_count_and_full_tex
     }
 }
 
+// RFC §7.1
 #[test]
 fn byte_limit_independent_from_line_limit_preserves_multibyte_file() {
     for size in [8191, 8192, 8193] {
@@ -160,6 +164,7 @@ fn msh(script: &str) -> Command {
     c
 }
 
+// RFC §7.1
 #[test]
 fn cli_forces_noninteractive_environment_merges_streams_and_propagates_status() {
     let mut cmd = msh(
@@ -181,6 +186,7 @@ fn cli_forces_noninteractive_environment_merges_streams_and_propagates_status() 
     assert!(res.stderr.is_empty());
 }
 
+// RFC §7.1
 #[test]
 fn cli_suppresses_raw_bytes_before_ansi_filtering_or_folding() {
     let out = msh(r#"printf '\211PNG\r\n\032\n\033[31m\000'"#)
@@ -205,6 +211,7 @@ fn cli_suppresses_raw_bytes_before_ansi_filtering_or_folding() {
     );
 }
 
+// RFC §7.1, §6.4
 #[test]
 fn timeout_reports_124_before_a_finite_longer_command_completes() {
     let start = Instant::now();

@@ -39,6 +39,7 @@ def page_shapes_pdf():
 
 
 class PdfPages(unittest.TestCase):
+    # RFC §7.2
     def test_single_file_and_stdin_render_the_selected_pages(self):
         self.assertTrue(any(shutil.which(name) for name in ("pdftoppm", "mutool", "gs")),
                         "install poppler-utils, mutool or Ghostscript for this suite")

@@ -2,6 +2,7 @@
 use super::{Fixture, expect_code};
 use std::fs;
 
+// RFC §10.2
 #[test]
 fn strict_requires_landlock_and_best_effort_warns_when_the_kernel_lacks_it() {
     let fx = Fixture::new();
@@ -23,6 +24,7 @@ fn strict_requires_landlock_and_best_effort_warns_when_the_kernel_lacks_it() {
     }
 }
 
+// RFC §10.2
 #[cfg(target_os = "linux")]
 #[test]
 fn supported_landlock_allows_writes_to_the_three_roots_and_keeps_other_fixture_files_readable() {

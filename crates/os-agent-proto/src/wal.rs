@@ -88,6 +88,7 @@ mod tests {
     use super::*;
     use crate::IR_VERSION;
 
+    // RFC §6.2
     #[test]
     fn wal_events_round_trip() {
         let init = WalEvent::SessionInit {

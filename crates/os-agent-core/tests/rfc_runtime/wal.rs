@@ -30,6 +30,7 @@ fn replay(path: &Path) -> os_agent_core::wal::ReplayedSession {
     WalStore::open(path).unwrap().load_active_window().unwrap()
 }
 
+// RFC §6.2
 #[test]
 fn every_partial_byte_write_of_a_final_record_fails_without_modifying_history() {
     let dir = TempDir::new();
@@ -57,6 +58,7 @@ fn every_partial_byte_write_of_a_final_record_fails_without_modifying_history() 
     }
 }
 
+// RFC §6.2
 #[test]
 fn checkpoint_short_circuits_archived_history_and_handles_reverse_read_boundaries() {
     let dir = TempDir::new();
@@ -84,6 +86,7 @@ fn checkpoint_short_circuits_archived_history_and_handles_reverse_read_boundarie
     }
 }
 
+// RFC §6.1, §6.2
 #[test]
 fn overlapping_folds_keep_the_surviving_prefix_and_never_recycle_turn_ids() {
     let dir = TempDir::new();
@@ -119,6 +122,7 @@ fn overlapping_folds_keep_the_surviving_prefix_and_never_recycle_turn_ids() {
     assert_eq!(actual, expected.map(|(t, s)| (t, s.to_owned())));
 }
 
+// RFC §6.2, §6.4
 #[test]
 fn cli_rejects_corrupted_tails_and_unknown_section_versions_before_inference() {
     for (kind, version, suffix, code) in [
@@ -141,6 +145,7 @@ fn cli_rejects_corrupted_tails_and_unknown_section_versions_before_inference() {
     }
 }
 
+// RFC §6.2
 #[test]
 fn nonblocking_wal_lock_excludes_second_process_and_is_released_on_close() {
     let fx = Fixture::new();
@@ -159,6 +164,7 @@ fn nonblocking_wal_lock_excludes_second_process_and_is_released_on_close() {
     assert_eq!(jsonl(&path)[0]["type"], "session_init");
 }
 
+// RFC §6.2, §9.1
 #[test]
 fn resumed_session_reuses_frozen_prefix_and_appends_configuration_drift_once() {
     let fx = Fixture::new();
@@ -287,6 +293,7 @@ impl FoldHistory {
     }
 }
 
+// RFC §6.1, §6.2, §9.1
 #[test]
 fn all_live_anchors_across_three_successive_folds_match_forward_replay_and_usage() {
     let dir = TempDir::new();

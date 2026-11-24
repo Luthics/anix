@@ -5,6 +5,7 @@ use super::{
 use std::fs;
 use std::time::{Duration, Instant};
 
+// RFC §9.3
 #[test]
 fn pre_context_failure_forwards_stderr_and_stops_before_inference() {
     let fx = Fixture::new();
@@ -30,6 +31,7 @@ fn pre_context_failure_forwards_stderr_and_stops_before_inference() {
     assert!(!root.join("should-not-run").exists() && !fx.capture.exists());
 }
 
+// RFC §9.3
 #[test]
 fn post_tool_failure_stops_before_later_hooks_tools_and_provider_turns() {
     let fx = Fixture::new();
@@ -65,6 +67,7 @@ fn post_tool_failure_stops_before_later_hooks_tools_and_provider_turns() {
     }
 }
 
+// RFC §9.3, §9.5
 #[test]
 fn on_exit_timeout_is_local_to_one_hook_and_preserves_the_primary_exit_code() {
     let fx = Fixture::new();
@@ -101,6 +104,7 @@ fn on_exit_timeout_is_local_to_one_hook_and_preserves_the_primary_exit_code() {
     assert!(!String::from_utf8(out.stderr).unwrap().contains("10-slow"));
 }
 
+// RFC §9.4
 #[test]
 fn each_skill_search_layer_wins_once_and_the_body_stays_out_of_the_index() {
     let fx = Fixture::new();
@@ -163,6 +167,7 @@ fn each_skill_search_layer_wins_once_and_the_body_stays_out_of_the_index() {
     );
 }
 
+// RFC §9.6
 #[test]
 fn tips_are_restored_after_version_drift_and_fall_back_to_runtime_when_state_is_unwritable() {
     let fx = Fixture::new();
@@ -201,6 +206,7 @@ fn tips_are_restored_after_version_drift_and_fall_back_to_runtime_when_state_is_
     assert!(fallback.contains(fs::canonicalize(file).unwrap().to_str().unwrap()));
 }
 
+// RFC §9.6
 #[test]
 fn background_tip_is_indexed_in_ascii_order_and_can_be_overridden_or_masked_individually() {
     let fx = Fixture::new();

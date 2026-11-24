@@ -6,6 +6,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+// RFC §6.3, §6.4, §6.2
 #[test]
 fn interruption_reaps_the_provider_discards_partial_assistant_and_releases_lock() {
     for (signal, code) in [(libc::SIGINT, 130), (libc::SIGTERM, 143)] {
@@ -49,6 +50,7 @@ fn publish(root: &Path, name: &str, text: &str) {
     fs::rename(tmp, root.join("mail/new").join(name)).unwrap();
 }
 
+// RFC §4.2, §6.2, §6.3
 #[test]
 fn idle_process_holds_wal_and_usr2_snapshots_exact_ir_at_a_safe_boundary() {
     let fx = Fixture::new();
@@ -115,6 +117,7 @@ fn idle_process_holds_wal_and_usr2_snapshots_exact_ir_at_a_safe_boundary() {
     agent.finish(143);
 }
 
+// RFC §6.3, §6.1
 #[test]
 fn usr1_forces_one_tool_free_compaction_before_the_next_inbox_inference() {
     let fx = Fixture::new();
@@ -167,6 +170,7 @@ fn usr1_forces_one_tool_free_compaction_before_the_next_inbox_inference() {
     assert!(!root.join("request-4").exists());
 }
 
+// RFC §6.3, §6.4
 #[test]
 fn interruption_waits_three_seconds_then_stops_a_provider_that_handles_term_without_exiting() {
     let fx = Fixture::new();
@@ -205,6 +209,7 @@ printf finished > natural-exit
     );
 }
 
+// RFC §10.2
 #[cfg(target_os = "linux")]
 #[test]
 fn abrupt_parent_exit_stops_the_active_provider_or_shell_child() {

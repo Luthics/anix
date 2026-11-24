@@ -3,6 +3,7 @@ use super::{Fixture, expect_code, jsonl, scripted_provider, success_text, tool, 
 use serde_json::{Value, json};
 use std::fs;
 
+// RFC §3.1, §4.1, §6.4
 #[test]
 fn cli_version_usage_and_success_have_distinct_stream_contracts() {
     let fx = Fixture::new();
@@ -29,6 +30,7 @@ fn cli_version_usage_and_success_have_distinct_stream_contracts() {
     assert!(!fx.capture.exists());
 }
 
+// RFC §4.1, §9.5
 #[test]
 fn args_stdin_and_sparse_extra_descriptors_are_ordered_and_trace_is_separate() {
     let fx = Fixture::new();
@@ -80,6 +82,7 @@ fn args_stdin_and_sparse_extra_descriptors_are_ordered_and_trace_is_separate() {
         && r["ts"].is_string()));
 }
 
+// RFC §4.1, §4.3
 #[test]
 fn repeated_payload_redirection_appends_raw_bytes_in_both_stderr_modes() {
     for mode in ["auto", "explicit"] {
@@ -141,6 +144,7 @@ fn repeated_payload_redirection_appends_raw_bytes_in_both_stderr_modes() {
     }
 }
 
+// RFC §2, §3.4, §4.3
 #[test]
 fn tool_receives_control_channels_tools_path_and_no_parent_model_or_wal() {
     let fx = Fixture::new();
@@ -177,6 +181,7 @@ fn tool_receives_control_channels_tools_path_and_no_parent_model_or_wal() {
     );
 }
 
+// RFC §3.1, §4.1
 #[test]
 fn script_arguments_accept_an_optional_separator_and_preserve_option_like_literals() {
     let fx = Fixture::new();
@@ -197,6 +202,7 @@ fn script_arguments_accept_an_optional_separator_and_preserve_option_like_litera
     }
 }
 
+// RFC §4.1, §4.3
 #[test]
 fn every_static_fd_access_mode_is_probed_and_consumed_input_files_are_closed_before_spawn() {
     use super::executable;
@@ -269,6 +275,7 @@ done"#;
     }
 }
 
+// RFC §3.4, §4.3
 #[test]
 fn shell_environment_contains_only_observability_effective_approval_and_routed_fds() {
     use super::executable;

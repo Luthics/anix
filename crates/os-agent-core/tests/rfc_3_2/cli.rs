@@ -39,6 +39,7 @@ impl Fixture {
     }
 }
 
+// RFC §3.2, §9.1
 #[test]
 fn crlf_script_reaches_the_provider_as_the_intended_system_message() {
     let fixture = Fixture::new();
@@ -61,6 +62,7 @@ fn crlf_script_reaches_the_provider_as_the_intended_system_message() {
     );
 }
 
+// RFC §3.2, §3.3, §6.4
 #[test]
 fn unknown_top_level_fields_fail_closed_regardless_of_spelling_or_position() {
     let fixture = Fixture::new();
@@ -83,6 +85,7 @@ fn unknown_top_level_fields_fail_closed_regardless_of_spelling_or_position() {
     }
 }
 
+// RFC §3.2, §6.4
 #[test]
 fn invalid_file_bytes_and_yaml_report_usage_errors_to_stderr() {
     let fixture = Fixture::new();

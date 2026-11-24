@@ -4,6 +4,7 @@
 use os_agent_core::frontmatter::parse_script_str;
 use serde_json::json;
 
+// RFC §3.2
 #[test]
 fn layout_matrix_for_line_ending_shebang_header_body_and_eof() {
     let bodies = [
@@ -40,6 +41,7 @@ fn layout_matrix_for_line_ending_shebang_header_body_and_eof() {
     }
 }
 
+// RFC §3.2
 #[test]
 fn only_a_first_line_beginning_with_hash_bang_is_removed() {
     for (source, body) in [
@@ -62,6 +64,7 @@ fn only_a_first_line_beginning_with_hash_bang_is_removed() {
     }
 }
 
+// RFC §3.2
 #[test]
 fn opening_delimiter_requires_the_designated_line_and_exact_marker() {
     for marker in ["--", "----", "—", "x---", "---x", "--- # comment"] {
@@ -84,6 +87,7 @@ fn opening_delimiter_requires_the_designated_line_and_exact_marker() {
     }
 }
 
+// RFC §3.2
 #[test]
 fn first_closing_delimiter_ends_yaml_and_only_blank_body_edges_are_removed() {
     for eol in ["\n", "\r\n"] {
@@ -106,6 +110,7 @@ fn first_closing_delimiter_ends_yaml_and_only_blank_body_edges_are_removed() {
     }
 }
 
+// RFC §3.2, §3.3
 #[test]
 fn yaml_12_scalars_extensions_and_open_params_coexist_with_known_fields() {
     let source = r#"---
@@ -135,6 +140,7 @@ unknown-field: literal prompt"#;
     assert_eq!(parsed.prompt, "unknown-field: literal prompt");
 }
 
+// RFC §3.2
 #[test]
 fn incomplete_delimiters_and_malformed_yaml_fail_at_the_header() {
     for source in [

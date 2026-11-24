@@ -192,6 +192,7 @@ pub fn run() -> ExitCode {
 mod tests {
     use super::*;
 
+    // RFC §3.1
     #[test]
     fn parses_script_and_args_with_double_dash() {
         let cli = Cli::try_parse_from(["agent", "-y", "-q", "audit.agent", "--", "HEAD~1"])
@@ -209,6 +210,7 @@ mod tests {
         assert_eq!(cli.script_args, vec!["-q", "-n", "5"]);
     }
 
+    // RFC §3.1
     #[test]
     fn parses_direct_and_quoted_script_args_without_double_dash() {
         let cli = Cli::try_parse_from(["agent", "bash.agent", "git log -n 5"])
@@ -231,6 +233,7 @@ mod tests {
         assert_eq!(cli.script_args, vec![""]);
     }
 
+    // RFC §3.1, §8.3
     #[test]
     fn trust_subcommand_does_not_conflict_with_script_args() {
         let cli = Cli::try_parse_from(["agent", "trust", "./proj"]).expect("parse trust");

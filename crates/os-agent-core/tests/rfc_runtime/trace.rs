@@ -51,6 +51,7 @@ fn verify(trace: &str, deltas: bool, wire: bool) {
     }
 }
 
+// RFC §9.5, §4.1
 #[test]
 fn regular_fd3_separates_events_deltas_and_wire_and_omits_provider_key() {
     for (level, deltas, wire) in [
@@ -79,6 +80,7 @@ fn regular_fd3_separates_events_deltas_and_wire_and_omits_provider_key() {
     }
 }
 
+// RFC §9.5
 #[test]
 fn wire_trace_only_writes_full_ir_into_a_private_file() {
     for mode in [0o644, 0o660] {
@@ -106,6 +108,7 @@ fn wire_trace_only_writes_full_ir_into_a_private_file() {
     }
 }
 
+// RFC §4.1, §9.5
 #[test]
 fn journal_receives_events_on_fd3_fallback_and_never_receives_wire_ir() {
     for level in [None, Some("wire")] {
@@ -146,6 +149,7 @@ fn journal_receives_events_on_fd3_fallback_and_never_receives_wire_ir() {
     }
 }
 
+// RFC §9.5
 #[test]
 fn disconnected_trace_recipient_does_not_change_payload_stderr_or_exit_status() {
     use std::os::fd::OwnedFd;

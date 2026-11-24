@@ -6,6 +6,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::sync::Barrier;
 use std::thread;
 
+// RFC §4.2, §6.2
 #[test]
 fn concurrent_publications_wait_for_tool_closure_and_preserve_each_complete_body() {
     let fx = Fixture::new();

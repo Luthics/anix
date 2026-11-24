@@ -30,6 +30,7 @@ fn result(id: &str, tid: u64) -> Value {
     json!({"role":"tool","turn_id":tid,"tool_call_id":id,"text":"result"})
 }
 
+// RFC §9.1
 #[test]
 fn required_header_fields_and_types_cannot_be_dropped_or_moved() {
     let body = message("user", 1, "x");
@@ -61,6 +62,7 @@ fn required_header_fields_and_types_cannot_be_dropped_or_moved() {
     assert!(IrStream::from_jsonl(&input(&header(), &[header(), body])).is_err());
 }
 
+// RFC §9.1
 #[test]
 fn golden_ir_keeps_frozen_text_extensions_and_attachment_references_without_opening_files() {
     let mut h = header();
@@ -83,6 +85,7 @@ fn golden_ir_keeps_frozen_text_extensions_and_attachment_references_without_open
     assert_eq!(actual, expected);
 }
 
+// RFC §9.1
 #[test]
 fn tool_replies_form_a_bijection_and_are_contiguous() {
     for first in ["a", "b", "other"] {
@@ -110,6 +113,7 @@ fn tool_replies_form_a_bijection_and_are_contiguous() {
     }
 }
 
+// RFC §9.1
 #[test]
 fn assistant_requires_text_or_calls_even_with_reasoning_or_opaque_state() {
     for extra in [
@@ -128,6 +132,7 @@ fn assistant_requires_text_or_calls_even_with_reasoning_or_opaque_state() {
     }
 }
 
+// RFC §9.1, §6.2
 #[test]
 fn ordinary_turns_increase_strictly_and_checkpoint_anchor_may_be_shared() {
     assert!(valid(&[

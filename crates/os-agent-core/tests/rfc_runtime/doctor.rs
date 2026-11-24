@@ -26,6 +26,7 @@ fn installation(key_env: &str, key: &str) -> Fixture {
     fx
 }
 
+// RFC §10.3, §2
 #[test]
 fn each_missing_or_non_executable_private_binary_is_identified() {
     let fx = installation("", "");
@@ -56,6 +57,7 @@ fn each_missing_or_non_executable_private_binary_is_identified() {
     expect_code(&fx.run(fx.agent().arg("--doctor")), 0);
 }
 
+// RFC §10.3
 #[test]
 fn doctor_distinguishes_required_missing_empty_and_fallback_credentials() {
     for (key_env, key, value, expected) in [
@@ -84,6 +86,7 @@ fn doctor_distinguishes_required_missing_empty_and_fallback_credentials() {
     }
 }
 
+// RFC §10.3
 #[test]
 fn invalid_global_or_project_toml_and_unusable_runtime_directory_report_failure() {
     for name in ["config/agent/config.toml", ".agent/config.toml"] {

@@ -82,6 +82,7 @@ pub unsafe fn apply_prepared_sandbox_in_child(sb: &PreparedSandbox) -> std::io::
 mod tests {
     use super::*;
 
+    // RFC §10.2
     #[test]
     fn probes_platform_capabilities() {
         let caps = probe_capabilities();

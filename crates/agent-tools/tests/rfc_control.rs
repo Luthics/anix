@@ -35,6 +35,7 @@ fn frame(result: &Output) -> Value {
     serde_json::from_slice(&result.stdout).unwrap()
 }
 
+// RFC §7.2, §6.1
 #[test]
 fn aclr_emits_a_single_compact_or_fold_frame_with_lossless_json_escaping() {
     let bin = env!("CARGO_BIN_EXE_aclr");
@@ -51,6 +52,7 @@ fn aclr_emits_a_single_compact_or_fold_frame_with_lossless_json_escaping() {
         );
     }
 }
+// RFC §6.1, §7.2
 #[test]
 fn invalid_aclr_argv_never_submits_a_frame() {
     for args in [
@@ -71,6 +73,7 @@ fn invalid_aclr_argv_never_submits_a_frame() {
         );
     }
 }
+// RFC §7.2
 #[test]
 fn fold_control_frames_stay_within_64_kib_even_after_json_escaping() {
     // Leave a margin on either side: both interpretations of whether the final LF
@@ -123,6 +126,7 @@ fn take_image(record: &Value) -> (u32, u32) {
     (im.width(), im.height())
 }
 
+// RFC §7.2
 #[test]
 fn aview_resizes_portrait_landscape_and_square_images_only_when_needed() {
     for (w, h, limit, expected) in [
@@ -145,6 +149,7 @@ fn aview_resizes_portrait_landscape_and_square_images_only_when_needed() {
     }
 }
 
+// RFC §7.2
 #[test]
 fn aview_file_input_and_stdin_agree_on_image_dimensions() {
     let bytes = png(5, 3);
@@ -159,6 +164,7 @@ fn aview_file_input_and_stdin_agree_on_image_dimensions() {
     );
 }
 
+// RFC §7.2
 #[test]
 fn undecodable_input_or_invalid_options_do_not_emit_media() {
     for (args, input) in [

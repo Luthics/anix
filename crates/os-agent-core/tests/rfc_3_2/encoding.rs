@@ -6,6 +6,7 @@ use os_agent_core::frontmatter::parse_script_file;
 
 use super::TempDir;
 
+// RFC §3.2
 #[test]
 fn all_256_single_bytes_inside_a_plain_prompt() {
     let dir = TempDir::new();
@@ -31,6 +32,7 @@ fn all_256_single_bytes_inside_a_plain_prompt() {
     }
 }
 
+// RFC §3.2
 #[test]
 fn valid_multibyte_boundaries_survive_file_decoding() {
     let dir = TempDir::new();
@@ -57,6 +59,7 @@ fn valid_multibyte_boundaries_survive_file_decoding() {
     }
 }
 
+// RFC §3.2
 #[test]
 fn malformed_sequences_are_rejected_in_every_script_region() {
     let dir = TempDir::new();
@@ -96,6 +99,7 @@ fn malformed_sequences_are_rejected_in_every_script_region() {
     }
 }
 
+// RFC §3.2
 #[test]
 fn eof_at_each_interior_byte_of_a_utf8_scalar() {
     let dir = TempDir::new();

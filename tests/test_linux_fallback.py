@@ -7,6 +7,7 @@ import unittest
 
 
 class KernelFallback(unittest.TestCase):
+    # RFC §10.2
     def test_unavailable_landlock_warns_or_fails_before_inference(self):
         binary = os.environ.get("AGENT_BIN", Path(__file__).resolve().parents[1] / "target/debug/agent")
         with tempfile.TemporaryDirectory(prefix="agent-no-landlock-") as tmp:

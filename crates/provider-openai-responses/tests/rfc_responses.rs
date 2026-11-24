@@ -123,6 +123,7 @@ fn sse(events: &[Value]) -> String {
         .collect()
 }
 
+// RFC §9.1, §9.2
 #[test]
 fn maps_request_and_streams_text_reasoning_usage_and_done() {
     let mut h = head();
@@ -165,6 +166,7 @@ fn maps_request_and_streams_text_reasoning_usage_and_done() {
     assert_eq!(events[4], json!({"type":"done","finish_reason":"stop"}));
 }
 
+// RFC §9.2
 #[test]
 fn repeated_sse_notifications_emit_one_complete_tool_call() {
     let item = json!({"id":"f1","call_id":"c1","type":"function_call","name":"msh","arguments":"{\"cmd\":\"pwd\"}"});
@@ -192,6 +194,7 @@ fn repeated_sse_notifications_emit_one_complete_tool_call() {
     );
 }
 
+// RFC §9.2
 #[test]
 fn transient_http_errors_are_retryable_but_adapter_never_retries_itself() {
     for status in [429, 500, 502, 503] {
@@ -207,6 +210,7 @@ fn transient_http_errors_are_retryable_but_adapter_never_retries_itself() {
     }
 }
 
+// RFC §9.2
 #[test]
 fn missing_terminal_event_is_not_reported_as_success() {
     let (requests, out, events) = run(
@@ -226,6 +230,7 @@ fn missing_terminal_event_is_not_reported_as_success() {
     assert!(events.iter().all(|e| e["type"] != "done"));
 }
 
+// RFC §9.1, §9.2, §6.4
 #[test]
 fn unsupported_ir_version_and_missing_media_fail_before_http() {
     let mut bad = head();
@@ -256,6 +261,7 @@ fn unsupported_ir_version_and_missing_media_fail_before_http() {
     }
 }
 
+// RFC §9.1, §9.2
 #[test]
 fn adapter_reads_each_declared_media_type_from_disk_in_user_and_tool_messages() {
     use base64::Engine;
@@ -334,6 +340,7 @@ fn adapter_reads_each_declared_media_type_from_disk_in_user_and_tool_messages() 
     }
 }
 
+// RFC §9.2
 #[test]
 fn response_usage_preserves_inclusive_totals_and_available_details() {
     let usage = json!({"input_tokens":111,"output_tokens":75,

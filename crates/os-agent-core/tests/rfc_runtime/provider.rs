@@ -16,6 +16,7 @@ fn traced(fx: &Fixture) -> std::process::Output {
     ]))
 }
 
+// RFC §9.2, §9.5
 #[test]
 fn retryable_failures_exhaust_three_backoffs_and_preserve_the_request_and_final_stderr() {
     let fx = Fixture::new();
@@ -127,6 +128,7 @@ fn check_terminal_failure(script: &str, timeout: u64, status: i32, single_attemp
     );
 }
 
+// RFC §9.2, §6.4
 #[test]
 fn nonretryable_error_preserves_provider_stderr_without_another_attempt() {
     check_terminal_failure(
@@ -137,6 +139,7 @@ fn nonretryable_error_preserves_provider_stderr_without_another_attempt() {
     );
 }
 
+// RFC §9.2, §6.2
 #[test]
 fn clean_provider_eof_without_done_preserves_stderr_and_discards_partial_text() {
     check_terminal_failure(
@@ -147,11 +150,13 @@ fn clean_provider_eof_without_done_preserves_stderr_and_discards_partial_text() 
     );
 }
 
+// RFC §9.2, §6.4
 #[test]
 fn provider_timeout_maps_to_124_without_a_retry() {
     check_terminal_failure("exec /bin/sleep 15", 3, 124, true);
 }
 
+// RFC §9.2, §6.2
 #[test]
 fn opaque_round_trips_with_the_same_provider_and_is_removed_before_a_provider_switch() {
     let fx = Fixture::new();

@@ -706,6 +706,7 @@ mod tests {
         }
     }
 
+    // RFC §6.2, §9.1, §9.2
     #[test]
     fn replay_skips_empty_assistant_and_prunes_unclosed_tool_calls_preserving_usage() {
         let tmp =
