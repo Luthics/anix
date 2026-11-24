@@ -751,6 +751,7 @@ fn run_inference_cycle(
                 &effective_cmd,
                 &cfg.paths.cwd,
                 cfg.msh_timeout_sec,
+                cfg.approval,
                 sandbox,
                 signals,
             ) {

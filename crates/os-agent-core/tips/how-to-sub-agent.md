@@ -19,6 +19,6 @@ Invoke child `*.agent` scripts directly inside `msh` as ordinary executables usi
   ```
 
 ## Pitfalls
-- `agent` automatically strips `AGENT_CONTEXT` before spawning `msh`, so child agents never collide with the parent WAL `flock`. Pass `-c <separate.ctx.jsonl>` explicitly if a child needs multi-turn state.
-- Always pass `-q` (or `-y` if non-interactive) when capturing a child agent's stdout in pipes; under `approval=ask` without `/dev/tty`, a child exits `42` (Fail-Closed).
+- `agent` strips all `AGENT_*` env vars before spawning `msh` (preserving only `AGENT_LOG`/`AGENT_TRACE_LEVEL` and injecting the parent's resolved `AGENT_APPROVAL`), so child agents use their own Frontmatter and never collide with the parent WAL `flock`. Pass `-c <separate.ctx.jsonl>` explicitly if a child needs multi-turn state.
+- Always pass `-q` when capturing a child agent's stdout in pipes; under `approval=ask` without `/dev/tty`, a child exits `42` (Fail-Closed).
 - Attach `3> /tmp/child.trace.jsonl` when debugging nested runs; `ppid` in the trace envelope links parent and child automatically.

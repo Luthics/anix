@@ -24,6 +24,10 @@ use crate::trust::{self, TrustError};
 const ON_EXIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 const BUILTIN_TIPS: &[(&str, &str)] = &[
+    (
+        "how-to-background.md",
+        include_str!("../tips/how-to-background.md"),
+    ),
     ("how-to-goal.md", include_str!("../tips/how-to-goal.md")),
     ("how-to-loop.md", include_str!("../tips/how-to-loop.md")),
     (
