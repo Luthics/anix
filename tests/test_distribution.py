@@ -1,7 +1,7 @@
 """RFC §§2, 3.1, 4.1–4.4, 6.1–6.2, 7, 9 and 10.3 through the installed binaries.
 
-Run with python3 tests/test_distribution.py. Only the upstream HTTP service is
-simulated. No token, external API, shell rc change or system install is needed.
+The default entry point builds from the checkout. To test a release bootstrap,
+set OS_AGENT_BOOTSTRAP to a locally staged installer that can run under sh.
 """
 import base64
 import json
@@ -76,6 +76,7 @@ class Responses(BaseHTTPRequestHandler):
 
 
 class Distribution(unittest.TestCase):
+    # RFC §2, §10.3, §7.2, §6.1, §4.4, §9.6
     def test_installed_pipeline_and_fold(self):
         with tempfile.TemporaryDirectory(prefix="agent-fhs-") as home:
             root = Path(home)
@@ -91,8 +92,18 @@ class Distribution(unittest.TestCase):
             for var, subdir in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")]:
                 build_env.setdefault(var, str(Path.home() / subdir))
             build_env.pop("CARGO_TARGET_DIR", None)
-            subprocess.run(["bash", str(REPO / "scripts/install-local.sh")], check=True,
-                           cwd=REPO, env=build_env, stdout=subprocess.PIPE, timeout=600)
+            bootstrap = os.environ.get("OS_AGENT_BOOTSTRAP")
+            if bootstrap:
+                # Match the documented sh-on-stdin invocation. Test the release
+                # script itself, before the fixture provisions its loopback API.
+                release_env = {k: build_env[k] for k in (
+                    "HOME", "PATH", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR")}
+                with Path(bootstrap).open("rb") as source:
+                    subprocess.run(["/bin/sh"], stdin=source, cwd=root, env=release_env,
+                                   stdout=subprocess.PIPE, check=True, timeout=600)
+            else:
+                subprocess.run(["bash", str(REPO / "scripts/install-local.sh")], check=True,
+                               cwd=REPO, env=build_env, stdout=subprocess.PIPE, timeout=600)
             for name in (".bashrc", ".zshrc", ".profile"):
                 self.assertEqual((root / name).read_bytes(), b"# fixture rc\n")
             self.assertEqual({p.name for p in (prefix / "bin").iterdir()}, {"agent"})
@@ -113,10 +124,12 @@ class Distribution(unittest.TestCase):
                     self.assertFalse(thread.is_alive())
 
     def exercise(self, root, http):
-        config = root / ".config/agent"
+        # The project only redirects inference to the test server. Leave the
+        # installer's global config and hooks in place for the actual first run.
+        config = root / ".agent"
         config.mkdir(parents=True, exist_ok=True)
         config.joinpath("config.toml").write_text(
-            "[defaults]\nmodel='test-model'\n[providers.openai-responses]\n"
+            "[defaults]\nprovider='openai-responses'\nmodel='test-model'\n[providers.openai-responses]\n"
             f"base_url='http://127.0.0.1:{http.server_port}/v1'\n"
             "api_key_env=''\napi_key='loopback-fixture'\ntimeout_sec=10\n")
         (root / "pixel.png").write_bytes(one_pixel_png())
@@ -139,6 +152,9 @@ class Distribution(unittest.TestCase):
             first, second, third = http.requests
             self.assertEqual(first["model"], "test-model")
             self.assertIn("inspect fixture", first["instructions"])
+            for contract in ("$AGENT_OUT", "$AGENT_ERR", "<runtime_tips>",
+                             "how-to-background.md"):
+                self.assertIn(contract, first["instructions"])
             self.assertEqual(first["instructions"], third["instructions"])
             user_text = first["input"][-1]["content"][0]["text"]
             self.assertLess(user_text.index("<args>sample</args>"), user_text.index("from stdin"))
