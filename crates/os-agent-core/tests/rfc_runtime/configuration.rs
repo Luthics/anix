@@ -685,3 +685,304 @@ fn global_and_project_config_reject_unknown_keys_before_any_inference() {
         }
     }
 }
+
+// RFC §3.3, §3.2, §6.4
+#[test]
+fn absolute_frontmatter_threshold_must_fit_uint32_before_the_disable_rule_applies() {
+    let mut unexpected = Vec::new();
+    for (value, expected) in [
+        (4294967294u64, 0),
+        (4294967295, 0),
+        (4294967296, 2),
+        (4294967297, 2),
+        (u64::MAX, 2),
+    ] {
+        let fx = Fixture::new();
+        fs::write(
+            fx.dir.0.join("case.agent"),
+            format!("---\nmax_tokens: 1024\ncompact_threshold: {value}\n---\nbody"),
+        )
+        .unwrap();
+        let out = fx.run(fx.agent().args(["-q", "case.agent", "--", "go"]));
+        if out.status.code() != Some(expected) || fx.capture.exists() != (expected == 0) {
+            unexpected.push((value, out.status.code(), fx.capture.exists()));
+        } else if expected == 2 {
+            assert!(!out.stderr.is_empty());
+        }
+        assert!(out.stdout.is_empty());
+    }
+    assert!(
+        unexpected.is_empty(),
+        "threshold, exit, provider reached: {unexpected:?}"
+    );
+}
+
+// RFC §3.1, §3.4, §9.1
+#[test]
+fn cli_params_preserve_json_literals_and_the_exact_fallback_string() {
+    let fx = Fixture::new();
+    fs::write(fx.dir.0.join("case.agent"), "body").unwrap();
+    let cases = [
+        ("flag", " true ", json!(true)),
+        ("empty", "", json!("")),
+        ("spaces", " \t ", json!(" \t ")),
+        ("quoted", r#""null""#, json!("null")),
+        ("nothing", "null", json!(null)),
+        ("equals", "x==y ", json!("x==y ")),
+        (
+            "number",
+            "9007199254740993",
+            json!(9_007_199_254_740_993u64),
+        ),
+        ("fraction", "-1.25e2", json!(-125.0)),
+        ("leading_zero", "01", json!("01")),
+        ("array", "[1,]", json!("[1,]")),
+        ("unfinished", "{\"a\":", json!("{\"a\":")),
+        (
+            "key.with.dots",
+            r#"{"b":["\u03a9",false]}"#,
+            json!({"b":["Ω",false]}),
+        ),
+    ];
+    let mut cmd = fx.agent();
+    let mut params = json!({});
+    for (key, raw, expected) in cases {
+        cmd.arg("--param").arg(format!("{key}={raw}"));
+        params[key] = expected;
+    }
+    expect_code(&fx.run(cmd.args(["-q", "case.agent", "--", "go"])), 0);
+    assert_eq!(jsonl(&fx.capture)[0]["params"], params);
+}
+
+// RFC §3.1, §6.4
+#[test]
+fn malformed_cli_param_stops_before_provider_or_wal_creation() {
+    for param in ["without-separator", "=value", ""] {
+        let fx = Fixture::new();
+        fs::write(fx.dir.0.join("case.agent"), "body").unwrap();
+        let out = fx.run(fx.agent().args([
+            "-c",
+            "history",
+            "--param",
+            "valid=true",
+            "--param",
+            param,
+            "case.agent",
+            "--",
+            "go",
+        ]));
+        expect_code(&out, 2);
+        assert!(!out.stderr.is_empty());
+        assert!(out.stdout.is_empty());
+        assert!(!fx.capture.exists());
+        assert!(!fx.dir.0.join("history").exists(), "param={param:?}");
+    }
+}
+
+// RFC §3.3, §3.4, §6.2, §8.1, §9.1
+#[test]
+fn a_shared_script_resolves_its_context_and_project_configuration_from_each_cwd() {
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    let scripts = root.join("scripts");
+    fs::create_dir_all(scripts.join(".agent")).unwrap();
+    fs::write(
+        scripts.join(".agent/config.toml"),
+        "[defaults]\nmodel='beside-script'",
+    )
+    .unwrap();
+    let script = scripts.join("shared.agent");
+    fs::write(&script, "---\ncontext: session.jsonl\n---\nshared prompt").unwrap();
+    for project in ["one", "two"] {
+        let dir = root.join(project);
+        fs::create_dir_all(dir.join(".agent")).unwrap();
+        fs::create_dir(dir.join("nested")).unwrap();
+        fs::write(
+            dir.join(".agent/config.toml"),
+            format!("[defaults]\nmodel='model-{project}'"),
+        )
+        .unwrap();
+    }
+    for (project, input, prior) in [
+        ("one", "a", None),
+        ("two", "b", None),
+        ("one", "c", Some("a")),
+    ] {
+        let cwd = root.join(project).join("nested");
+        let out = fx.run(
+            fx.agent()
+                .current_dir(&cwd)
+                .arg("-q")
+                .arg(&script)
+                .args(["--", input]),
+        );
+        expect_code(&out, 0);
+        let ir = jsonl(&fx.capture);
+        assert_eq!(
+            ir[0]["meta"]["cwd"],
+            cwd.canonicalize().unwrap().to_str().unwrap()
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("model")).unwrap(),
+            format!("model-{project}")
+        );
+        let expected: Vec<_> = prior
+            .into_iter()
+            .chain([input])
+            .map(|x| format!("<args>{x}</args>"))
+            .collect();
+        for rows in [&ir, &jsonl(&cwd.join("session.jsonl"))] {
+            let users: Vec<_> = rows
+                .iter()
+                .filter(|r| r["role"] == "user")
+                .map(|r| r["text"].as_str().unwrap())
+                .collect();
+            assert_eq!(users, expected);
+        }
+        assert!(!root.join(project).join("session.jsonl").exists());
+    }
+    assert!(!scripts.join("session.jsonl").exists());
+}
+
+// RFC §3.1, §3.3, §3.4, §8.2, §9.1, §9.2
+#[test]
+fn only_the_selected_providers_defaults_feed_the_shallow_params_merge() {
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    let cfg = root.join("config/agent/config.toml");
+    let global = fs::read_to_string(&cfg).unwrap();
+    fs::write(
+        &cfg,
+        global
+            + r#"
+[providers.fixture.params]
+only_a = 1
+tree = {from_global_a = 1}
+[providers.alternate]
+bin = "record-provider"
+[providers.alternate.params]
+only_b = 2
+tree = {from_global_b = 2}
+"#,
+    )
+    .unwrap();
+    fs::create_dir(root.join(".agent")).unwrap();
+    fs::write(
+        root.join(".agent/config.toml"),
+        r#"
+[providers.fixture.params]
+layer = "project-a"
+tree = {from_project_a = 3}
+[providers.alternate.params]
+layer = "project-b"
+tree = {from_project_b = 4}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("case.agent"),
+        "---\nprovider: alternate\nparams: {common: 'script', overridable: [1]}\n---\nbody",
+    )
+    .unwrap();
+    for (env, cli, provider) in [
+        (None, None, "alternate"),
+        (Some("fixture"), None, "fixture"),
+        (Some("alternate"), Some("fixture"), "fixture"),
+        (Some("fixture"), Some("alternate"), "alternate"),
+    ] {
+        let mut cmd = fx.agent();
+        if let Some(v) = env {
+            cmd.env("AGENT_PROVIDER", v);
+        }
+        if let Some(v) = cli {
+            cmd.args(["--provider", v]);
+        }
+        expect_code(
+            &fx.run(cmd.args([
+                "--param",
+                "overridable=null",
+                "-q",
+                "case.agent",
+                "--",
+                "go",
+            ])),
+            0,
+        );
+        let expected = if provider == "fixture" {
+            json!({"only_a":1,"layer":"project-a","tree":{"from_project_a":3},"common":"script","overridable":null})
+        } else {
+            json!({"only_b":2,"layer":"project-b","tree":{"from_project_b":4},"common":"script","overridable":null})
+        };
+        assert_eq!(
+            jsonl(&fx.capture)[0]["params"],
+            expected,
+            "env={env:?} cli={cli:?}"
+        );
+    }
+}
+
+// RFC §2, §8.2, §9.2
+#[test]
+fn a_named_provider_searches_path_then_libexec_while_a_path_executes_directly() {
+    use super::executable;
+    use std::os::unix::fs::PermissionsExt;
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    let config = root.join("config/agent/config.toml");
+    let original = fs::read_to_string(&config).unwrap();
+    let recorder = fs::read_to_string(root.join("record-provider")).unwrap();
+    let first = root.join("first");
+    let second = root.join("second");
+    let fallback = root.join(".local/libexec/agent");
+    let direct = root.join("elsewhere");
+    for (dir, label) in [
+        (&first, "first"),
+        (&second, "second"),
+        (&fallback, "libexec"),
+        (&direct, "direct"),
+    ] {
+        executable(
+            &dir.join("driver"),
+            &format!("{recorder}\nprintf '%s' {label} > selected\n"),
+        );
+    }
+    fs::write(root.join("case.agent"), "body").unwrap();
+    let search = std::env::join_paths([&first, &second]).unwrap();
+    let run = |spec: &str, label: Option<&str>| {
+        fs::write(&config, original.replace("record-provider", spec)).unwrap();
+        let marker = root.join("selected");
+        if marker.exists() {
+            fs::remove_file(&marker).unwrap();
+        }
+        if fx.capture.exists() {
+            fs::remove_file(&fx.capture).unwrap();
+        }
+        let out = fx.run(
+            fx.agent()
+                .env("PATH", &search)
+                .args(["-q", "case.agent", "--", "go"]),
+        );
+        if let Some(label) = label {
+            assert_eq!(
+                out.status.code(),
+                Some(0),
+                "{spec} -> {label}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(fs::read_to_string(marker).unwrap(), label);
+            assert_eq!(jsonl(&fx.capture)[0]["type"], "header");
+        } else {
+            expect_code(&out, 1);
+            assert!(!out.stderr.is_empty());
+            assert!(!marker.exists() && !fx.capture.exists());
+        }
+    };
+    run("driver", Some("first"));
+    run(direct.join("driver").to_str().unwrap(), Some("direct"));
+    run("./elsewhere/driver", Some("direct"));
+    run("./missing/driver", None);
+    fs::set_permissions(first.join("driver"), fs::Permissions::from_mode(0o644)).unwrap();
+    run("driver", Some("second"));
+    fs::remove_file(second.join("driver")).unwrap();
+    run("driver", Some("libexec"));
+}
