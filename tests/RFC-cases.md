@@ -331,7 +331,7 @@
 | [`test_doctor_checks_missing_msh_before_diagnosing_invalid_toml`](../tests/test_linux_fallback.py#L111) | [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) |
 | [`test_doctor_detects_broken_pipes_and_ineffective_or_unavailable_flock`](../tests/test_linux_fallback.py#L133) | [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) |
 | [`test_idle_inbox_polls_the_empty_new_directory_at_200_ms_without_a_watcher`](../tests/test_linux_fallback.py#L150) | [§4.2](../docs/v1.0.0-RFC.md?plain=1#L142) |
-| [`test_inbox_polls_new_publications_when_kernel_notifications_are_unavailable`](../tests/test_linux_fallback.py#L182) | [§4.2](../docs/v1.0.0-RFC.md?plain=1#L142) |
+| [`test_inbox_polls_new_publications_when_kernel_notifications_are_unavailable`](../tests/test_linux_fallback.py#L184) | [§4.2](../docs/v1.0.0-RFC.md?plain=1#L142) |
 
 ## `tests/test_pdf_pages.py`
 

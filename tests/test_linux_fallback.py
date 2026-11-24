@@ -159,14 +159,16 @@ class KernelFallback(unittest.TestCase):
         self.assertIn("ENOSYS", trace)
         self.assertIn("INJECTED", trace)
         self.assertFalse((self.root / "request").exists())
-        # Inspect full idle intervals between actual empty directory reads.
-        # Exclude the last interval, which can be shortened at the idle deadline.
+        # A millisecond-truncated wait can wake just before the idle deadline
+        # and lead to another short wait. Sample the steady portion only.
         scan = re.compile(r"(\d+\.\d+) getdents64\(\d+<[^>]+/mail/new>,.*\)\s+= 0$")
-        scans = [(i, float(match[1])) for i, line in enumerate(trace.splitlines())
+        lines = trace.splitlines()
+        scans = [(i, float(match[1])) for i, line in enumerate(lines)
                  if (match := scan.search(line))]
         self.assertGreaterEqual(len(scans), 4, trace)
-        lines = trace.splitlines()
-        for (before, start), (after, end) in zip(scans, scans[1:-1]):
+        steady = [(a, b) for a, b in zip(scans, scans[1:]) if b[1] < scans[-1][1] - .2]
+        self.assertGreaterEqual(len(steady), 2, trace)
+        for (before, start), (after, end) in steady:
             waits = "\n".join(lines[before + 1:after])
             # Read the nominal timeout when visible, independent of scheduling
             # latency. Use observed scans for alternate wait mechanisms.
