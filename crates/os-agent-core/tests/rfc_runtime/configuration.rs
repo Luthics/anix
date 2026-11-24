@@ -1046,3 +1046,29 @@ fn each_xdg_directory_resolves_independently_when_other_overrides_are_absent() {
     assert_eq!(paths.trusted_registry_file(), state.join("trusted.json"));
     assert_eq!(paths.journal_socket_path(), runtime.join("journal.sock"));
 }
+
+// RFC §9.1, §9.2
+#[test]
+fn selected_model_changes_the_provider_environment_without_entering_the_ir() {
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    fs::write(root.join("case.agent"), "portable prompt").unwrap();
+    for model in ["first-model-marker", "second-model-marker"] {
+        expect_code(
+            &fx.run(
+                fx.agent()
+                    .args(["--model", model, "case.agent", "--", "input"]),
+            ),
+            0,
+        );
+        assert_eq!(fs::read_to_string(root.join("model")).unwrap(), model);
+        let bytes = fs::read_to_string(&fx.capture).unwrap();
+        assert!(!bytes.contains(model));
+        let rows = jsonl(&fx.capture);
+        assert_eq!(rows[0]["type"], "header");
+        assert!(rows.iter().all(|row| row.get("model").is_none()));
+        assert!(rows[0]["meta"].get("model").is_none());
+        assert_eq!(rows[1]["text"], "portable prompt");
+        assert_eq!(rows[2]["text"], "<args>input</args>");
+    }
+}

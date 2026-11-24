@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import time
@@ -144,6 +145,38 @@ class KernelFallback(unittest.TestCase):
                 self.assertEqual(run.returncode, 1, (run.stdout, run.stderr))
                 self.assertRegex(run.stderr, affected)
                 self.assertRegex(run.stderr, remedy)
+
+    # RFC §4.2
+    def test_idle_inbox_polls_the_empty_new_directory_at_200_ms_without_a_watcher(self):
+        watcher = "?inotify_init,inotify_init1"
+        result = subprocess.run(
+            ["strace", "-f", "-qq", "-ttt", "-yy", "-o", str(self.trace),
+             "-e", f"trace={watcher},getdents64,clock_nanosleep,nanosleep,ppoll,?poll",
+             "-e", f"inject={watcher}:error=ENOSYS", self.binary, "--inbox", "mail",
+             "--idle-timeout", "2", "-q", "case.agent"], timeout=12, **self.process)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        trace = self.trace.read_text()
+        self.assertIn("ENOSYS", trace)
+        self.assertIn("INJECTED", trace)
+        self.assertFalse((self.root / "request").exists())
+        # Inspect full idle intervals between actual empty directory reads.
+        # Exclude the last interval, which can be shortened at the idle deadline.
+        scan = re.compile(r"(\d+\.\d+) getdents64\(\d+<[^>]+/mail/new>,.*\)\s+= 0$")
+        scans = [(i, float(match[1])) for i, line in enumerate(trace.splitlines())
+                 if (match := scan.search(line))]
+        self.assertGreaterEqual(len(scans), 4, trace)
+        lines = trace.splitlines()
+        for (before, start), (after, end) in zip(scans, scans[1:-1]):
+            waits = "\n".join(lines[before + 1:after])
+            # Read the nominal timeout when visible, independent of scheduling
+            # latency. Use observed scans for alternate wait mechanisms.
+            relative = re.search(r"(?:clock_nanosleep\([^,]+, 0, |nanosleep\()"
+                                 r"\{tv_sec=0, tv_nsec=(\d+)\}", waits)
+            if relative:
+                self.assertEqual(int(relative[1]), 200_000_000, waits)
+            else:
+                self.assertGreaterEqual(end - start, .18, waits)
+                self.assertLess(end - start, .40, waits)
 
     # RFC §4.2
     def test_inbox_polls_new_publications_when_kernel_notifications_are_unavailable(self):

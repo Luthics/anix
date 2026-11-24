@@ -102,7 +102,7 @@ fn pre_context_failure_forwards_stderr_and_stops_before_inference() {
     assert!(!root.join("should-not-run").exists() && !fx.capture.exists());
 }
 
-// RFC §9.3
+// RFC §9.3, §9.5
 #[test]
 fn post_tool_failure_stops_before_later_hooks_tools_and_provider_turns() {
     let fx = Fixture::new();
@@ -128,10 +128,20 @@ fn post_tool_failure_stops_before_later_hooks_tools_and_provider_turns() {
         ],
     );
     let out = fx.run(
-        fx.agent()
-            .args(["--shell", "/bin/sh", "-y", "case.agent", "--", "start"]),
+        fx.command_for("/bin/sh")
+            .env("AGENT_TRACE_LEVEL", "events")
+            .args([
+                "-c",
+                r#"exec "$1" --shell /bin/sh -y case.agent -- start 3>trace"#,
+                "fixture",
+                env!("CARGO_BIN_EXE_agent"),
+            ]),
     );
     assert!(!out.status.success());
+    let events = jsonl(&root.join("trace"));
+    let end = events.last().unwrap();
+    assert_eq!(end["type"], "run_end");
+    assert_eq!(end["exit_code"], out.status.code().unwrap());
     assert_eq!(jsonl(&root.join("post-input"))[0]["tool_call_id"], "first");
     for path in ["second-tool", "should-not-run", "request-2"] {
         assert!(!root.join(path).exists(), "{path}");

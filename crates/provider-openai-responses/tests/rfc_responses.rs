@@ -158,6 +158,7 @@ fn maps_request_and_streams_text_reasoning_usage_and_done() {
     assert_eq!(req["model"], "fixture");
     assert_eq!(req["input"][0]["content"][0]["text"], "input");
     assert_eq!(req["max_output_tokens"], 17);
+    assert_eq!(req["temperature"], 0.25);
     assert!(req.get("tools").is_none());
     assert_eq!(events.len(), 5);
     assert_eq!(events[0], json!({"type":"reasoning_delta","text":"思"}));

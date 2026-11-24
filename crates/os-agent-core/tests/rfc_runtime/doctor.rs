@@ -26,11 +26,19 @@ fn installation(key_env: &str, key: &str) -> Fixture {
     fx
 }
 
-// RFC §10.3, §2
+// RFC §10.3, §2, §8.1
 #[test]
 fn each_missing_or_non_executable_private_binary_is_identified() {
     let fx = installation("", "");
     expect_code(&fx.run(fx.agent().arg("--doctor")), 0);
+    assert_eq!(
+        fs::metadata(fx.dir.0.join("run/agent"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
     for name in BINARIES {
         let path = fx.dir.0.join(name);
         for missing in [false, true] {

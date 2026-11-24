@@ -199,11 +199,19 @@ fn tty_stdin_uses_args_immediately_or_reads_input_through_eof() {
 // RFC §4.1, §5.1, §5.2
 #[test]
 fn approval_choices_use_dev_tty_and_preserve_piped_stdin() {
-    for choice in ["y", "n", "e", "a"] {
+    // Exercise optional rejection text and both documented editor sources.
+    for (choice, reason, fallback_vi) in [
+        ("y", "", false),
+        ("n", "fixture refusal", false),
+        ("n", "", false),
+        ("e", "", false),
+        ("e", "", true),
+        ("a", "", false),
+    ] {
         let fx = Fixture::new();
         let root = &fx.dir.0;
         fs::write(root.join("case.agent"), "test").unwrap();
-        let edit = root.join("editor");
+        let edit = root.join(if fallback_vi { "vi" } else { "editor" });
         fs::write(
             &edit,
             r#"#!/bin/sh
@@ -224,8 +232,10 @@ printf 'printf edited' > "$1"
         scripted_provider(&fx, &turns);
         let pty = Pty::open();
         let mut c = terminal_command(&fx);
-        c.env("EDITOR", &edit)
-            .args(["--approval", "ask", "--shell", "/bin/sh", "case.agent"])
+        if !fallback_vi {
+            c.env("EDITOR", &edit);
+        }
+        c.args(["--approval", "ask", "--shell", "/bin/sh", "case.agent"])
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
@@ -242,7 +252,7 @@ printf 'printf edited' > "$1"
         if choice == "n" {
             // Wait until the process actually requests the reason before sending another line.
             running.until("reason");
-            running.send(b"fixture refusal\n");
+            running.send(format!("{reason}\n").as_bytes());
         }
         running.finish(0);
         let ir = jsonl(&root.join("request-2"));
@@ -258,7 +268,10 @@ printf 'printf edited' > "$1"
         match choice {
             "n" => {
                 assert_eq!(result["is_error"], true);
-                assert!(text.contains("fixture refusal"));
+                assert!(text.contains("Error: User denied this action."), "{text}");
+                if !reason.is_empty() {
+                    assert!(text.contains(&format!("Reason: {reason}")), "{text}");
+                }
             }
             "e" => {
                 assert!(text.ends_with("edited"));

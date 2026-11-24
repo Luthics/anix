@@ -181,6 +181,13 @@ fn pre_context_hooks_merge_in_ascii_order_with_override_and_two_masks() {
     }
     fs::write(p.join("42-mask"), "").unwrap();
     symlink("/dev/null", p.join("43-link")).unwrap();
+    for dir in [&g, &p] {
+        fs::write(
+            dir.join("45-disabled"),
+            "#!/bin/sh\nprintf disabled >> order\n",
+        )
+        .unwrap();
+    }
     expect_code(&fx.run(fx.agent().args(["trust", "."])), 0);
     expect_code(&fx.run(fx.agent().args(["case.agent", "--", "go"])), 0);
     assert_eq!(
@@ -329,13 +336,15 @@ printf '%s\n' '{"turn_id":3,"tool_call_id":"t","cmd":"printf before","exit_code"
     ]));
     expect_code(&out, 0);
     let post = &jsonl(&root.join("post.json"))[0];
+    assert_eq!(post["cmd"], "printf before");
     assert_eq!(post["exit_code"], 0);
     assert_eq!(post["tool_call_id"], "t");
     assert_eq!(post["output"], "before");
     let ir = jsonl(&root.join("request-2"));
-    let tool = ir.iter().find(|m| m["role"] == "tool").unwrap()["text"]
-        .as_str()
-        .unwrap();
+    let reply = ir.iter().find(|m| m["role"] == "tool").unwrap();
+    assert!(post["turn_id"].is_u64());
+    assert_eq!(post["turn_id"], reply["turn_id"]);
+    let tool = reply["text"].as_str().unwrap();
     assert!(tool.ends_with("filtered") && !tool.contains("before"));
     let exit = &jsonl(&root.join("exit.json"))[0];
     assert_eq!(exit["exit_code"], 0);

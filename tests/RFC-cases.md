@@ -121,6 +121,7 @@
 | [`only_the_selected_providers_defaults_feed_the_shallow_params_merge`](../crates/os-agent-core/tests/rfc_runtime/configuration.rs#L851) | [§3.1](../docs/v1.0.0-RFC.md?plain=1#L39) · [§3.3](../docs/v1.0.0-RFC.md?plain=1#L85) · [§3.4](../docs/v1.0.0-RFC.md?plain=1#L102) · [§8.2](../docs/v1.0.0-RFC.md?plain=1#L333) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
 | [`a_named_provider_searches_path_then_libexec_while_a_path_executes_directly`](../crates/os-agent-core/tests/rfc_runtime/configuration.rs#L928) | [§2](../docs/v1.0.0-RFC.md?plain=1#L23) · [§8.2](../docs/v1.0.0-RFC.md?plain=1#L333) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
 | [`each_xdg_directory_resolves_independently_when_other_overrides_are_absent`](../crates/os-agent-core/tests/rfc_runtime/configuration.rs#L994) | [§8.1](../docs/v1.0.0-RFC.md?plain=1#L326) · [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§8.3](../docs/v1.0.0-RFC.md?plain=1#L373) |
+| [`selected_model_changes_the_provider_environment_without_entering_the_ir`](../crates/os-agent-core/tests/rfc_runtime/configuration.rs#L1052) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
 
 ## `crates/os-agent-core/tests/rfc_runtime/control.rs`
 
@@ -134,10 +135,10 @@
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`each_missing_or_non_executable_private_binary_is_identified`](../crates/os-agent-core/tests/rfc_runtime/doctor.rs#L31) | [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) · [§2](../docs/v1.0.0-RFC.md?plain=1#L23) |
-| [`doctor_distinguishes_required_missing_empty_and_fallback_credentials`](../crates/os-agent-core/tests/rfc_runtime/doctor.rs#L62) | [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) |
-| [`invalid_global_or_project_toml_and_unusable_runtime_directory_report_failure`](../crates/os-agent-core/tests/rfc_runtime/doctor.rs#L91) | [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) |
-| [`doctor_and_the_runtime_can_use_a_configured_default_provider_on_path`](../crates/os-agent-core/tests/rfc_runtime/doctor.rs#L114) | [§2](../docs/v1.0.0-RFC.md?plain=1#L23) · [§3.1](../docs/v1.0.0-RFC.md?plain=1#L39) · [§8.2](../docs/v1.0.0-RFC.md?plain=1#L333) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) |
+| [`each_missing_or_non_executable_private_binary_is_identified`](../crates/os-agent-core/tests/rfc_runtime/doctor.rs#L31) | [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) · [§2](../docs/v1.0.0-RFC.md?plain=1#L23) · [§8.1](../docs/v1.0.0-RFC.md?plain=1#L326) |
+| [`doctor_distinguishes_required_missing_empty_and_fallback_credentials`](../crates/os-agent-core/tests/rfc_runtime/doctor.rs#L70) | [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) |
+| [`invalid_global_or_project_toml_and_unusable_runtime_directory_report_failure`](../crates/os-agent-core/tests/rfc_runtime/doctor.rs#L99) | [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) |
+| [`doctor_and_the_runtime_can_use_a_configured_default_provider_on_path`](../crates/os-agent-core/tests/rfc_runtime/doctor.rs#L122) | [§2](../docs/v1.0.0-RFC.md?plain=1#L23) · [§3.1](../docs/v1.0.0-RFC.md?plain=1#L39) · [§8.2](../docs/v1.0.0-RFC.md?plain=1#L333) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) |
 
 ## `crates/os-agent-core/tests/rfc_runtime/hooks.rs`
 
@@ -145,15 +146,15 @@
 | --- | --- |
 | [`pre_context_filters_can_rewrite_and_append_conversation_records_before_freezing`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L10) | [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
 | [`pre_context_failure_forwards_stderr_and_stops_before_inference`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L81) | [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) |
-| [`post_tool_failure_stops_before_later_hooks_tools_and_provider_turns`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L107) | [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) |
-| [`on_exit_timeout_is_local_to_one_hook_and_preserves_the_primary_exit_code`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L143) | [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
-| [`each_skill_search_layer_wins_once_and_the_body_stays_out_of_the_index`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L180) | [§9.4](../docs/v1.0.0-RFC.md?plain=1#L461) |
-| [`tips_are_restored_after_version_drift_and_fall_back_to_runtime_when_state_is_unwritable`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L243) | [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
-| [`masking_the_whole_tips_hook_suppresses_both_its_index_and_first_run_files`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L282) | [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
-| [`an_empty_merged_tips_index_costs_no_prompt_bytes`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L333) | [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
-| [`background_tip_is_indexed_in_ascii_order_and_can_be_overridden_or_masked_individually`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L367) | [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
-| [`runtime_contract_depends_on_stderr_and_only_changes_at_the_tail_on_resume`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L422) | [§4.4](../docs/v1.0.0-RFC.md?plain=1#L172) · [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
-| [`each_builtin_can_be_replaced_globally_then_overridden_or_masked_by_the_project`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L479) | [§4.4](../docs/v1.0.0-RFC.md?plain=1#L172) · [§8.3](../docs/v1.0.0-RFC.md?plain=1#L373) · [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) · [§9.4](../docs/v1.0.0-RFC.md?plain=1#L461) · [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
+| [`post_tool_failure_stops_before_later_hooks_tools_and_provider_turns`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L107) | [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`on_exit_timeout_is_local_to_one_hook_and_preserves_the_primary_exit_code`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L153) | [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`each_skill_search_layer_wins_once_and_the_body_stays_out_of_the_index`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L190) | [§9.4](../docs/v1.0.0-RFC.md?plain=1#L461) |
+| [`tips_are_restored_after_version_drift_and_fall_back_to_runtime_when_state_is_unwritable`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L253) | [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
+| [`masking_the_whole_tips_hook_suppresses_both_its_index_and_first_run_files`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L292) | [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
+| [`an_empty_merged_tips_index_costs_no_prompt_bytes`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L343) | [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
+| [`background_tip_is_indexed_in_ascii_order_and_can_be_overridden_or_masked_individually`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L377) | [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
+| [`runtime_contract_depends_on_stderr_and_only_changes_at_the_tail_on_resume`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L432) | [§4.4](../docs/v1.0.0-RFC.md?plain=1#L172) · [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`each_builtin_can_be_replaced_globally_then_overridden_or_masked_by_the_project`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L489) | [§4.4](../docs/v1.0.0-RFC.md?plain=1#L172) · [§8.3](../docs/v1.0.0-RFC.md?plain=1#L373) · [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) · [§9.4](../docs/v1.0.0-RFC.md?plain=1#L461) · [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
 
 ## `crates/os-agent-core/tests/rfc_runtime/inbox.rs`
 
@@ -184,11 +185,11 @@
 | [`deny_and_fail_on_deny_differ_in_exit_status_tool_reply_and_side_effects`](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs#L89) | [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
 | [`max_turns_stops_before_another_request_and_success_on_last_turn_is_allowed`](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs#L135) | [§3.3](../docs/v1.0.0-RFC.md?plain=1#L85) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
 | [`pre_context_hooks_merge_in_ascii_order_with_override_and_two_masks`](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs#L163) | [§8.3](../docs/v1.0.0-RFC.md?plain=1#L373) · [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) |
-| [`new_and_modified_project_hooks_require_explicit_trust`](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs#L194) | [§8.3](../docs/v1.0.0-RFC.md?plain=1#L373) |
-| [`project_provider_and_compactor_each_require_trust_after_a_content_change`](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs#L225) | [§8.3](../docs/v1.0.0-RFC.md?plain=1#L373) · [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) |
-| [`post_tool_filters_the_model_result_and_on_exit_failure_keeps_primary_status`](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs#L302) | [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
-| [`frozen_context_lists_skill_metadata_and_tip_paths_but_leaves_bodies_on_disk`](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs#L352) | [§4.4](../docs/v1.0.0-RFC.md?plain=1#L172) · [§9.4](../docs/v1.0.0-RFC.md?plain=1#L461) · [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
-| [`provider_failure_after_partial_text_retries_with_unchanged_ir_and_emits_trace_evidence`](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs#L415) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`new_and_modified_project_hooks_require_explicit_trust`](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs#L201) | [§8.3](../docs/v1.0.0-RFC.md?plain=1#L373) |
+| [`project_provider_and_compactor_each_require_trust_after_a_content_change`](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs#L232) | [§8.3](../docs/v1.0.0-RFC.md?plain=1#L373) · [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) |
+| [`post_tool_filters_the_model_result_and_on_exit_failure_keeps_primary_status`](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs#L309) | [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`frozen_context_lists_skill_metadata_and_tip_paths_but_leaves_bodies_on_disk`](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs#L361) | [§4.4](../docs/v1.0.0-RFC.md?plain=1#L172) · [§9.4](../docs/v1.0.0-RFC.md?plain=1#L461) · [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
+| [`provider_failure_after_partial_text_retries_with_unchanged_ir_and_emits_trace_evidence`](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs#L424) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
 
 ## `crates/os-agent-core/tests/rfc_runtime/platform.rs`
 
@@ -223,9 +224,9 @@
 | --- | --- |
 | [`tty_stdin_uses_args_immediately_or_reads_input_through_eof`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L169) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) |
 | [`approval_choices_use_dev_tty_and_preserve_piped_stdin`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L201) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) · [§5.2](../docs/v1.0.0-RFC.md?plain=1#L189) |
-| [`unsuccessful_or_empty_terminal_edit_runs_neither_original_nor_edited_command`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L294) | [§5.2](../docs/v1.0.0-RFC.md?plain=1#L189) |
-| [`always_approval_is_scoped_to_executable_and_pid_even_with_the_same_wal`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L333) | [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) · [§5.2](../docs/v1.0.0-RFC.md?plain=1#L189) |
-| [`detached_session_requiring_approval_fails_with_42_without_executing_tool`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L395) | [§5.3](../docs/v1.0.0-RFC.md?plain=1#L198) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`unsuccessful_or_empty_terminal_edit_runs_neither_original_nor_edited_command`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L307) | [§5.2](../docs/v1.0.0-RFC.md?plain=1#L189) |
+| [`always_approval_is_scoped_to_executable_and_pid_even_with_the_same_wal`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L346) | [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) · [§5.2](../docs/v1.0.0-RFC.md?plain=1#L189) |
+| [`detached_session_requiring_approval_fails_with_42_without_executing_tool`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L408) | [§5.3](../docs/v1.0.0-RFC.md?plain=1#L198) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
 
 ## `crates/os-agent-core/tests/rfc_runtime/trace.rs`
 
@@ -305,14 +306,14 @@
 | 测试 | RFC 条款 |
 | --- | --- |
 | [`maps_request_and_streams_text_reasoning_usage_and_done`](../crates/provider-openai-responses/tests/rfc_responses.rs#L131) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
-| [`runtime_update_stays_in_chronological_input_and_frozen_instructions_keep_their_bytes`](../crates/provider-openai-responses/tests/rfc_responses.rs#L174) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
-| [`repeated_sse_notifications_emit_one_complete_tool_call`](../crates/provider-openai-responses/tests/rfc_responses.rs#L213) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
-| [`transient_http_errors_are_retryable_but_adapter_never_retries_itself`](../crates/provider-openai-responses/tests/rfc_responses.rs#L241) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
-| [`missing_terminal_event_is_not_reported_as_success`](../crates/provider-openai-responses/tests/rfc_responses.rs#L257) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
-| [`unsupported_ir_version_and_missing_media_fail_before_http`](../crates/provider-openai-responses/tests/rfc_responses.rs#L277) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
-| [`unreadable_media_emits_a_permanent_error_before_dispatch`](../crates/provider-openai-responses/tests/rfc_responses.rs#L326) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
-| [`adapter_reads_each_declared_media_type_from_disk_in_user_and_tool_messages`](../crates/provider-openai-responses/tests/rfc_responses.rs#L360) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
-| [`response_usage_preserves_inclusive_totals_and_available_details`](../crates/provider-openai-responses/tests/rfc_responses.rs#L424) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`runtime_update_stays_in_chronological_input_and_frozen_instructions_keep_their_bytes`](../crates/provider-openai-responses/tests/rfc_responses.rs#L175) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`repeated_sse_notifications_emit_one_complete_tool_call`](../crates/provider-openai-responses/tests/rfc_responses.rs#L214) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`transient_http_errors_are_retryable_but_adapter_never_retries_itself`](../crates/provider-openai-responses/tests/rfc_responses.rs#L242) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`missing_terminal_event_is_not_reported_as_success`](../crates/provider-openai-responses/tests/rfc_responses.rs#L258) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`unsupported_ir_version_and_missing_media_fail_before_http`](../crates/provider-openai-responses/tests/rfc_responses.rs#L278) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`unreadable_media_emits_a_permanent_error_before_dispatch`](../crates/provider-openai-responses/tests/rfc_responses.rs#L327) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`adapter_reads_each_declared_media_type_from_disk_in_user_and_tool_messages`](../crates/provider-openai-responses/tests/rfc_responses.rs#L361) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`response_usage_preserves_inclusive_totals_and_available_details`](../crates/provider-openai-responses/tests/rfc_responses.rs#L425) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
 
 ## `tests/test_distribution.py`
 
@@ -325,11 +326,12 @@
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`test_archived_wal_growth_does_not_require_reading_the_archive_on_resume`](../tests/test_linux_fallback.py#L36) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
-| [`test_unavailable_landlock_warns_or_fails_before_inference`](../tests/test_linux_fallback.py#L84) | [§10.2](../docs/v1.0.0-RFC.md?plain=1#L524) |
-| [`test_doctor_checks_missing_msh_before_diagnosing_invalid_toml`](../tests/test_linux_fallback.py#L110) | [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) |
-| [`test_doctor_detects_broken_pipes_and_ineffective_or_unavailable_flock`](../tests/test_linux_fallback.py#L132) | [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) |
-| [`test_inbox_polls_new_publications_when_kernel_notifications_are_unavailable`](../tests/test_linux_fallback.py#L149) | [§4.2](../docs/v1.0.0-RFC.md?plain=1#L142) |
+| [`test_archived_wal_growth_does_not_require_reading_the_archive_on_resume`](../tests/test_linux_fallback.py#L37) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`test_unavailable_landlock_warns_or_fails_before_inference`](../tests/test_linux_fallback.py#L85) | [§10.2](../docs/v1.0.0-RFC.md?plain=1#L524) |
+| [`test_doctor_checks_missing_msh_before_diagnosing_invalid_toml`](../tests/test_linux_fallback.py#L111) | [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) |
+| [`test_doctor_detects_broken_pipes_and_ineffective_or_unavailable_flock`](../tests/test_linux_fallback.py#L133) | [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) |
+| [`test_idle_inbox_polls_the_empty_new_directory_at_200_ms_without_a_watcher`](../tests/test_linux_fallback.py#L150) | [§4.2](../docs/v1.0.0-RFC.md?plain=1#L142) |
+| [`test_inbox_polls_new_publications_when_kernel_notifications_are_unavailable`](../tests/test_linux_fallback.py#L182) | [§4.2](../docs/v1.0.0-RFC.md?plain=1#L142) |
 
 ## `tests/test_pdf_pages.py`
 
