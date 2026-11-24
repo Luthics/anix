@@ -1,0 +1,19 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# OS / Editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# OS Agent runtime artifacts
+*.ctx.jsonl
+*.trace.jsonl
+.env
+.env.local
+
+# Machine-local personal scripts & notes
+.local/

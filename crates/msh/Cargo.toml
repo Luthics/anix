@@ -1,0 +1,23 @@
+[package]
+name = "msh"
+description = "Model-oriented non-interactive POSIX shell wrapper (`msh`)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "msh"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+libc.workspace = true
+os-agent-proto.workspace = true
+signal-hook.workspace = true
+thiserror.workspace = true
+uuid.workspace = true

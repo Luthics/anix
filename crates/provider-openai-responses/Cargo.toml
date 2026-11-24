@@ -1,0 +1,23 @@
+[package]
+name = "provider-openai-responses"
+description = "Default OpenAI Responses API Provider adapter (`agent-provider-openai-responses`)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "agent-provider-openai-responses"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+base64.workspace = true
+os-agent-proto.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ureq.workspace = true

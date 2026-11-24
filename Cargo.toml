@@ -1,0 +1,50 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/os-agent-proto",
+    "crates/os-agent-core",
+    "crates/msh",
+    "crates/provider-openai-responses",
+    "crates/agent-tools",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/Luthics/os-agent"
+authors = ["Luthics <27689212+Luthics@users.noreply.github.com>"]
+
+[workspace.dependencies]
+os-agent-proto = { path = "crates/os-agent-proto" }
+base64 = "0.22"
+clap = { version = "4", features = ["derive", "env"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+sha2 = "0.10"
+signal-hook = "0.3"
+thiserror = "2"
+time = { version = "0.3", features = ["formatting", "parsing"] }
+toml = "0.8"
+ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }
+uuid = { version = "1", features = ["v4"] }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+missing_debug_implementations = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "deny"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+opt-level = 3

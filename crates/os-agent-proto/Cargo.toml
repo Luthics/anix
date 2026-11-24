@@ -1,0 +1,17 @@
+[package]
+name = "os-agent-proto"
+description = "Canonical IR v1, WAL, Provider, Trace, Hook, and $AGENT_CTL wire protocol definitions for OS Agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
