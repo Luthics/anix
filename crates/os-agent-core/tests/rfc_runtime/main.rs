@@ -9,6 +9,7 @@ use tempdir::TempDir;
 mod background;
 mod compaction;
 mod configuration;
+mod control;
 mod doctor;
 mod hooks;
 mod inbox;

@@ -20,6 +20,66 @@ fn hook(fx: &Fixture) {
     fs::write(&path, "#!/bin/sh\n/bin/cat > exit.json\n").unwrap();
     fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
 }
+// RFC §9.2, §6.1, §9.3, §9.5
+#[test]
+fn retry_usage_counts_every_charged_attempt_without_inflating_the_final_watermark() {
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    fs::write(root.join("case.agent"), "body").unwrap();
+    hook(&fx);
+    let mut partial = counts(17, 7, 9, 3, 5);
+    partial["type"] = json!("usage");
+    let failure = vec![
+        partial,
+        json!({"type":"error","code":"temporary","message":"retry fixture","retryable":true}),
+    ];
+    let success = with_usage(success_text("finished"), counts(23, 11, 13, 2, 4));
+    scripted_provider(&fx, &[failure, success]);
+    let provider = root.join("record-provider");
+    fs::write(
+        &provider,
+        fs::read_to_string(&provider).unwrap() + "\n[ \"$n\" -gt 1 ]\n",
+    )
+    .unwrap();
+    let cmd = r#"exec "$1" -q -c history case.agent -- go 3>trace"#;
+    let output =
+        fx.run(
+            fx.command_for("/bin/sh")
+                .args(["-c", cmd, "fixture", env!("CARGO_BIN_EXE_agent")]),
+        );
+    expect_code(&output, 0);
+    assert_eq!(
+        fs::read(root.join("request-1")).unwrap(),
+        fs::read(root.join("request-2")).unwrap()
+    );
+    let trace = jsonl(&root.join("trace"));
+    assert_eq!(
+        trace
+            .iter()
+            .filter(|r| r["type"] == "provider_error")
+            .count(),
+        1
+    );
+    let exit = jsonl(&root.join("exit.json"));
+    let end = trace.iter().find(|r| r["type"] == "run_end").unwrap();
+    for row in [end, &exit[0]] {
+        assert_eq!(
+            row["context"]["tokens"], 34,
+            "last successful model input + output"
+        );
+        assert_eq!(
+            row["usage"],
+            counts(40, 18, 22, 5, 9),
+            "all billed attempts"
+        );
+        assert_eq!(
+            row["session_usage"], row["usage"],
+            "fresh persistent session"
+        );
+    }
+}
+
+// RFC §6.1, §6.2, §9.2
 #[test]
 fn full_compaction_and_resume_account_for_every_call_without_inflating_watermark() {
     let fx = Fixture::new();
@@ -114,6 +174,7 @@ fn full_compaction_and_resume_account_for_every_call_without_inflating_watermark
     assert!(!restored.iter().any(|r| r.get("usage").is_some()));
 }
 
+// RFC §6.1, §6.2, §9.1
 #[test]
 fn tail_fold_aligns_to_assistant_and_removes_the_triggering_tool_call() {
     let fx = Fixture::new();
@@ -166,6 +227,7 @@ fn tail_fold_aligns_to_assistant_and_removes_the_triggering_tool_call() {
     assert!(restored[4]["turn_id"].as_u64().unwrap() > to);
 }
 
+// RFC §6.1, §9.1
 #[test]
 fn external_compactor_receives_tool_free_ir_and_empty_or_failed_summary_is_fatal() {
     for (script, code) in [
@@ -235,6 +297,7 @@ fn initial_watermark(input: &str) -> u64 {
         .unwrap()
 }
 
+// RFC §6.1
 #[test]
 fn fresh_window_counts_utf8_bytes_in_groups_of_three() {
     let readings: Vec<_> = (0..7)
@@ -250,6 +313,7 @@ fn fresh_window_counts_utf8_bytes_in_groups_of_three() {
     assert_eq!(initial_watermark("x🦀"), readings[4]);
 }
 
+// RFC §6.1, §6.4
 #[test]
 fn hard_limit_allows_equality_and_blocks_the_first_provider_request_above_it() {
     let input = "z".repeat(3600);
@@ -279,6 +343,7 @@ fn hard_limit_allows_equality_and_blocks_the_first_provider_request_above_it() {
     }
 }
 
+// RFC §6.1
 #[test]
 fn auto_compaction_runs_before_inference_and_rechecks_the_new_window_against_the_cap() {
     let input = "a".repeat(3600);
@@ -337,6 +402,7 @@ fn auto_compaction_runs_before_inference_and_rechecks_the_new_window_against_the
     }
 }
 
+// RFC §6.1, §8.2
 #[test]
 fn builtin_compactor_uses_configured_provider_model_and_literal_or_file_prompt() {
     for from_file in [false, true] {
