@@ -1,0 +1,202 @@
+//! §§4.4, 8.3 and 9.3–9.6. Tests use separate HOME and project roots.
+use super::{
+    Fixture, executable, expect_code, jsonl, scripted_provider, success_text, tool, with_tools,
+};
+use std::fs;
+use std::time::{Duration, Instant};
+
+#[test]
+fn pre_context_failure_forwards_stderr_and_stops_before_inference() {
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    fs::write(root.join("case.agent"), "body").unwrap();
+    let dir = root.join("config/agent/hooks/pre-context.d");
+    executable(
+        &dir.join("51-fail"),
+        "#!/bin/sh\n/bin/cat > pre-input\nprintf specific-pre-failure >&2\nexit 7\n",
+    );
+    executable(
+        &dir.join("52-next"),
+        "#!/bin/sh\n: > should-not-run\n/bin/cat\n",
+    );
+    let out = fx.run(fx.agent().args(["case.agent", "--", "start"]));
+    expect_code(&out, 1);
+    assert!(
+        String::from_utf8(out.stderr)
+            .unwrap()
+            .contains("specific-pre-failure")
+    );
+    assert_eq!(jsonl(&root.join("pre-input"))[0]["type"], "header");
+    assert!(!root.join("should-not-run").exists() && !fx.capture.exists());
+}
+
+#[test]
+fn post_tool_failure_stops_before_later_hooks_tools_and_provider_turns() {
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    fs::write(root.join("case.agent"), "body").unwrap();
+    let dir = root.join("config/agent/hooks/post-tool.d");
+    executable(
+        &dir.join("51-fail"),
+        "#!/bin/sh\n/bin/cat > post-input\nexit 6\n",
+    );
+    executable(
+        &dir.join("52-next"),
+        "#!/bin/sh\n: > should-not-run\n/bin/cat\n",
+    );
+    scripted_provider(
+        &fx,
+        &[
+            with_tools([
+                tool("first", "printf one"),
+                tool("second", "printf two > second-tool"),
+            ]),
+            success_text("unexpected"),
+        ],
+    );
+    let out = fx.run(
+        fx.agent()
+            .args(["--shell", "/bin/sh", "-y", "case.agent", "--", "start"]),
+    );
+    assert!(!out.status.success());
+    assert_eq!(jsonl(&root.join("post-input"))[0]["tool_call_id"], "first");
+    for path in ["second-tool", "should-not-run", "request-2"] {
+        assert!(!root.join(path).exists(), "{path}");
+    }
+}
+
+#[test]
+fn on_exit_timeout_is_local_to_one_hook_and_preserves_the_primary_exit_code() {
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    fs::write(root.join("case.agent"), "body").unwrap();
+    let dir = root.join("config/agent/hooks/on-exit.d");
+    executable(
+        &dir.join("10-slow"),
+        "#!/bin/sh\n/bin/cat > slow-input\nexec /bin/sleep 20\n",
+    );
+    executable(&dir.join("20-next"), "#!/bin/sh\n/bin/cat > next-input\n");
+    fs::write(
+        root.join("record-provider"),
+        "#!/bin/sh\n/bin/cat >/dev/null\nprintf bad-provider >&2\nexit 4\n",
+    )
+    .unwrap();
+    let start = Instant::now();
+    let out = fx.run(fx.command_for("/bin/sh").args([
+        "-c",
+        r#"exec "$1" -q case.agent -- go 3>trace"#,
+        "fixture",
+        env!("CARGO_BIN_EXE_agent"),
+    ]));
+    expect_code(&out, 1);
+    assert!(start.elapsed() >= Duration::from_secs(5));
+    let slow = jsonl(&root.join("slow-input"));
+    assert_eq!(slow[0]["exit_code"], 1);
+    assert_eq!(slow, jsonl(&root.join("next-input")));
+    assert!(
+        jsonl(&root.join("trace"))
+            .iter()
+            .any(|r| r.to_string().contains("10-slow"))
+    );
+    assert!(!String::from_utf8(out.stderr).unwrap().contains("10-slow"));
+}
+
+#[test]
+fn each_skill_search_layer_wins_once_and_the_body_stays_out_of_the_index() {
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    let project = root.join("project");
+    fs::create_dir(&project).unwrap();
+    fs::write(project.join("case.agent"), "body").unwrap();
+    fs::remove_file(root.join("config/agent/hooks/pre-context.d/20-skills")).unwrap();
+    let layers = [
+        project.join(".agent/skills"),
+        project.join(".skills"),
+        project.join(".claude/skills"),
+        root.join("config/agent/skills"),
+        root.join(".skills"),
+        root.join(".claude/skills"),
+    ];
+    for (i, dir) in layers.iter().enumerate() {
+        let path = dir.join("tool");
+        fs::create_dir_all(&path).unwrap();
+        fs::write(
+            path.join("SKILL.md"),
+            format!("---\nname: sample\ndescription: 'level-{i} & details'\n---\nBODY-ONLY"),
+        )
+        .unwrap();
+    }
+    for (i, dir) in layers.iter().enumerate() {
+        expect_code(
+            &fx.run(
+                fx.agent()
+                    .current_dir(&project)
+                    .args(["case.agent", "--", "go"]),
+            ),
+            0,
+        );
+        let ir = jsonl(&fx.capture);
+        let text = ir[1]["text"].as_str().unwrap();
+        assert_eq!(text.matches("<skill ").count(), 1, "{text}");
+        let path = fs::canonicalize(dir.join("tool/SKILL.md")).unwrap();
+        assert!(
+            text.contains(path.to_str().unwrap())
+                && text.contains(&format!("level-{i} &amp; details")),
+            "{text}"
+        );
+        assert!(!text.contains("BODY-ONLY"));
+        fs::remove_file(path).unwrap();
+    }
+    expect_code(
+        &fx.run(
+            fx.agent()
+                .current_dir(&project)
+                .args(["case.agent", "--", "go"]),
+        ),
+        0,
+    );
+    assert!(
+        !jsonl(&fx.capture)[1]["text"]
+            .as_str()
+            .unwrap()
+            .contains("<skill ")
+    );
+}
+
+#[test]
+fn tips_are_restored_after_version_drift_and_fall_back_to_runtime_when_state_is_unwritable() {
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    fs::write(root.join("case.agent"), "body").unwrap();
+    let mask = root.join("config/agent/hooks/pre-context.d/30-tips");
+    let state = root.join("state");
+    let builtin = state.join("agent/builtin-tips");
+    let invoke = || {
+        expect_code(
+            &fx.run(
+                fx.agent()
+                    .env("XDG_STATE_HOME", &state)
+                    .args(["case.agent", "--", "go"]),
+            ),
+            0,
+        );
+        jsonl(&fx.capture)[1]["text"].as_str().unwrap().to_owned()
+    };
+    assert!(!invoke().contains("<runtime_tips>") && !builtin.exists());
+    fs::remove_file(mask).unwrap();
+    let text = invoke();
+    let file = builtin.join("how-to-loop.md");
+    let original = fs::read(&file).unwrap();
+    assert!(!original.is_empty());
+    assert!(text.contains(fs::canonicalize(&file).unwrap().to_str().unwrap()));
+    fs::write(&file, "stale text").unwrap();
+    invoke();
+    assert_eq!(fs::read(file).unwrap(), original);
+    // A regular path component reliably prevents writes, including under uid 0.
+    fs::rename(&builtin, state.join("previous")).unwrap();
+    fs::write(&builtin, "blocked path").unwrap();
+    let fallback = invoke();
+    let file = root.join("run/agent/builtin-tips/how-to-loop.md");
+    assert_eq!(fs::read(&file).unwrap(), original);
+    assert!(fallback.contains(fs::canonicalize(file).unwrap().to_str().unwrap()));
+}

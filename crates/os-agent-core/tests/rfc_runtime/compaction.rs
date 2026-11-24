@@ -214,3 +214,181 @@ fn external_compactor_receives_tool_free_ir_and_empty_or_failed_summary_is_fatal
         assert_eq!(root.join("request-2").exists(), code == 0);
     }
 }
+
+/// Measure the first request with a deliberately failing provider so no assistant
+/// reply changes the window before the on-exit observation.
+fn initial_watermark(input: &str) -> u64 {
+    let fx = Fixture::new();
+    hook(&fx);
+    fs::write(fx.dir.0.join("case.agent"), "body").unwrap();
+    fs::write(
+        fx.dir.0.join("record-provider"),
+        "#!/bin/sh\n/bin/cat >/dev/null\nexit 1\n",
+    )
+    .unwrap();
+    expect_code(
+        &fx.run(fx.agent().args(["--no-compact", "case.agent", "--", input])),
+        1,
+    );
+    jsonl(&fx.dir.0.join("exit.json"))[0]["context"]["tokens"]
+        .as_u64()
+        .unwrap()
+}
+
+#[test]
+fn fresh_window_counts_utf8_bytes_in_groups_of_three() {
+    let readings: Vec<_> = (0..7)
+        .map(|n| initial_watermark(&format!("x{}", "a".repeat(n))))
+        .collect();
+    for pair in readings.windows(2) {
+        assert!(pair[1] == pair[0] || pair[1] == pair[0] + 1, "{readings:?}");
+    }
+    for i in 0..4 {
+        assert_eq!(readings[i + 3], readings[i] + 1, "{readings:?}");
+    }
+    assert_eq!(initial_watermark("x水"), readings[3]);
+    assert_eq!(initial_watermark("x🦀"), readings[4]);
+}
+
+#[test]
+fn hard_limit_allows_equality_and_blocks_the_first_provider_request_above_it() {
+    let input = "z".repeat(3600);
+    let watermark = initial_watermark(&input);
+    assert!(watermark > 1024);
+    for (limit, status) in [(watermark - 1, 124), (watermark, 0), (watermark + 1, 0)] {
+        let fx = Fixture::new();
+        fs::write(fx.dir.0.join("case.agent"), "body").unwrap();
+        let out = fx.run(fx.agent().args([
+            "-q",
+            "--no-compact",
+            "--max-tokens",
+            &limit.to_string(),
+            "case.agent",
+            "--",
+            &input,
+        ]));
+        expect_code(&out, status);
+        assert_eq!(
+            fx.capture.is_file(),
+            status == 0,
+            "watermark={watermark}, limit={limit}"
+        );
+        if status == 124 {
+            assert!(!out.stderr.is_empty());
+        }
+    }
+}
+
+#[test]
+fn auto_compaction_runs_before_inference_and_rechecks_the_new_window_against_the_cap() {
+    let input = "a".repeat(3600);
+    let watermark = initial_watermark(&input);
+    for (threshold, summary, compacts, status) in [
+        (watermark + 1, "small".to_owned(), false, 0),
+        (watermark - 1, "small".to_owned(), true, 0),
+        (watermark - 1, "s".repeat(9000), true, 124),
+    ] {
+        let fx = Fixture::new();
+        let root = &fx.dir.0;
+        fs::write(root.join("case.agent"), "body").unwrap();
+        fs::write(root.join("summary"), summary).unwrap();
+        let compact = root.join("compress");
+        fs::write(
+            &compact,
+            "#!/bin/sh\n/bin/cat > compact.ir\n/bin/cat summary\n",
+        )
+        .unwrap();
+        fs::set_permissions(&compact, fs::Permissions::from_mode(0o700)).unwrap();
+        let config = root.join("config/agent/config.toml");
+        fs::write(
+            &config,
+            fs::read_to_string(&config).unwrap() + "\n[compact]\nbin='compress'\n",
+        )
+        .unwrap();
+        let out = fx.run(fx.agent().args([
+            "-q",
+            "--max-tokens",
+            "2048",
+            "--compact-threshold",
+            &threshold.to_string(),
+            "case.agent",
+            "--",
+            &input,
+        ]));
+        expect_code(&out, status);
+        assert_eq!(root.join("compact.ir").exists(), compacts);
+        assert_eq!(fx.capture.exists(), status == 0);
+        if compacts {
+            let original = jsonl(&root.join("compact.ir"));
+            assert_eq!(original[0]["tools"], json!([]));
+            assert!(
+                original.last().unwrap()["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains(&input)
+            );
+            if status == 0 {
+                assert_eq!(
+                    jsonl(&fx.capture)[2]["text"],
+                    "<checkpoint>\nsmall\n</checkpoint>"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn builtin_compactor_uses_configured_provider_model_and_literal_or_file_prompt() {
+    for from_file in [false, true] {
+        let fx = Fixture::new();
+        let root = &fx.dir.0;
+        fs::write(root.join("case.agent"), "regular prompt").unwrap();
+        let conf = root.join("config/agent/config.toml");
+        let prompt = "summarize only the fixture";
+        let setting = if from_file {
+            fs::write(root.join("custom.txt"), prompt).unwrap();
+            "prompt_file='custom.txt'".to_owned()
+        } else {
+            format!("prompt='{prompt}'")
+        };
+        fs::write(&conf,format!("{}\n[providers.other]\nbin='summarizer'\n[compact]\nprovider='other'\nmodel='other-model'\n{setting}\n",fs::read_to_string(&conf).unwrap())).unwrap();
+        let bin = root.join("summarizer");
+        fs::write(&bin,r#"#!/bin/sh
+set -eu
+/bin/cat > summary-request
+printf %s "$AGENT_MODEL" > summary-model
+printf '%s\n' '{"type":"text_delta","text":"local summary"}' '{"type":"done","finish_reason":"stop"}'
+"#).unwrap();
+        fs::set_permissions(bin, fs::Permissions::from_mode(0o700)).unwrap();
+        scripted_provider(
+            &fx,
+            &[
+                with_tools([tool(
+                    "c",
+                    r#"printf '%s\n' '{"op":"compact"}' > "$AGENT_CTL""#,
+                )]),
+                success_text("normal reply"),
+            ],
+        );
+        expect_code(
+            &fx.run(
+                fx.agent()
+                    .args(["-y", "--shell", "/bin/sh", "case.agent", "--", "go"]),
+            ),
+            0,
+        );
+        let ir = jsonl(&root.join("summary-request"));
+        assert_eq!(ir[0]["tools"], json!([]));
+        assert!(ir.iter().any(|r| r["text"] == prompt));
+        assert_eq!(
+            fs::read_to_string(root.join("summary-model")).unwrap(),
+            "other-model"
+        );
+        let normal = jsonl(&root.join("request-2"));
+        assert!(!normal[0]["tools"].as_array().unwrap().is_empty());
+        assert_eq!(
+            normal[2]["text"],
+            "<checkpoint>\nlocal summary\n</checkpoint>"
+        );
+    }
+}

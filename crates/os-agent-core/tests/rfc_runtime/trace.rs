@@ -145,3 +145,43 @@ fn journal_receives_events_on_fd3_fallback_and_never_receives_wire_ir() {
         verify(&events, has_deltas, false);
     }
 }
+
+#[test]
+fn disconnected_trace_recipient_does_not_change_payload_stderr_or_exit_status() {
+    use std::os::fd::OwnedFd;
+    use std::os::unix::net::UnixStream;
+    use std::process::Stdio;
+    for connected_at_launch in [true, false] {
+        let fx = fixture();
+        let (writer, reader) = UnixStream::pair().unwrap();
+        // Use stdin to transfer an O_RDWR endpoint into the wrapper; the actual agent
+        // receives that endpoint only on fd 3 and has /dev/null on fd 0.
+        let mut cmd = fx.command_for("/bin/sh");
+        cmd.stdin(Stdio::from(OwnedFd::from(writer))).args([
+            "-c",
+            r#"exec 3<&0; exec "$1" -q case.agent -- go </dev/null"#,
+            "fixture",
+            env!("CARGO_BIN_EXE_agent"),
+        ]);
+        if connected_at_launch {
+            let reader = std::thread::spawn(move || {
+                let mut reader = reader;
+                reader
+                    .set_read_timeout(Some(std::time::Duration::from_secs(12)))
+                    .unwrap();
+                let mut byte = [0; 1];
+                reader.read_exact(&mut byte).unwrap();
+            });
+            let out = fx.run(&mut cmd);
+            reader.join().unwrap();
+            expect_code(&out, 0);
+            assert!(out.stdout.is_empty() && out.stderr.is_empty());
+        } else {
+            drop(reader);
+            let out = fx.run(&mut cmd);
+            expect_code(&out, 0);
+            assert!(out.stdout.is_empty() && out.stderr.is_empty());
+        }
+        assert!(fx.dir.0.join("request-1").exists());
+    }
+}

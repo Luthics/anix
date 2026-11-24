@@ -1,55 +1,10 @@
 //! RFC §§4.2, 6.1–6.4. Deliver real signals to processes started by the test.
+use super::background::{Agent, until};
 use super::{Fixture, expect_code, jsonl, scripted_provider, success_text};
-use std::fs::{self, File};
-use std::io;
+use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Stdio};
-use std::thread;
 use std::time::{Duration, Instant};
-
-struct Agent(Child);
-
-impl Agent {
-    fn start(fx: &Fixture, args: &[&str]) -> Self {
-        fs::write(fx.dir.0.join("case.agent"), "frozen-test-text").unwrap();
-        let c = fx
-            .agent()
-            .args(args)
-            .stdout(Stdio::null())
-            .stderr(File::create(fx.dir.0.join("agent-stderr")).unwrap())
-            .spawn()
-            .unwrap();
-        Self(c)
-    }
-    fn signal(&self, signo: i32) {
-        // SAFETY: Only target the positive PID returned by our own Child. It has
-        // not been reaped so the kernel cannot reuse it.
-        let rc = unsafe { libc::kill(self.0.id() as libc::pid_t, signo) };
-        assert_eq!(rc, 0, "kill: {}", io::Error::last_os_error());
-    }
-    fn finish(&mut self, expected: i32) {
-        until("agent termination", || self.0.try_wait().unwrap().is_some());
-        assert_eq!(self.0.wait().unwrap().code(), Some(expected));
-    }
-}
-
-impl Drop for Agent {
-    fn drop(&mut self) {
-        if matches!(self.0.try_wait(), Ok(None)) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
-    }
-}
-
-fn until(what: &str, mut ready: impl FnMut() -> bool) {
-    let end = Instant::now() + Duration::from_secs(12);
-    while !ready() {
-        assert!(Instant::now() < end, "deadline waiting for {what}");
-        thread::sleep(Duration::from_millis(10));
-    }
-}
 
 #[test]
 fn interruption_reaps_the_provider_discards_partial_assistant_and_releases_lock() {
@@ -210,4 +165,99 @@ fn usr1_forces_one_tool_free_compaction_before_the_next_inbox_inference() {
         1
     );
     assert!(!root.join("request-4").exists());
+}
+
+#[test]
+fn interruption_waits_three_seconds_then_stops_a_provider_that_handles_term_without_exiting() {
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    fs::write(
+        root.join("record-provider"),
+        r#"#!/bin/sh
+set -eu
+/bin/cat > /dev/null
+trap 'printf acknowledged > term-seen' TERM
+: > ready
+i=0
+while [ "$i" -lt 200 ]; do /bin/sleep 0.1 || :; i=$((i+1)); done
+printf finished > natural-exit
+"#,
+    )
+    .unwrap();
+    let mut agent = Agent::start(&fx, &["-q", "-c", "history", "case.agent", "--", "go"]);
+    until("active provider", || root.join("ready").is_file());
+    let start = Instant::now();
+    agent.signal(libc::SIGTERM);
+    agent.finish(143);
+    assert!(start.elapsed() >= Duration::from_millis(2950));
+    assert_eq!(
+        fs::read_to_string(root.join("term-seen")).unwrap(),
+        "acknowledged"
+    );
+    assert!(!root.join("natural-exit").exists());
+    scripted_provider(&fx, &[success_text("new process took lock")]);
+    expect_code(
+        &fx.run(
+            fx.agent()
+                .args(["-q", "-c", "history", "case.agent", "--", "resume"]),
+        ),
+        0,
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn abrupt_parent_exit_stops_the_active_provider_or_shell_child() {
+    use super::{tool, with_tools};
+    for active_provider in [true, false] {
+        let fx = Fixture::new();
+        let root = &fx.dir.0;
+        let script = r#"printf '%s\n' "$$" > "$HOME/child-pid.tmp"; /bin/mv "$HOME/child-pid.tmp" "$HOME/child-pid"; exec /bin/sleep 15"#;
+        if active_provider {
+            fs::write(
+                root.join("record-provider"),
+                format!("#!/bin/sh\n/bin/cat >/dev/null\n{script}\n"),
+            )
+            .unwrap();
+        } else {
+            scripted_provider(&fx, &[with_tools([tool("active", script)])]);
+        }
+        let mut agent = Agent::start(
+            &fx,
+            &["-q", "-y", "--shell", "/bin/sh", "case.agent", "--", "go"],
+        );
+        until("child pid published", || root.join("child-pid").exists());
+        let pid: u32 = fs::read_to_string(root.join("child-pid"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let stat = PathBuf::from(format!("/proc/{pid}/stat"));
+        let before = fs::read_to_string(&stat).unwrap();
+        // proc stat fields begin with pid, (comm), state, ppid.
+        assert_eq!(
+            before
+                .rsplit_once(')')
+                .unwrap()
+                .1
+                .split_whitespace()
+                .nth(1)
+                .unwrap(),
+            agent.0.id().to_string()
+        );
+        agent.signal(libc::SIGKILL);
+        let status = agent.0.wait().unwrap();
+        assert!(!status.success());
+        until(
+            "child terminated after abrupt parent death",
+            || match fs::read_to_string(&stat) {
+                Ok(row) => matches!(
+                    row.rsplit_once(')').unwrap().1.split_whitespace().next(),
+                    Some("Z" | "X")
+                ),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+                Err(e) => panic!("read {stat:?}: {e}"),
+            },
+        );
+    }
 }

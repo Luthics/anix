@@ -1,15 +1,29 @@
 //! Black-box conformance tests for the shipping `agent` executable using local providers.
-mod configuration;
 #[path = "../common/fixture.rs"]
 mod fixture;
-mod io;
 #[path = "../common/tempdir.rs"]
 mod tempdir;
 use fixture::Fixture;
 use tempdir::TempDir;
 
-use serde_json::Value;
+mod background;
+mod compaction;
+mod configuration;
+mod doctor;
+mod hooks;
+mod inbox;
+mod io;
+mod lifecycle;
+mod platform;
+mod provider;
+mod signals;
+mod terminal;
+mod trace;
+mod wal;
+
+use serde_json::{Value, json};
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Output;
 
@@ -29,8 +43,6 @@ fn expect_code(result: &Output, expected: i32) {
         String::from_utf8_lossy(&result.stderr)
     );
 }
-
-use serde_json::json;
 
 fn done() -> Value {
     json!({"type":"done","finish_reason":"stop"})
@@ -76,10 +88,9 @@ fn with_tools(calls: impl IntoIterator<Item = Value>) -> Vec<Value> {
         .chain([json!({"type":"done","finish_reason":"tool_calls"})])
         .collect()
 }
-mod compaction;
-mod doctor;
-mod lifecycle;
-mod signals;
-mod terminal;
-mod trace;
-mod wal;
+
+fn executable(path: &Path, contents: &str) {
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, contents).unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+}

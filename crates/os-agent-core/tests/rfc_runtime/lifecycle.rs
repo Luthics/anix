@@ -3,13 +3,8 @@ use super::{Fixture, expect_code, jsonl, scripted_provider, success_text, tool, 
 use serde_json::json;
 use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
-use std::path::Path;
 
-fn executable(path: &Path, contents: &str) {
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(path, contents).unwrap();
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
-}
+use super::executable;
 
 #[test]
 fn inbox_observes_only_published_files_in_ascii_order_and_moves_them_after_commit() {

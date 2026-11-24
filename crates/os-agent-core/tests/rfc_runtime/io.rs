@@ -196,3 +196,75 @@ fn script_arguments_accept_an_optional_separator_and_preserve_option_like_litera
         );
     }
 }
+
+#[test]
+fn every_static_fd_access_mode_is_probed_and_consumed_input_files_are_closed_before_spawn() {
+    use super::executable;
+    // Check the original file identity, because a child can legitimately reuse a
+    // low-numbered descriptor for a different file or pipe after exec.
+    let inspect = r#"for n in 4 5 6 7 8 9; do
+    if [ -f "$HOME/readable-$n" ] && [ "/dev/fd/$n" -ef "$HOME/source-$n" ]; then
+        printf '%s\n' "$n" >> "$HOME/leaked"
+    fi
+done"#;
+    for rotation in 0..4 {
+        let fx = Fixture::new();
+        let root = &fx.dir.0;
+        fs::write(root.join("case.agent"), "body").unwrap();
+        let hook = root.join("config/agent/hooks/pre-context.d/70-inspect");
+        executable(&hook, &format!("#!/bin/sh\n{inspect}\n/bin/cat\n"));
+        scripted_provider(
+            &fx,
+            &[with_tools([tool("inspect", inspect)]), success_text("done")],
+        );
+        let provider = root.join("record-provider");
+        let body = fs::read_to_string(&provider).unwrap().replacen(
+            "set -eu",
+            &format!("set -eu\n{inspect}"),
+            1,
+        );
+        fs::write(provider, body).unwrap();
+        let mut redirects = String::new();
+        let mut expected = Vec::new();
+        for n in 4..=9 {
+            let mode = (n + rotation) % 4;
+            let file = format!("source-{n}");
+            fs::write(root.join(&file), format!("value-{n}")).unwrap();
+            redirects.push_str(&match mode {
+                0 => format!(" {n}<&-"),
+                1 => format!(" {n}<{file}"),
+                2 => format!(" {n}>{file}"),
+                _ => format!(" {n}<>{file}"),
+            });
+            if mode == 1 || mode == 3 {
+                expected.push(n);
+                fs::write(root.join(format!("readable-{n}")), "").unwrap();
+            }
+        }
+        let script = format!("exec \"$1\" -y -q --shell /bin/sh case.agent -- initial{redirects}");
+        expect_code(
+            &fx.run(fx.command_for("/bin/sh").args([
+                "-c",
+                &script,
+                "fixture",
+                env!("CARGO_BIN_EXE_agent"),
+            ])),
+            0,
+        );
+        let req = jsonl(&root.join("request-1"));
+        let user = req.last().unwrap()["text"].as_str().unwrap();
+        assert_eq!(user.matches("<input fd=").count(), expected.len(), "{user}");
+        let mut tail = user;
+        for n in expected {
+            let tag = format!("<input fd=\"{n}\">");
+            let section = tail.split_once(&tag).unwrap().1;
+            let (value, rest) = section.split_once("</input>").unwrap();
+            assert_eq!(value.trim_matches('\n'), format!("value-{n}"));
+            tail = rest;
+        }
+        assert!(
+            !root.join("leaked").exists(),
+            "consumed input inherited by child"
+        );
+    }
+}
