@@ -1,15 +1,25 @@
-"""RFC §§4.3, 7.1, 9.5 through the real agent and msh, with a local provider.
+"""POSIX conformance through the real agent and msh, with a local provider.
 
 Build both executables first. OS_AGENT_BIN_DIR can select another build.
 """
 from contextlib import ExitStack
+from datetime import datetime
+import array
+import fcntl
 import json
 import os
 from pathlib import Path
 import pty
 import re
+import resource
+import select
+import signal
+import socket
 import subprocess
+import sys
 import tempfile
+import termios
+import time
 import tty
 import unittest
 
@@ -61,6 +71,242 @@ fi
         reply = json.loads((self.root / "second.ir").read_text().splitlines()[-1])
         self.assertEqual((reply["role"], reply["tool_call_id"]), ("tool", "fixture-id"))
         return result, reply
+
+    # RFC §3.3, §9.5
+    def test_trace_envelope_identifies_the_live_process_and_effective_agent_name(self):
+        (self.root / "first.reply").write_text(
+            '{"type":"text_delta","text":"ok"}\n{"type":"done","finish_reason":"stop"}\n')
+        for source, name in [("plain", "filename"), ("---\nname: named.agent-2\n---\nbody", "named.agent-2")]:
+            with self.subTest(name=name):
+                (self.root / "filename.agent").write_text(source)
+                (self.root / "first.ir").unlink(missing_ok=True)
+                before = time.time()
+                with subprocess.Popen(["sh", "-c", 'exec "$@" 3>trace', "fixture",
+                                       self.agent, "-q", "filename.agent", "--", "go"],
+                                      cwd=self.root, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, env={**self.env, "AGENT_TRACE_LEVEL": "events"}) as child:
+                    try:
+                        out, err = child.communicate(timeout=15)
+                    finally:
+                        if child.poll() is None:
+                            child.kill()
+                            child.communicate()
+                after = time.time()
+                self.assertEqual((child.returncode, out, err), (0, b"", b""))
+                events = [json.loads(row) for row in (self.root / "trace").read_bytes().splitlines()]
+                self.assertEqual(events[0]["type"], "run_start")
+                self.assertEqual(events[-1]["type"], "run_end")
+                for event in events:
+                    self.assertEqual((event["v"], event["agent"], event["pid"], event["ppid"]),
+                                     (1, name, child.pid, os.getpid()))
+                    stamp = datetime.fromisoformat(event["ts"].replace("Z", "+00:00"))
+                    self.assertIsNotNone(stamp.tzinfo)
+                    self.assertLessEqual(before - 1, stamp.timestamp())
+                    self.assertLessEqual(stamp.timestamp(), after + 1)
+
+    # RFC §6.2, §6.4
+    def test_wal_append_failure_preserves_the_prefix_and_reopens_according_to_tail_state(self):
+        # Use a real kernel-enforced short write or EFBIG. Limits apply only
+        # to the disposable agent process, and never to the test runner.
+        (self.root / "first.reply").write_text(
+            '{"type":"text_delta","text":"ok"}\n{"type":"done","finish_reason":"stop"}\n')
+
+        def run(wal, message, limit=None):
+            def limit_file_growth():
+                signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+                resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
+
+            return subprocess.run([self.agent, "-q", "-c", wal, "case.agent", "--", message],
+                                  cwd=self.root, env=self.env, stdin=subprocess.DEVNULL,
+                                  capture_output=True, timeout=15,
+                                  preexec_fn=None if limit is None else limit_file_growth)
+
+        seed = self.root / "seed.wal"
+        first = run(seed, "seed")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        prefix = seed.read_bytes()
+        self.assertTrue(prefix.endswith(b"\n"))
+        for room in (0, 1, 7, 63):
+            with self.subTest(extra_writable_bytes=room):
+                wal = self.root / f"limited-{room}.wal"
+                wal.write_bytes(prefix)
+                failed = run(wal, "cannot-commit-" + "f" * 100, len(prefix) + room)
+                self.assertEqual(failed.returncode, 1, failed.stderr)
+                self.assertTrue(failed.stderr.strip())
+                after = wal.read_bytes()
+                self.assertEqual(after[:len(prefix)], prefix)
+                self.assertLessEqual(len(after), len(prefix) + room)
+                resumed = run(wal, "resume")
+                if after == prefix:
+                    self.assertEqual(resumed.returncode, 0, resumed.stderr)
+                    rows = [json.loads(l) for l in wal.read_bytes().splitlines()]
+                    self.assertEqual([r["text"] for r in rows if r.get("role") == "user"],
+                                     ["<args>seed</args>", "<args>resume</args>"])
+                else:
+                    self.assertFalse(after.endswith(b"\n"), "a full record fit in the fault window")
+                    self.assertEqual(resumed.returncode, 1, resumed.stderr)
+                    self.assertEqual(wal.read_bytes(), after)
+
+    # RFC §9.4, §7.1
+    def test_skill_index_round_trips_xml_metadata_and_msh_reads_the_indexed_file_on_demand(self):
+        guide = self.root / '.skills/R&D "examples"/SKILL.md'
+        guide.parent.mkdir(parents=True)
+        guide.write_text("---\nname: report\ndescription: 'Compare A&B with <例>.'\n---\n"
+                         "body-visible-only-after-cat\n")
+        # This mock chooses its command from the received index, so a bad path
+        # or an unescaped XML attribute breaks the actual tool round trip.
+        self.provider.write_text('#!/bin/sh\nexec "$FIXTURE_PYTHON" "$HOME/choose.py"\n')
+        (self.root / "choose.py").write_text('''import json, shlex, sys
+from pathlib import Path
+from xml.etree import ElementTree
+rows = [json.loads(line) for line in sys.stdin]
+if not Path("first.ir").exists():
+    Path("first.ir").write_text(json.dumps(rows))
+    text = next(r["text"] for r in rows if r.get("role") == "system")
+    xml = text[text.index("<available_skills>"):text.index("</available_skills>")+len("</available_skills>")]
+    skills = ElementTree.fromstring(xml).findall("skill")
+    assert len(skills) == 1
+    entry = skills[0]
+    Path("index.json").write_text(json.dumps([entry.attrib, entry.text]))
+    print(json.dumps({"type":"tool_call","id":"read","name":"msh",
+                      "arguments":{"cmd":"cat " + shlex.quote(entry.get("path"))}}))
+    print(json.dumps({"type":"done","finish_reason":"tool_calls"}))
+else:
+    Path("second.ir").write_text(json.dumps(rows))
+    print(json.dumps({"type":"text_delta","text":"finished"}))
+    print(json.dumps({"type":"done","finish_reason":"stop"}))
+''')
+        run = subprocess.run([self.agent, "-q", "-y", "case.agent", "--", "go"], cwd=self.root,
+                             stdin=subprocess.DEVNULL, capture_output=True, timeout=15,
+                             env={**self.env, "FIXTURE_PYTHON": sys.executable})
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(json.loads((self.root / "index.json").read_text()),
+                         [{"name":"report", "path":str(guide.resolve())}, "Compare A&B with <例>."])
+        first = json.loads((self.root / "first.ir").read_text())
+        self.assertFalse(any("body-visible-only-after-cat" in r.get("text", "") for r in first))
+        second = json.loads((self.root / "second.ir").read_text())
+        tool = [r for r in second if r.get("role") == "tool"]
+        self.assertEqual(len(tool), 1)
+        self.assertEqual(tool[0]["tool_call_id"], "read")
+        self.assertEqual(tool[0]["text"].split("\n", 1)[1].rstrip("\n"), guide.read_text().rstrip("\n"))
+
+    # RFC §4.1
+    def test_open_input_descriptor_defers_inference_until_eof(self):
+        (self.root / "first.reply").write_text(
+            '{"type":"text_delta","text":"ok"}\n{"type":"done","finish_reason":"stop"}\n')
+        for fd in (0, 4, 9):
+            with self.subTest(fd=fd), ExitStack() as stack:
+                request = self.root / "first.ir"
+                request.unlink(missing_ok=True)
+                read_fd, write_fd = os.pipe()
+                reader = stack.enter_context(os.fdopen(read_fd, "rb", buffering=0))
+                writer = stack.enter_context(os.fdopen(write_fd, "wb", buffering=0))
+                writer.write(b"first-\xe4")
+                redirect = "" if fd == 0 else f"exec {fd}<&0; exec </dev/null; "
+                child = subprocess.Popen(["/bin/sh", "-c", redirect + 'exec "$@"', "fixture",
+                                          self.agent, "-q", "case.agent"], stdin=reader, cwd=self.root,
+                                         env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                try:
+                    pending = array.array("i", [0])
+                    deadline = time.monotonic() + 10
+                    while True:
+                        fcntl.ioctl(reader, termios.FIONREAD, pending, True)
+                        if pending[0] == 0:
+                            break
+                        self.assertIsNone(child.poll())
+                        self.assertLess(time.monotonic(), deadline, f"fd {fd} was never read")
+                        time.sleep(.01)
+                    self.assertFalse(request.exists(), "provider started with its input still open")
+                    writer.write(b"\xb8\xad-last")
+                    writer.close()
+                    out, err = child.communicate(timeout=10)
+                finally:
+                    writer.close()
+                    if child.poll() is None:
+                        child.kill()
+                        child.communicate()
+                self.assertEqual((child.returncode, out, err), (0, b"", b""))
+                rows = [json.loads(s) for s in request.read_text().splitlines()]
+                users = [r["text"] for r in rows if r.get("role") == "user"]
+                self.assertEqual(len(users), 1)
+                if fd == 0:
+                    self.assertEqual(users[0], "first-中-last")
+                else:
+                    self.assertRegex(users[0], rf'^<input fd="{fd}">\n?first-中-last\n?</input>$')
+
+    # RFC §4.1, §9.5
+    def test_inference_can_finish_with_an_open_trace_consumer_that_stops_reading(self):
+        (self.root / "first.reply").write_text(
+            '{"type":"text_delta","text":"ok"}\n{"type":"done","finish_reason":"stop"}\n')
+        with ExitStack() as stack:
+            sender, receiver = socket.socketpair()
+            stack.enter_context(sender)
+            stack.enter_context(receiver)
+            sender.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
+            sender.setblocking(False)
+            # Fill the send queue down to one byte. The receiver stays connected
+            # throughout normal inference, and never consumes the prefilled data.
+            for chunk in (b"T" * 8192, b"T"):
+                while True:
+                    try:
+                        sender.send(chunk)
+                    except BlockingIOError:
+                        break
+            sender.setblocking(True)
+            cmd = ["sh", "-c", 'exec 3<&0; exec "$@" </dev/null', "fixture",
+                   self.agent, "-q", "case.agent", "--", "go"]
+            with subprocess.Popen(cmd, cwd=self.root, stdin=sender, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, env={**self.env, "AGENT_TRACE_LEVEL": "events"}) as child:
+                try:
+                    out, err = child.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    receiver.close()
+                    try:
+                        child.communicate(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        child.kill()
+                        child.communicate()
+                    self.fail("inference did not finish while the full trace socket stayed connected")
+            self.assertEqual((child.returncode, out, err), (0, b"", b""))
+            self.assertTrue((self.root / "first.ir").exists())
+
+    # RFC §7.1, §6.4
+    def test_msh_timeout_signals_the_whole_group_and_grants_three_seconds_before_kill(self):
+        # Both witnesses keep a FIFO writer open until they actually exit. EOF
+        # observes the last descendant's exit, including after its parent dies.
+        (self.root / "witness.py").write_text(
+            "import os, signal, subprocess, sys, time\n"
+            "from pathlib import Path\n"
+            "role = sys.argv[1]\n"
+            "fifo = open('alive', 'wb', buffering=0)\n"
+            "def term(sig, frame):\n"
+            "    Path(role + '.term').write_text(str(time.monotonic()))\n"
+            "    time.sleep(2.7)\n"
+            "    Path(role + '.grace').touch()\n"
+            "signal.signal(signal.SIGTERM, term)\n"
+            "Path(role + '.group').write_text(str(os.getpgrp()))\n"
+            "if role == 'leader':\n"
+            "    subprocess.Popen([sys.executable, __file__, 'worker'])\n"
+            "time.sleep(14)\n")
+        fifo = self.root / "alive"
+        os.mkfifo(fifo)
+        with os.fdopen(os.open(fifo, os.O_RDONLY | os.O_NONBLOCK), "rb", buffering=0) as reader:
+            out = subprocess.run([self.libexec / "msh", "-c", 'exec "$WITNESS" witness.py leader'],
+                                 cwd=self.root, stdin=subprocess.DEVNULL, capture_output=True, timeout=12,
+                                 env={**self.env, "MSH_TIMEOUT_SEC": "2", "WITNESS": sys.executable})
+            finished = time.monotonic()
+            self.assertEqual(out.returncode, 124, out)
+            self.assertRegex((out.stdout + out.stderr).lower(), rb"timeout|timed out")
+            groups = [(self.root / (role + ".group")).read_text() for role in ("leader", "worker")]
+            self.assertEqual(groups[0], groups[1])
+            self.assertNotEqual(int(groups[0]), os.getpgrp())
+            for role in ("leader", "worker"):
+                notified = float((self.root / (role + ".term")).read_text())
+                # Timestamp comes from the Python signal handler, shortly after delivery.
+                self.assertGreaterEqual(finished - notified, 2.8, role)
+                self.assertTrue((self.root / (role + ".grace")).exists(), role)
+            self.assertTrue(select.select([reader], [], [], 1)[0], "a group member still holds the FIFO")
+            self.assertEqual(reader.read(1), b"")
 
     # RFC §4.1, §4.3
     def test_stdout_and_stderr_terminal_modes_are_independent(self):
