@@ -1,6 +1,6 @@
 """POSIX conformance through the real agent and msh, with a local provider.
 
-Build both executables first. OS_AGENT_BIN_DIR can select another build.
+Build the workspace binaries first. OS_AGENT_BIN_DIR can select another build.
 """
 from contextlib import ExitStack
 from datetime import datetime
@@ -31,6 +31,7 @@ class ShellPipeline(unittest.TestCase):
         self.root = Path(self.temp.name)
         binaries = Path(os.environ.get("OS_AGENT_BIN_DIR", Path(__file__).resolve().parents[1] / "target/debug"))
         self.agent = binaries / "agent"
+        self.aclr = binaries / "aclr"
         self.libexec = self.root / ".local/libexec/agent"
         self.libexec.mkdir(parents=True)
         (self.libexec / "msh").symlink_to(binaries / "msh")
@@ -71,6 +72,56 @@ fi
         reply = json.loads((self.root / "second.ir").read_text().splitlines()[-1])
         self.assertEqual((reply["role"], reply["tool_call_id"]), ("tool", "fixture-id"))
         return result, reply
+
+    # RFC §7.2, §6.1, §6.2
+    def test_aclr_and_agent_agree_on_the_serialized_fold_frame_size_limit(self):
+        def emit(summary):
+            return subprocess.run(["/bin/sh", "-c", 'exec 6>&1; exec "$@" >/dev/null', "fixture",
+                                   self.aclr, "-t", "1", summary], cwd=self.root,
+                                  env={**self.env, "AGENT_CTL": "/dev/fd/6"},
+                                  stdin=subprocess.DEVNULL, capture_output=True, timeout=8)
+
+        # Start with the producer's own serialization, including exactly one LF.
+        template = emit("PLACEHOLDER")
+        self.assertEqual(template.returncode, 0, template.stderr)
+        self.assertEqual(json.loads(template.stdout), {"op": "fold", "from_turn": 1, "summary": "PLACEHOLDER"})
+        self.assertEqual(template.stdout.count(b"PLACEHOLDER"), 1)
+        self.assertTrue(template.stdout.endswith(b"\n"))
+        cmd = 'cat ctl.frame > "$AGENT_CTL"'
+        events = [{"type": "tool_call", "id": "boundary", "name": "msh", "arguments": {"cmd": cmd}},
+                  {"type": "done", "finish_reason": "tool_calls"}]
+        (self.root / "first.reply").write_text("".join(json.dumps(e) + "\n" for e in events))
+        for size in (63_999, 64_000, 64_001, 65_535, 65_536, 65_537, 65_538):
+            with self.subTest(bytes_including_lf=size):
+                summary = "x" * (size - len(template.stdout) + len("PLACEHOLDER"))
+                frame = template.stdout.replace(b"PLACEHOLDER", summary.encode())
+                producer = emit(summary)
+                accepted = producer.returncode == 0
+                self.assertEqual(len(frame), size)
+                self.assertTrue(producer.stdout == (frame if accepted else b""), "unexpected fd 6 bytes")
+                if size <= 64_000:
+                    self.assertTrue(accepted)
+                if size >= 65_538:
+                    self.assertFalse(accepted)
+
+                # Write the same bytes independently so that rejection by aclr
+                # cannot short-circuit the check of the agent's receiving side.
+                (self.root / "ctl.frame").write_bytes(frame)
+                (self.root / "first.ir").unlink(missing_ok=True)
+                (self.root / "second.ir").unlink(missing_ok=True)
+                wal = self.root / f"{size}.wal"
+                run = subprocess.run([self.agent, "-q", "-y", "-c", wal, "case.agent", "--", "go"],
+                                     cwd=self.root, env=self.env, stdin=subprocess.DEVNULL,
+                                     capture_output=True, timeout=10)
+                rows = [json.loads(line) for line in wal.read_bytes().splitlines()]
+                folds = [r for r in rows if r.get("type") == "fold"]
+                self.assertEqual(len(folds), int(accepted),
+                                 f"frame of {size} bytes including LF: aclr accepted={accepted}, WAL folds={len(folds)}")
+                if accepted:
+                    self.assertEqual(run.returncode, 0, run.stderr)
+                    self.assertTrue(folds[0]["summary"] == summary)
+                    actual = [json.loads(line) for line in (self.root / "second.ir").read_bytes().splitlines()]
+                    self.assertTrue(any(summary in row.get("text", "") for row in actual))
 
     # RFC §3.3, §9.5
     def test_trace_envelope_identifies_the_live_process_and_effective_agent_name(self):

@@ -63,7 +63,7 @@ jobs:
       - name: Test agent and msh together
         if: ${{ !cancelled() }}
         run: |
-          cargo build -p os-agent-core -p msh
+          cargo build -p os-agent-core -p msh -p agent-tools
           python3 tests/test_shell_pipeline.py
 
   linux-components:
