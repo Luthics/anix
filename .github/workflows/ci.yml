@@ -50,6 +50,10 @@ jobs:
           ./target/debug/agent --version
           test "$(./target/debug/msh -c 'echo ok')" = "ok"
 
+      - name: Test installed five-binary pipeline
+        if: ${{ !cancelled() }}
+        run: python3 tests/test_distribution.py
+
   linux-musl-static:
     name: Static Linux musl (x86_64)
     runs-on: ubuntu-latest
