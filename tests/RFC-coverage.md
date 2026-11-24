@@ -16,6 +16,11 @@
 | §9.2 | 在回环地址接收实际 HTTP 请求，模拟 SSE 分片、重复工具帧、无结束帧、429/5xx 和缺失媒体。另从运行时捕获重试前后的 IR 与半途断开的 Trace。 | [适配器](../crates/provider-openai-responses/tests/rfc_responses.rs)、[运行时重试](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs) |
 | §9.5 | 分别打开普通文件、只读 fd 3、Unix socket，核对事件/增量/原始 IR 的去向、凭据占位符未写出，以及 wire 文件权限。 | [Trace](../crates/os-agent-core/tests/rfc_runtime/trace.rs) |
 | §§2、10.3 | 在独立 HOME 安装五个程序，以 shebang 启动 agent，驱动真实 Provider、msh、aview 和 aclr；核对上游收到的图像、WAL 里的路径、fd 1 的原始字节和折叠后的下一次请求。自检另覆盖文件缺失、执行位、配置语法、凭据与运行目录。 | [安装链路](test_distribution.py)、[doctor](../crates/os-agent-core/tests/rfc_runtime/doctor.rs) |
+| §§4.1–4.3、6.3 | 轮换 fd 4–9 的四种访问模式，在 pre-context、Provider、shell 中核对已消费文件的身份。同一工具仍在执行时，从三个线程原子发布不同的大消息，检查队列状态、完整正文、工具闭合和 WAL 顺序。独立进程处理 TERM 后继续运行，验证三秒宽限和退出。 | [FD](../crates/os-agent-core/tests/rfc_runtime/io.rs)、[Inbox](../crates/os-agent-core/tests/rfc_runtime/inbox.rs)、[信号](../crates/os-agent-core/tests/rfc_runtime/signals.rs) |
+| §6.1 | 对相同窗口测量硬上限前一 token、等值、后一 token；按 UTF-8 字节增加输入观察水位，分别在自动阈值两侧观察调用次数和压缩后的第二次硬上限检查。通过不同二进制、模型和提示词文件验证内置压缩器的选择。 | [压缩](../crates/os-agent-core/tests/rfc_runtime/compaction.rs) |
+| §7.2 | 用四页宽高比各异的真实 PDF，从文件和 stdin 选择第 1、2、4 页；解码 fd 6 上每条 JSON，读取 PNG 文件的 IHDR 尺寸与权限。 | [PDF 页码](test_pdf_pages.py) |
+| §§9.2–9.6 | 核对四次请求、三次逐次退避延时、耗尽后的 stderr 和退出码；从两个不同 Provider 收到的 IR 检查 opaque 状态。覆盖前置和后置钩子失败、on-exit 的五秒超时、skills 六层覆盖、tips 版本刷新和运行目录回退，以及 Trace 对端断开。 | [Provider](../crates/os-agent-core/tests/rfc_runtime/provider.rs)、[钩子](../crates/os-agent-core/tests/rfc_runtime/hooks.rs)、[Trace](../crates/os-agent-core/tests/rfc_runtime/trace.rs) |
+| §10.2 | 在支持 Landlock 的内核上操作独立测试文件，观察可写范围和只读文件；让测试子进程的内核探测返回 ENOSYS，分别核对 strict、best-effort 的退出码和 Provider 调用。向测试所有的父进程发送 SIGKILL，检查活跃 Provider 或 shell 已终止。 | [沙箱](../crates/os-agent-core/tests/rfc_runtime/platform.rs)、[不可用内核](test_linux_fallback.py)、[父进程退出](../crates/os-agent-core/tests/rfc_runtime/signals.rs) |
 
 ## 复跑
 
@@ -27,9 +32,16 @@ python3 tests/test_distribution.py
 
 安装链路使用真实安装脚本、临时 HOME 和本机 HTTP 服务，CI 在 Linux 与 macOS 的测试任务中运行它。
 
+Linux 组件测试使用 Poppler 和 strace；macOS 可用 Ghostscript 运行同一 PDF 用例。
+
+```sh
+cargo build -p os-agent-core -p agent-tools
+python3 tests/test_pdf_pages.py
+python3 tests/test_linux_fallback.py  # Linux
+```
+
 ## 尚待决定或验证的条款
 
 - 无 frontmatter 的空行及 CRLF 字节语义、Inbox 领取后崩溃的恢复策略、非法 fold 的退出码归属、默认适配器的免鉴权流程，各有独立讨论。[#1](https://github.com/Luthics/os-agent/issues/1) · [#2](https://github.com/Luthics/os-agent/issues/2) · [#3](https://github.com/Luthics/os-agent/issues/3) · [#4](https://github.com/Luthics/os-agent/issues/4)
-- §§4–6 尚需覆盖同时投递、钩子和 Provider 的描述符继承、自动压缩与硬上限的等值和相邻边界，以及忽略 TERM 后的 KILL 回收。
-- §§7–9 尚需覆盖 PDF 页码、跨 Provider 的 opaque 数据、完整的 1/2/4 秒退避、钩子超时、索引六层优先级和 Trace 消费者断开。
-- §10.2 仍需区分可用与不可用 Landlock 内核的行为、父进程异常退出后的子进程回收。§11 在 RFC 中标为 Non-Normative。
+- §6.1 尚需明确估算的字节集合、自动压缩在等值时的行为。§§6.2、9.2 尚需定义旧 WAL 中 opaque 来源未知时的处理，以及切回原 Provider 后如何恢复。[#5](https://github.com/Luthics/os-agent/issues/5) · [#6](https://github.com/Luthics/os-agent/issues/6)
+- 后续逐条核对包括发布脚本的全局配置初始化、真实 msh 超时向 agent 的错误结果回传、每个配置环境变量、不同工具同批提交多个控制帧，以及 wire 级原始 msh 输出。§11 在 RFC 中标为 Non-Normative。
