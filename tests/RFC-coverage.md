@@ -75,3 +75,4 @@ python3 tests/test_linux_fallback.py  # Linux
 - §6.2 的示例允许配置更新只含一个键。恢复用例从 session_init 和 checkpoint 分别开始，交替改变 stderr 和 approval，核对两次恢复产生的 WAL 事件与 Provider 输入。缺失键如何继承待确认。[#17](https://github.com/Luthics/os-agent/issues/17)
 - §§6.1、9.1 的编号用例成功提交最后两个 uint64 编号，再次恢复时检查是否复用旧编号。计数器耗尽时的退出码、只剩一个编号时允许落盘的内容待确认。[#18](https://github.com/Luthics/os-agent/issues/18)
 - §6.2 尚需规定分节的提交边界。用例覆盖 session_init 后缺冻结提示词、checkpoint 后缺冻结提示词或摘要，并与完整分节的结果对照。[#19](https://github.com/Luthics/os-agent/issues/19)
+- §6.1 的水位测试在恢复前交换两个 assistant 的用量，再以 fold 剪去后者，用退出码和实际 Provider 请求验证基准回退。若最后一条回答缺 usage、较早一条有 usage，仍需明确采用哪个基准。[#20](https://github.com/Luthics/os-agent/issues/20)

@@ -234,6 +234,7 @@
 | [`running_out_of_uint64_turn_ids_never_reuses_a_committed_anchor`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L461) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
 | [`checkpoint_recovery_only_dispatches_a_complete_context_at_each_record_boundary`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L503) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
 | [`initial_section_interruption_never_dispatches_without_a_frozen_system_message`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L580) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`resume_uses_the_last_surviving_assistant_usage_for_the_hard_limit`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L634) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
 
 ## `crates/os-agent-proto/src/ctl.rs`
 

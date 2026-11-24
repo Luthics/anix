@@ -628,3 +628,69 @@ fn initial_section_interruption_never_dispatches_without_a_frozen_system_message
         );
     }
 }
+
+// RFC §6.1, §6.2, §6.4, §9.1
+#[test]
+fn resume_uses_the_last_surviving_assistant_usage_for_the_hard_limit() {
+    // The input is short enough to fit entirely under 1024 tokens by any
+    // documented estimate. A reported 4000-token baseline must exceed it.
+    for (earlier, later, fold, code) in [
+        (None, None, false, 0),
+        (Some(4000), Some(10), false, 0),
+        (Some(10), Some(4000), false, 124),
+        (Some(4000), Some(10), true, 124),
+        (Some(10), Some(4000), true, 0),
+        (None, Some(4000), true, 0),
+    ] {
+        let fx = Fixture::new();
+        let history = fx.dir.0.join("history");
+        fs::write(fx.dir.0.join("case.agent"), "prompt").unwrap();
+        let mut rows = vec![
+            section("session_init", 0, 1),
+            msg("system", 0, "frozen"),
+            msg("user", 1, "one"),
+            msg("assistant", 2, "first answer"),
+            msg("user", 3, "two"),
+            msg("assistant", 4, "second answer"),
+        ];
+        for (index, usage) in [(3, earlier), (5, later)] {
+            if let Some(tokens) = usage {
+                rows[index]["usage"] = json!({"input_tokens":tokens, "output_tokens":1});
+            }
+        }
+        if fold {
+            rows.push(json!({"type":"fold","ts":TS,"from_turn":3,"to_turn":4,"summary":"folded"}));
+        }
+        let prefix = lines(&rows);
+        fs::write(&history, &prefix).unwrap();
+        let out = fx.run(fx.agent().args([
+            "--max-tokens",
+            "1024",
+            "--no-compact",
+            "--stderr",
+            "auto",
+            "--approval",
+            "ask",
+            "-c",
+            "history",
+            "case.agent",
+            "--",
+            "next",
+        ]));
+        expect_code(&out, code);
+        assert!(fs::read(&history).unwrap().starts_with(&prefix));
+        assert_eq!(
+            fx.capture.exists(),
+            code == 0,
+            "{earlier:?}, {later:?}, fold={fold}"
+        );
+        if code == 0 {
+            let ir = jsonl(&fx.capture);
+            assert!(ir.iter().any(|r| r["text"] == "first answer"));
+            assert_eq!(ir.iter().any(|r| r["text"] == "second answer"), !fold);
+            assert!(ir.iter().all(|r| r.get("usage").is_none()));
+        } else {
+            assert!(!out.stderr.is_empty());
+        }
+    }
+}
