@@ -64,6 +64,94 @@ fn required_header_fields_and_types_cannot_be_dropped_or_moved() {
 
 // RFC §9.1
 #[test]
+fn meta_and_header_options_have_their_declared_wire_types() {
+    let body = [message("user", 1, "go")];
+    for key in ["cwd", "stderr_mode"] {
+        let mut h = header();
+        h["meta"].as_object_mut().unwrap().remove(key);
+        assert!(IrStream::from_jsonl(&input(&h, &body)).is_err(), "{key}");
+    }
+    for (key, invalid) in [
+        ("params", vec![json!([]), json!("object"), json!(false)]),
+        (
+            "max_output_tokens",
+            vec![json!(-1), json!(1.5), json!(u64::from(u32::MAX) + 1)],
+        ),
+    ] {
+        for value in invalid {
+            let mut h = header();
+            h[key] = value;
+            assert!(IrStream::from_jsonl(&input(&h, &body)).is_err(), "{h}");
+        }
+    }
+    for mode in ["auto", "explicit"] {
+        let mut h = header();
+        h["meta"]["stderr_mode"] = json!(mode);
+        h["max_output_tokens"] = json!(u32::MAX - 1);
+        h["params"] = json!({"future": ["a", {"b":true}]});
+        let ir = IrStream::from_jsonl(&input(&h, &body)).unwrap();
+        ir.validate_invariants().unwrap();
+        let encoded: Value =
+            serde_json::from_str(ir.to_jsonl().unwrap().lines().next().unwrap()).unwrap();
+        assert_eq!(encoded, h);
+    }
+}
+
+// RFC §9.1, §9.2
+#[test]
+fn validated_ir_only_serializes_objects_for_arguments_and_provider_opaque() {
+    let mut violations = Vec::new();
+    let mut head = header();
+    head["tools"] = json!([{"name":"msh","description":"fixture","parameters":{"type":"object"}}]);
+    for field in ["arguments", "provider_opaque"] {
+        for value in [
+            json!({}),
+            json!({"nested":[3]}),
+            json!("x"),
+            json!(false),
+            json!([1]),
+            json!(7),
+        ] {
+            let mut assistant = calls(&["c"]);
+            if field == "arguments" {
+                assistant["tool_calls"][0][field] = value.clone();
+            } else {
+                assistant[field] = value.clone();
+            }
+            let parsed = IrStream::from_jsonl(&input(&head, &[assistant, result("c", 3)]))
+                .and_then(|ir| {
+                    ir.validate_invariants()?;
+                    Ok(ir)
+                });
+            if value.is_object() {
+                assert!(parsed.is_ok(), "{field} = {value}");
+            }
+            if let Ok(ir) = parsed {
+                let wire = ir.to_jsonl().unwrap();
+                let out: Value = serde_json::from_str(wire.lines().nth(1).unwrap()).unwrap();
+                let emitted = if field == "arguments" {
+                    out["tool_calls"][0].get(field)
+                } else {
+                    out.get(field)
+                };
+                if value.is_object() {
+                    assert_eq!(emitted, Some(&value));
+                } else if emitted.is_some_and(|v| !v.is_object())
+                    || (field == "arguments" && emitted.is_none())
+                {
+                    violations.push(format!("{field} = {value}"));
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "non-object fields in validated IR: {violations:?}"
+    );
+}
+
+// RFC §9.1
+#[test]
 fn golden_ir_keeps_frozen_text_extensions_and_attachment_references_without_opening_files() {
     let mut h = header();
     h["x_header"] = json!({"opaque":[1,true]});

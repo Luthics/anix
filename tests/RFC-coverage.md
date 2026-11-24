@@ -70,3 +70,4 @@ python3 tests/test_linux_fallback.py  # Linux
 - §6.2 需明确最后一个完整 JSON 对象缺少 LF 时的恢复策略。用例接受原样拒绝，或保留前缀并成功追加合法 JSONL，逐行检查恢复后的实际文件。[#13](https://github.com/Luthics/os-agent/issues/13)
 - §7.2 待明确 64 KB 的精确字节数及 LF 是否计入。已将完全相同的帧交给发送端和接收端，比较两者在候选边界附近的判定。[#14](https://github.com/Luthics/os-agent/issues/14)
 - §7.1 待明确输出不足 40 行却超过字节阈值时的首尾重叠、单行裁剪和省略数口径。[#15](https://github.com/Luthics/os-agent/issues/15)
+- §§7.2、9.1 的媒体用例核对进入 WAL 和下一次 Provider 请求的 MIME 与绝对路径。非法帧如何反馈、同批其他帧如何处理，待规范确认。[#16](https://github.com/Luthics/os-agent/issues/16)

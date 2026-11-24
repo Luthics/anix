@@ -112,8 +112,9 @@
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`concatenated_and_split_media_frames_keep_order_and_tool_identity_after_resume`](../crates/os-agent-core/tests/rfc_runtime/control.rs#L24) | [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
-| [`two_valid_fold_frames_from_one_tool_are_appended_in_arrival_order`](../crates/os-agent-core/tests/rfc_runtime/control.rs#L97) | [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) · [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
+| [`tool_control_frames_cannot_publish_invalid_media_references_to_wal_or_provider_ir`](../crates/os-agent-core/tests/rfc_runtime/control.rs#L24) | [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
+| [`concatenated_and_split_media_frames_keep_order_and_tool_identity_after_resume`](../crates/os-agent-core/tests/rfc_runtime/control.rs#L115) | [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`two_valid_fold_frames_from_one_tool_are_appended_in_arrival_order`](../crates/os-agent-core/tests/rfc_runtime/control.rs#L188) | [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) · [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
 
 ## `crates/os-agent-core/tests/rfc_runtime/doctor.rs`
 
@@ -258,12 +259,14 @@
 | 测试 | RFC 条款 |
 | --- | --- |
 | [`required_header_fields_and_types_cannot_be_dropped_or_moved`](../crates/os-agent-proto/tests/rfc_ir.rs#L35) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
-| [`golden_ir_keeps_frozen_text_extensions_and_attachment_references_without_opening_files`](../crates/os-agent-proto/tests/rfc_ir.rs#L67) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
-| [`tool_replies_form_a_bijection_and_are_contiguous`](../crates/os-agent-proto/tests/rfc_ir.rs#L90) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
-| [`a_single_tool_result_cannot_close_two_calls_with_the_same_id`](../crates/os-agent-proto/tests/rfc_ir.rs#L118) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
-| [`required_message_fields_and_turn_id_types_hold_for_all_four_roles`](../crates/os-agent-proto/tests/rfc_ir.rs#L128) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
-| [`assistant_requires_text_or_calls_even_with_reasoning_or_opaque_state`](../crates/os-agent-proto/tests/rfc_ir.rs#L163) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
-| [`ordinary_turns_increase_strictly_and_checkpoint_anchor_may_be_shared`](../crates/os-agent-proto/tests/rfc_ir.rs#L182) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
+| [`meta_and_header_options_have_their_declared_wire_types`](../crates/os-agent-proto/tests/rfc_ir.rs#L67) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`validated_ir_only_serializes_objects_for_arguments_and_provider_opaque`](../crates/os-agent-proto/tests/rfc_ir.rs#L102) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`golden_ir_keeps_frozen_text_extensions_and_attachment_references_without_opening_files`](../crates/os-agent-proto/tests/rfc_ir.rs#L155) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`tool_replies_form_a_bijection_and_are_contiguous`](../crates/os-agent-proto/tests/rfc_ir.rs#L178) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`a_single_tool_result_cannot_close_two_calls_with_the_same_id`](../crates/os-agent-proto/tests/rfc_ir.rs#L206) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`required_message_fields_and_turn_id_types_hold_for_all_four_roles`](../crates/os-agent-proto/tests/rfc_ir.rs#L216) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`assistant_requires_text_or_calls_even_with_reasoning_or_opaque_state`](../crates/os-agent-proto/tests/rfc_ir.rs#L251) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`ordinary_turns_increase_strictly_and_checkpoint_anchor_may_be_shared`](../crates/os-agent-proto/tests/rfc_ir.rs#L270) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
 
 ## `crates/provider-openai-responses/tests/rfc_responses.rs`
 

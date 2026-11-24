@@ -19,6 +19,97 @@ fn run(fx: &Fixture) {
     assert!(out.stdout.is_empty() && out.stderr.is_empty());
 }
 
+// RFC §7.2, §9.1, §6.2
+#[test]
+fn tool_control_frames_cannot_publish_invalid_media_references_to_wal_or_provider_ir() {
+    let mut violations = Vec::new();
+    for (mime, absolute) in [
+        ("image/png", true),
+        ("image/png", false),
+        ("text/plain", true),
+    ] {
+        let fx = Fixture::new();
+        let root = &fx.dir.0;
+        fs::write(root.join("case.agent"), "frozen").unwrap();
+        let image = root.join("fixture.png");
+        fs::write(
+            &image,
+            include_bytes!("../../../provider-openai-responses/tests/media/blue.png"),
+        )
+        .unwrap();
+        let path = if absolute {
+            image.as_path()
+        } else {
+            std::path::Path::new("fixture.png")
+        };
+        let frame = json!({"op":"media","mime":mime,"path":path,"source":"fixture"});
+        fs::write(root.join("frame"), format!("{frame}\n")).unwrap();
+        scripted_provider(
+            &fx,
+            &[
+                with_tools([tool(
+                    "emit",
+                    r#"/bin/cat frame > "$AGENT_CTL" && : > delivered"#,
+                )]),
+                success_text("done"),
+            ],
+        );
+        let out = fx.run(fx.agent().args([
+            "-q",
+            "-y",
+            "--shell",
+            "/bin/sh",
+            "-c",
+            "history",
+            "case.agent",
+            "--",
+            "go",
+        ]));
+        assert!(
+            root.join("delivered").is_file(),
+            "{frame}: {:?}",
+            out.stderr
+        );
+        let valid = mime == "image/png" && absolute;
+        if valid {
+            expect_code(&out, 0);
+        }
+        for name in ["history", "request-2"] {
+            let input = root.join(name);
+            if !input.exists() {
+                assert!(!valid, "{name}: {frame}");
+                continue;
+            }
+            let media: Vec<_> = jsonl(&input)
+                .into_iter()
+                .filter(|r| r["role"] == "tool")
+                .flat_map(|r| r["media"].as_array().cloned().unwrap_or_default())
+                .collect();
+            if valid {
+                assert_eq!(media, [json!({"mime":mime,"path":image})]);
+            }
+            // The error policy for malformed control frames is independent of
+            // the schema of records that do reach the provider or the WAL.
+            for item in media {
+                let allowed = matches!(
+                    item["mime"].as_str(),
+                    Some("image/png" | "image/jpeg" | "image/webp" | "image/gif")
+                );
+                let absolute_path = item["path"]
+                    .as_str()
+                    .is_some_and(|s| std::path::Path::new(s).is_absolute());
+                if !allowed || !absolute_path {
+                    violations.push(format!("{name}: {item}"));
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "invalid published attachments: {violations:?}"
+    );
+}
+
 // RFC §7.2, §6.2, §9.1
 #[test]
 fn concatenated_and_split_media_frames_keep_order_and_tool_identity_after_resume() {
