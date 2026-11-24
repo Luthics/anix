@@ -416,3 +416,121 @@ fn background_tip_is_indexed_in_ascii_order_and_can_be_overridden_or_masked_indi
         assert!(!text.contains("local background guide"));
     }
 }
+
+// RFC §4.4, §4.1, §6.2, §9.1
+#[test]
+fn runtime_contract_depends_on_stderr_and_only_changes_at_the_tail_on_resume() {
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    fs::remove_file(root.join("config/agent/hooks/pre-context.d/00-posix-runtime")).unwrap();
+    fs::write(root.join("case.agent"), "keep this prompt").unwrap();
+    let request = |mode: &str, context: &str| {
+        let out =
+            fx.run(
+                fx.agent()
+                    .args(["--stderr", mode, "-c", context, "case.agent", "--", "input"]),
+            );
+        expect_code(&out, 0);
+        assert!(out.stdout.is_empty());
+        if mode == "explicit" {
+            assert!(out.stderr.is_empty());
+        } else {
+            assert!(String::from_utf8(out.stderr).unwrap().contains("ok"));
+        }
+        let ir = jsonl(&fx.capture);
+        assert_eq!(ir[0]["meta"]["stderr_mode"], mode);
+        ir.into_iter()
+            .filter(|row| row["role"] == "system")
+            .map(|row| row["text"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+    let auto = request("auto", "");
+    let explicit = request("explicit", "");
+    assert_ne!(auto, explicit);
+    for prefix in [&auto, &explicit] {
+        assert_eq!(prefix.len(), 1);
+        for token in ["keep this prompt", "$AGENT_OUT", "$AGENT_ERR", "msh"] {
+            assert!(
+                prefix[0].contains(token),
+                "missing {token} in {}",
+                prefix[0]
+            );
+        }
+    }
+    for tool in ["stderr", "aview", "aclr"] {
+        assert!(auto[0].contains(tool), "missing {tool} in {}", auto[0]);
+    }
+    for (first, second, frozen) in [("auto", "explicit", auto), ("explicit", "auto", explicit)] {
+        let wal = format!("{first}.wal");
+        assert_eq!(request(first, &wal), frozen);
+        let drift = request(second, &wal);
+        assert_eq!(drift.len(), 2);
+        assert_eq!(drift[0], frozen[0]);
+        assert!(
+            drift[1].starts_with("<runtime_update>") && drift[1].ends_with("</runtime_update>")
+        );
+        assert!(drift[1].contains(second));
+        assert_eq!(request(second, &wal), drift);
+    }
+}
+
+// RFC §4.4, §8.3, §9.3, §9.4, §9.6
+#[test]
+fn each_builtin_can_be_replaced_globally_then_overridden_or_masked_by_the_project() {
+    use std::os::unix::fs::symlink;
+
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    let global = root.join("config/agent/hooks/pre-context.d");
+    let project = root.join(".agent/hooks/pre-context.d");
+    let skill = root.join(".skills/sample");
+    fs::create_dir_all(&skill).unwrap();
+    fs::write(
+        skill.join("SKILL.md"),
+        "---\nname: sample\ndescription: Example\n---\n",
+    )
+    .unwrap();
+    fs::write(root.join("case.agent"), "SCRIPT_MARKER").unwrap();
+    let capture = || {
+        expect_code(
+            &fx.run(fx.agent().args(["-q", "case.agent", "--", "input"])),
+            0,
+        );
+        jsonl(&fx.capture)[1]["text"].as_str().unwrap().to_owned()
+    };
+    // The other two built-ins stay masked by the fixture in each iteration.
+    for (name, tag) in [
+        ("00-posix-runtime", "$AGENT_OUT"),
+        ("20-skills", "<available_skills>"),
+        ("30-tips", "<runtime_tips>"),
+    ] {
+        let lower = global.join(name);
+        let upper = project.join(name);
+        fs::remove_file(&lower).unwrap();
+        assert!(capture().contains(tag), "{name} absent on first run");
+        executable(
+            &lower,
+            "#!/bin/sh\nexec /usr/bin/sed 's/SCRIPT_MARKER/GLOBAL_MARKER/g'\n",
+        );
+        assert_eq!(capture(), "GLOBAL_MARKER", "{name}");
+        executable(
+            &upper,
+            "#!/bin/sh\nexec /usr/bin/sed 's/SCRIPT_MARKER/PROJECT_MARKER/g'\n",
+        );
+        expect_code(&fx.run(fx.agent().args(["trust", "."])), 0);
+        assert_eq!(capture(), "PROJECT_MARKER", "{name}");
+        for null_link in [false, true] {
+            fs::remove_file(&upper).unwrap();
+            if null_link {
+                symlink("/dev/null", &upper).unwrap();
+            } else {
+                fs::write(&upper, "").unwrap();
+            }
+            expect_code(&fx.run(fx.agent().args(["trust", "."])), 0);
+            assert_eq!(capture(), "SCRIPT_MARKER", "{name} null_link={null_link}");
+        }
+        fs::remove_file(&upper).unwrap();
+        assert_eq!(capture(), "GLOBAL_MARKER");
+        fs::write(&lower, "").unwrap();
+    }
+}

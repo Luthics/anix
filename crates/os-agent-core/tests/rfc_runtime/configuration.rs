@@ -176,7 +176,7 @@ fn every_subset_of_five_layers_selects_highest_priority_model_and_output_limit()
     }
 }
 
-// RFC §3.3, §3.4, §8.2
+// RFC §3.3, §3.4, §7.1, §8.2
 #[test]
 fn scalar_settings_resolve_for_every_subset_of_the_five_override_layers() {
     use clap::Parser;
@@ -221,6 +221,7 @@ fn scalar_settings_resolve_for_every_subset_of_the_five_override_layers() {
                     child.env(format!("AGENT_{}", key.to_ascii_uppercase()), text(&value));
                 }
                 child
+                    .env("MSH_TIMEOUT_SEC", "7")
                     .env("AGENT_CONTEXT", "env.wal")
                     .env("AGENT_INBOX", "env-box")
                     .env("AGENT_IDLE_TIMEOUT", "41");
@@ -290,6 +291,7 @@ fn scalar_settings_resolve_for_every_subset_of_the_five_override_layers() {
         )
         .unwrap();
         let winner = (1..=5).rev().find(|&n| enabled(n)).unwrap_or(0);
+        assert_eq!(cfg.msh_timeout_sec, if has_env { 7 } else { 120 });
         let expected = if winner == 0 {
             json!(["openai-responses", "msh", 20, 128000, 102400, "ask", "auto"])
         } else {
@@ -985,4 +987,62 @@ fn a_named_provider_searches_path_then_libexec_while_a_path_executes_directly() 
     run("driver", Some("second"));
     fs::remove_file(second.join("driver")).unwrap();
     run("driver", Some("libexec"));
+}
+
+// RFC §8.1, §4.1, §8.3
+#[test]
+fn each_xdg_directory_resolves_independently_when_other_overrides_are_absent() {
+    use os_agent_core::config::AgentPaths;
+    use std::path::PathBuf;
+
+    // Resolve the paths in isolated processes. In particular, never create
+    // or chmod the actual per-UID fallback directory on a developer machine.
+    const MASK: &str = "RFC_XDG_MASK";
+    let vars = ["XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR"];
+    let Some(mask) = std::env::var_os(MASK) else {
+        let fx = Fixture::new();
+        let exe = std::env::current_exe().unwrap();
+        for mask in 0..8 {
+            let mut child = fx.command_for(exe.to_str().unwrap());
+            for (bit, key) in vars.iter().enumerate() {
+                child.env_remove(key);
+                if mask & (1 << bit) != 0 {
+                    child.env(key, fx.dir.0.join(key));
+                }
+            }
+            child.env(MASK, mask.to_string()).args(["--exact",
+                "configuration::each_xdg_directory_resolves_independently_when_other_overrides_are_absent"]);
+            let out = fx.run(&mut child);
+            assert!(
+                out.status.success(),
+                "mask {mask:03b}: {}",
+                String::from_utf8_lossy(&out.stdout)
+            );
+        }
+        return;
+    };
+    let mask: u8 = mask.to_str().unwrap().parse().unwrap();
+    let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+    let uid = std::process::Command::new("/usr/bin/id")
+        .arg("-u")
+        .output()
+        .unwrap();
+    assert!(uid.status.success());
+    let uid = String::from_utf8(uid.stdout).unwrap();
+    let fallback = [
+        home.join(".config/agent"),
+        home.join(".local/state/agent"),
+        PathBuf::from(format!("/tmp/agent-{}", uid.trim())),
+    ];
+    let [config, state, runtime] = std::array::from_fn(|bit| {
+        if mask & (1 << bit) == 0 {
+            fallback[bit].clone()
+        } else {
+            home.join(vars[bit]).join("agent")
+        }
+    });
+    let paths = AgentPaths::discover(&home).unwrap();
+    assert_eq!(paths.global_config_file(), config.join("config.toml"));
+    assert_eq!(paths.trusted_registry_file(), state.join("trusted.json"));
+    assert_eq!(paths.journal_socket_path(), runtime.join("journal.sock"));
 }

@@ -274,3 +274,31 @@ fn timeout_reports_124_before_a_finite_longer_command_completes() {
     assert!(start.elapsed() < Duration::from_secs(18));
     assert!(!result.stdout.is_empty());
 }
+
+// RFC §7.1
+#[test]
+fn unconfigured_msh_folds_only_above_200_lines_or_8192_bytes() {
+    // Stay clear of overlapping head/tail ranges, including in byte-only cases.
+    for (lines, bytes, folded) in [
+        (199, 8191, false),
+        (200, 8192, false),
+        (201, 8192, true),
+        (200, 8193, true),
+        (201, 8193, true),
+    ] {
+        let mut input = "x\n".repeat(lines - 1);
+        input.push_str(&"z".repeat(bytes - input.len() - 1));
+        input.push('\n');
+        let out = msh(&format!("printf %s '{input}'")).output().unwrap();
+        assert!(out.status.success());
+        if folded {
+            let summary = String::from_utf8(out.stdout).unwrap();
+            assert_eq!(
+                take_artifact(&folded_file(&summary), "log"),
+                input.as_bytes()
+            );
+        } else {
+            assert_eq!(out.stdout, input.as_bytes(), "lines={lines} bytes={bytes}");
+        }
+    }
+}

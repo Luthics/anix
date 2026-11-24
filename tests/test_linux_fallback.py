@@ -93,8 +93,7 @@ class KernelFallback(unittest.TestCase):
                 self.assertEqual(out.stdout, b"")
                 self.assertEqual((self.root / "request").exists(), policy == "best-effort")
 
-    # RFC §10.3
-    def test_doctor_detects_broken_pipes_and_ineffective_or_unavailable_flock(self):
+    def prepare_doctor(self):
         for name in ("bin/agent", "libexec/agent/msh", "libexec/agent/agent-provider-openai-responses",
                      "libexec/agent/tools/aview", "libexec/agent/tools/aclr"):
             path = self.root / ".local" / name
@@ -106,6 +105,32 @@ class KernelFallback(unittest.TestCase):
         self.process["env"]["LOCAL_KEY"] = "offline-doctor-fixture"
         baseline = subprocess.run([self.binary, "--doctor"], timeout=8, **self.process)
         self.assertEqual(baseline.returncode, 0, baseline.stderr)
+
+    # RFC §10.3
+    def test_doctor_checks_missing_msh_before_diagnosing_invalid_toml(self):
+        self.prepare_doctor()
+        missing = self.root / ".local/libexec/agent/msh"
+        missing.unlink()
+        self.config.joinpath("config.toml").write_text("[broken-table\n")
+        result = subprocess.run(["strace", "-f", "-qq", "-s", "512", "-e", "trace=%file,write,writev",
+                                 "-o", str(self.trace), self.binary, "--doctor"], timeout=10, **self.process)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn(b"msh", result.stderr)
+        lines = self.trace.read_text().splitlines()
+        # Compare the filesystem observation with the first *published* config
+        # failure. This permits preliminary config reads, buffered diagnostics,
+        # and returning immediately after the first failed check.
+        probes = [i for i, line in enumerate(lines) if 'msh"' in line and "ENOENT" in line]
+        self.assertTrue(probes, "no filesystem probe of the missing msh")
+        for i, line in enumerate(lines):
+            if ("write(2," in line or "writev(2," in line) and any(
+                    word in line.lower() for word in ("config", "toml", "broken-table")):
+                self.assertLess(probes[0], i, f"configuration failure preceded msh check:\n{line}\n{lines[probes[0]]}")
+                break
+
+    # RFC §10.3
+    def test_doctor_detects_broken_pipes_and_ineffective_or_unavailable_flock(self):
+        self.prepare_doctor()
         for syscalls, fault, affected, remedy in [
             ("?pipe,pipe2", "error=EMFILE", rb"pipe|/dev/fd", rb"/dev/fd|mount"),
             ("flock", "error=ENOSYS", rb"flock", rb"XDG_RUNTIME_DIR|filesystem"),
