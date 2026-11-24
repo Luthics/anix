@@ -52,7 +52,9 @@ jobs:
 
       - name: Test installed five-binary pipeline
         if: ${{ !cancelled() }}
-        run: python3 tests/test_distribution.py
+        run: |
+          python3 tests/test_distribution.py
+          python3 tests/test_shell_pipeline.py
 
   linux-components:
     name: PDF rendering and Linux kernel fallback

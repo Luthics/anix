@@ -142,19 +142,19 @@ fn repeated_payload_redirection_appends_raw_bytes_in_both_stderr_modes() {
 }
 
 #[test]
-fn nested_tool_receives_control_channels_tools_path_and_no_parent_wal_variable() {
+fn tool_receives_control_channels_tools_path_and_no_parent_model_or_wal() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
     fs::write(root.join("case.agent"), "body").unwrap();
     let tools = root.join(".local/libexec/agent/tools");
     fs::create_dir_all(&tools).unwrap();
     fs::write(tools.join("aclr"), "").unwrap();
-    let cmd = r#"printf '%s\n' "${AGENT_CONTEXT-unset}" "$AGENT_OUT" "$AGENT_ERR" "$AGENT_CTL" "${PATH%%:*}" "$AGENT_MODEL"; if read -r x; then exit 23; fi; exit 0"#;
+    let cmd = r#"printf '%s\n' "${AGENT_CONTEXT-unset}" "$AGENT_OUT" "$AGENT_ERR" "$AGENT_CTL" "${PATH%%:*}" "${AGENT_MODEL-unset}"; if read -r x; then exit 23; fi; exit 0"#;
     scripted_provider(&fx, &[with_tools([tool("env", cmd)]), success_text("done")]);
     let result = fx.run(
         fx.agent()
             .env("AGENT_CONTEXT", "session.wal")
-            .env("AGENT_MODEL", "child-visible")
+            .env("AGENT_MODEL", "parent-only")
             .args(["--shell", "/bin/sh", "-y", "case.agent", "--", "go"]),
     );
     expect_code(&result, 0);
@@ -172,7 +172,7 @@ fn nested_tool_receives_control_channels_tools_path_and_no_parent_wal_variable()
             "/dev/fd/5",
             "/dev/fd/6",
             tools.to_str().unwrap(),
-            "child-visible"
+            "unset"
         ]
     );
 }
@@ -266,5 +266,116 @@ done"#;
             !root.join("leaked").exists(),
             "consumed input inherited by child"
         );
+    }
+}
+
+#[test]
+fn shell_environment_contains_only_observability_effective_approval_and_routed_fds() {
+    use super::executable;
+    use std::collections::BTreeMap;
+
+    // A harmless allowlisted fixture lets us inspect the real environment under
+    // ask and deny as well as auto, without prompting or changing policy.
+    for (cli, yes, inherited_approval, log, trace, expected) in [
+        (&[][..], None, None, None, None, "ask"),
+        (
+            &["-y"][..],
+            None,
+            Some("deny"),
+            Some("info"),
+            Some("events"),
+            "auto",
+        ),
+        (&[][..], Some("true"), None, Some(""), Some(""), "auto"),
+        (
+            &["--approval", "deny"][..],
+            Some("1"),
+            Some("auto"),
+            Some("trace"),
+            Some("deltas"),
+            "deny",
+        ),
+    ] {
+        let fx = Fixture::new();
+        let root = &fx.dir.0;
+        let config = root.join("config/agent/config.toml");
+        fs::write(
+            &config,
+            fs::read_to_string(&config).unwrap() + "\n[approval]\nsafe_commands=['observe']\n",
+        )
+        .unwrap();
+        fs::write(root.join("case.agent"), "body").unwrap();
+        executable(
+            &root.join("observe"),
+            "#!/bin/sh\n/usr/bin/env > observed\n",
+        );
+        scripted_provider(
+            &fx,
+            &[with_tools([tool("t", "observe")]), success_text("finished")],
+        );
+        let mut cmd = fx.agent();
+        cmd.args(cli).envs([
+            ("AGENT_CONTEXT", "parent.wal"),
+            ("AGENT_MODEL", "parent-model"),
+            ("AGENT_PROVIDER", "fixture"),
+            ("AGENT_MAX_TURNS", "6"),
+            ("AGENT_MAX_TOKENS", "8192"),
+            ("AGENT_MAX_OUTPUT_TOKENS", "140"),
+            ("AGENT_COMPACT_THRESHOLD", "0"),
+            ("AGENT_IDLE_TIMEOUT", "7"),
+            ("AGENT_SHELL", "/bin/sh"),
+            ("AGENT_STDERR", "explicit"),
+            ("AGENT_OPAQUE_TEST_KEY", "private-fixture"),
+            ("AGENT_PROVIDER_API_KEY", "fixture-only"),
+            ("AGENT_OUT", "wrong-4"),
+            ("AGENT_ERR", "wrong-5"),
+            ("AGENT_CTL", "wrong-6"),
+            ("OPENAI_API_KEY", "external-placeholder"),
+            ("MY_AGENT_MODEL", "ordinary"),
+            ("AGENTIC_FIXTURE", "ordinary-prefix"),
+            ("AGENT_", "prefix-only"),
+        ]);
+        for (name, value) in [
+            ("AGENT_YES", yes),
+            ("AGENT_APPROVAL", inherited_approval),
+            ("AGENT_LOG", log),
+            ("AGENT_TRACE_LEVEL", trace),
+        ] {
+            if let Some(v) = value {
+                cmd.env(name, v);
+            }
+        }
+        if expected == "deny" {
+            cmd.env("AGENT_INBOX", "parent-mail")
+                .args(["--idle-timeout", "1"]);
+        }
+        expect_code(&fx.run(cmd.args(["case.agent", "--", "go"])), 0);
+        let raw = fs::read_to_string(root.join("observed")).unwrap();
+        let vars: BTreeMap<_, _> = raw.lines().map(|l| l.split_once('=').unwrap()).collect();
+        for (key, value) in [
+            ("OPENAI_API_KEY", "external-placeholder"),
+            ("MY_AGENT_MODEL", "ordinary"),
+            ("AGENTIC_FIXTURE", "ordinary-prefix"),
+        ] {
+            assert_eq!(vars.get(key), Some(&value));
+        }
+        let actual: BTreeMap<_, _> = vars
+            .into_iter()
+            .filter(|(k, _)| k.starts_with("AGENT_"))
+            .collect();
+        let mut allowed = BTreeMap::from([
+            ("AGENT_OUT", "/dev/fd/4"),
+            ("AGENT_ERR", "/dev/fd/5"),
+            ("AGENT_CTL", "/dev/fd/6"),
+            ("AGENT_APPROVAL", expected),
+        ]);
+        if let Some(v) = log {
+            allowed.insert("AGENT_LOG", v);
+        }
+        if let Some(v) = trace {
+            allowed.insert("AGENT_TRACE_LEVEL", v);
+        }
+        assert_eq!(actual, allowed, "cli={cli:?} yes={yes:?}");
+        assert!(root.join("parent.wal").is_file());
     }
 }

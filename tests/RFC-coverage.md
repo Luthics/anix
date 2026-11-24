@@ -21,6 +21,8 @@
 | §7.2 | 用四页宽高比各异的真实 PDF，从文件和 stdin 选择第 1、2、4 页；解码 fd 6 上每条 JSON，读取 PNG 文件的 IHDR 尺寸与权限。 | [PDF 页码](test_pdf_pages.py) |
 | §§9.2–9.6 | 核对四次请求、三次逐次退避延时、耗尽后的 stderr 和退出码；从两个不同 Provider 收到的 IR 检查 opaque 状态。覆盖前置和后置钩子失败、on-exit 的五秒超时、skills 六层覆盖、tips 版本刷新和运行目录回退，以及 Trace 对端断开。 | [Provider](../crates/os-agent-core/tests/rfc_runtime/provider.rs)、[钩子](../crates/os-agent-core/tests/rfc_runtime/hooks.rs)、[Trace](../crates/os-agent-core/tests/rfc_runtime/trace.rs) |
 | §10.2 | 在支持 Landlock 的内核上操作独立测试文件，观察可写范围和只读文件；让测试子进程的内核探测返回 ENOSYS，分别核对 strict、best-effort 的退出码和 Provider 调用。向测试所有的父进程发送 SIGKILL，检查活跃 Provider 或 shell 已终止。 | [沙箱](../crates/os-agent-core/tests/rfc_runtime/platform.rs)、[不可用内核](test_linux_fallback.py)、[父进程退出](../crates/os-agent-core/tests/rfc_runtime/signals.rs) |
+| §§3.4、9.6（178cd0e） | 从 msh 的实际环境核对全部 AGENT_* 键，覆盖观测变量未设、为空和有值、最终审批、侧信道与普通环境变量；两个真实 agent 嵌套执行，验证子模型、WAL、独立预算及 auto/deny。读取 how-to-background.md 的实际索引，再逐项覆盖与屏蔽。 | [环境白名单](../crates/os-agent-core/tests/rfc_runtime/io.rs)、[嵌套进程](test_shell_pipeline.py)、[指南索引](../crates/os-agent-core/tests/rfc_runtime/hooks.rs) |
+| §§6.2、7.1、9.1–9.2、9.5 | 对连续三次折叠的所有活跃锚点，用独立正向模型逐步核对逆读窗口和消耗；四种格式的实际图像经用户和工具消息传入，逐字节比对适配器 HTTP 数据；真实 msh 的超时、shell 解析和 wire 原始输出有独立断言。 | [WAL 正向模型](../crates/os-agent-core/tests/rfc_runtime/wal.rs)、[媒体与计费](../crates/provider-openai-responses/tests/rfc_responses.rs)、[shell 链路](test_shell_pipeline.py) |
 
 ## 复跑
 
@@ -28,6 +30,7 @@
 cargo test -p os-agent-core --test rfc_3_2
 cargo xtest --no-fail-fast
 python3 tests/test_distribution.py
+python3 tests/test_shell_pipeline.py
 ```
 
 安装链路使用真实安装脚本、临时 HOME 和本机 HTTP 服务，CI 在 Linux 与 macOS 的测试任务中运行它。
@@ -44,4 +47,4 @@ python3 tests/test_linux_fallback.py  # Linux
 
 - 无 frontmatter 的空行及 CRLF 字节语义、Inbox 领取后崩溃的恢复策略、非法 fold 的退出码归属、默认适配器的免鉴权流程，各有独立讨论。[#1](https://github.com/Luthics/os-agent/issues/1) · [#2](https://github.com/Luthics/os-agent/issues/2) · [#3](https://github.com/Luthics/os-agent/issues/3) · [#4](https://github.com/Luthics/os-agent/issues/4)
 - §6.1 尚需明确估算的字节集合、自动压缩在等值时的行为。§§6.2、9.2 尚需定义旧 WAL 中 opaque 来源未知时的处理，以及切回原 Provider 后如何恢复。[#5](https://github.com/Luthics/os-agent/issues/5) · [#6](https://github.com/Luthics/os-agent/issues/6)
-- 后续逐条核对包括发布脚本的全局配置初始化、真实 msh 超时向 agent 的错误结果回传、每个配置环境变量、不同工具同批提交多个控制帧，以及 wire 级原始 msh 输出。§11 在 RFC 中标为 Non-Normative。
+- 后续逐条核对包括发布脚本的全局配置初始化、剩余配置变量组合，以及同批提交多个控制帧的顺序。§11 在 RFC 中标为 Non-Normative。

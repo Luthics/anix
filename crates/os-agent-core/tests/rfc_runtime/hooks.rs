@@ -200,3 +200,57 @@ fn tips_are_restored_after_version_drift_and_fall_back_to_runtime_when_state_is_
     assert_eq!(fs::read(&file).unwrap(), original);
     assert!(fallback.contains(fs::canonicalize(file).unwrap().to_str().unwrap()));
 }
+
+#[test]
+fn background_tip_is_indexed_in_ascii_order_and_can_be_overridden_or_masked_individually() {
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    fs::write(root.join("case.agent"), "body").unwrap();
+    fs::remove_file(root.join("config/agent/hooks/pre-context.d/30-tips")).unwrap();
+    let filename = "how-to-background.md";
+    let builtin = root.join(".local/state/agent/builtin-tips").join(filename);
+    let project = root.join(".agent/tips").join(filename);
+    fs::create_dir_all(project.parent().unwrap()).unwrap();
+    for step in 0..3 {
+        if step == 1 {
+            fs::write(&project, "local background guide").unwrap();
+        }
+        if step == 2 {
+            fs::write(&project, "").unwrap();
+        }
+        expect_code(
+            &fx.run(fx.agent().args(["-q", "case.agent", "--", "go"])),
+            0,
+        );
+        let rows = jsonl(&fx.capture);
+        let text = rows[1]["text"].as_str().unwrap();
+        let block = text
+            .split_once("<runtime_tips>")
+            .unwrap()
+            .1
+            .split_once("</runtime_tips>")
+            .unwrap()
+            .0;
+        let paths: Vec<_> = block
+            .lines()
+            .filter(|l| l.starts_with('/'))
+            .map(std::path::Path::new)
+            .collect();
+        let names: Vec<_> = paths.iter().map(|p| p.file_name().unwrap()).collect();
+        assert!(names.windows(2).all(|s| s[0] < s[1]), "{names:?}");
+        assert!(names.iter().any(|n| *n == "how-to-loop.md"));
+        let background: Vec<_> = paths
+            .into_iter()
+            .filter(|p| p.file_name().unwrap() == filename)
+            .collect();
+        match step {
+            0 => {
+                assert_eq!(background, [fs::canonicalize(&builtin).unwrap()]);
+                assert!(fs::metadata(&builtin).unwrap().len() > 0);
+            }
+            1 => assert_eq!(background, [fs::canonicalize(&project).unwrap()]),
+            _ => assert!(background.is_empty()),
+        }
+        assert!(!text.contains("local background guide"));
+    }
+}
