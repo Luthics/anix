@@ -1,6 +1,6 @@
 # v1.0 RFC 测试索引
 
-按用例查找规范原文请打开 [RFC 逐测试索引](RFC-cases.md)。索引读取每个 Rust 和 Python 测试旁的条款标记。下表说明各组测试的观察点。[v1.0.0-RFC.md](../docs/v1.0.0-RFC.md)
+从 RFC 原句查用例、实现检查或待决定的问题，请打开 [RFC 条款验收表](RFC-requirements.md)。从测试函数查 RFC 章节，请打开 [逐测试索引](RFC-cases.md)。下表说明各组测试的观察点。[v1.0.0-RFC.md](../docs/v1.0.0-RFC.md)
 
 | RFC | 已有断言与观察点 | 测试入口 |
 | --- | --- | --- |
@@ -113,3 +113,6 @@ python3 tests/test_linux_fallback.py  # Linux
 - §3.3 对含非标识符字符的文件名尚需定义默认 name。Trace 用例覆盖合规的多点文件名及显式指定 name 的情况。[#26](https://github.com/Luthics/os-agent/issues/26)
 - §3.1 尚需明确同一 CLI 层中别名与完整选项的冲突，以及多次传入同名参数键的处理方式。[#27](https://github.com/Luthics/os-agent/issues/27)
 - §§2、8.1 对带斜杠的相对组件路径尚需指定基准目录。实测仅添加一个空项目配置目录就可能改变全局配置所选的 Provider。[#28](https://github.com/Luthics/os-agent/issues/28)
+- §7.1 允许通过 TOML 配置单条 msh 命令超时，§8.2 尚需明确键名与单位。临时 HOME 中已核实当前实现读取 `[defaults].msh_timeout_sec`。[#29](https://github.com/Luthics/os-agent/issues/29)
+- §10.3 在缺少 msh 且 TOML 损坏时，Linux 先观测到配置错误诊断，之后才探测 msh。§3.1 所说的 Provider 连通性也需与自检清单对齐。[#30](https://github.com/Luthics/os-agent/issues/30) · [#31](https://github.com/Luthics/os-agent/issues/31)
+- §9.5 的通用 error 事件尚需定义触发条件。在 post-tool 钩子失败时，已检查 run_end 与进程退出码一致。[#32](https://github.com/Luthics/os-agent/issues/32)
