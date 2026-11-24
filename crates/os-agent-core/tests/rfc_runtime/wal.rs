@@ -371,3 +371,260 @@ fn all_live_anchors_across_three_successive_folds_match_forward_replay_and_usage
     // 2 first-boundary choices, then 3 or 4, then 3..6; every generated leaf is checked.
     assert_eq!(states.len(), 30);
 }
+
+// RFC §6.2, §9.1
+#[test]
+fn resume_compares_both_contract_fields_after_a_sparse_runtime_update() {
+    let mut discrepancies = Vec::new();
+    for kind in ["session_init", "checkpoint"] {
+        for (stored_patch, stderr, approval, changed) in [
+            (json!({"stderr":"explicit"}), "explicit", "ask", false),
+            (json!({"stderr":"explicit"}), "explicit", "deny", true),
+            (json!({"approval":"deny"}), "auto", "deny", false),
+            (json!({"approval":"deny"}), "explicit", "deny", true),
+        ] {
+            let fx = Fixture::new();
+            let root = &fx.dir.0;
+            fs::write(root.join("case.agent"), "current script").unwrap();
+            let start = if kind == "session_init" { 0 } else { 20 };
+            let mut rows = vec![
+                section(kind, start, 1),
+                msg("system", start, "frozen prefix"),
+            ];
+            if kind == "checkpoint" {
+                rows.push(msg(
+                    "user",
+                    start + 1,
+                    "<checkpoint>\nsummary\n</checkpoint>",
+                ));
+            } else {
+                rows.push(msg("user", 1, "first user message"));
+            }
+            rows.push(json!({"type":"runtime_update","turn_id":start+2,"ts":TS,
+                             "content":"stored update","config":stored_patch}));
+            let original = lines(&rows);
+            let history = root.join("history");
+            fs::write(&history, &original).unwrap();
+            for input in ["first", "second"] {
+                expect_code(
+                    &fx.run(fx.agent().args([
+                        "--stderr",
+                        stderr,
+                        "--approval",
+                        approval,
+                        "-c",
+                        "history",
+                        "case.agent",
+                        "--",
+                        input,
+                    ])),
+                    0,
+                );
+                assert!(fs::read(&history).unwrap().starts_with(&original));
+                let wal = jsonl(&history);
+                let updates: Vec<_> = wal
+                    .iter()
+                    .filter(|r| r["type"] == "runtime_update")
+                    .collect();
+                let ir = jsonl(&fx.capture);
+                assert_eq!(ir[1]["text"], "frozen prefix");
+                let ir_updates: Vec<_> = ir
+                    .iter()
+                    .skip(2)
+                    .filter(|r| r["role"] == "system")
+                    .collect();
+                assert_eq!(ir_updates.len(), updates.len());
+                for (event, message) in updates.iter().zip(ir_updates) {
+                    assert_eq!(message["turn_id"], event["turn_id"]);
+                    assert_eq!(
+                        message["text"],
+                        format!(
+                            "<runtime_update>{}</runtime_update>",
+                            event["content"].as_str().unwrap()
+                        )
+                    );
+                }
+                if updates.len() != 1 + usize::from(changed) {
+                    discrepancies.push(format!("{kind}, {stored_patch}, resumed as {stderr}/{approval} ({input}): {} updates", updates.len()));
+                }
+            }
+        }
+    }
+    assert!(
+        discrepancies.is_empty(),
+        "incorrect drift decisions: {discrepancies:?}"
+    );
+}
+
+// RFC §6.1, §6.2, §9.1
+#[test]
+fn running_out_of_uint64_turn_ids_never_reuses_a_committed_anchor() {
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    fs::write(root.join("case.agent"), "fixture").unwrap();
+    let history = root.join("history");
+    let start = u64::MAX - 4;
+    let prefix = lines(&[
+        section("checkpoint", start, 1),
+        msg("system", start, "frozen"),
+        msg("user", start + 1, "<checkpoint>\nprior\n</checkpoint>"),
+        msg("assistant", start + 2, "old answer"),
+    ]);
+    fs::write(&history, &prefix).unwrap();
+    let run = |text: &str| fx.run(fx.agent().args(["-c", "history", "case.agent", "--", text]));
+    // Exactly two IDs remain for a normal user/assistant exchange.
+    expect_code(&run("last pair"), 0);
+    let before = fs::read(&history).unwrap();
+    assert!(before.starts_with(&prefix));
+    let records = jsonl(&history);
+    assert_eq!(records[records.len() - 2]["turn_id"], u64::MAX - 1);
+    assert_eq!(records.last().unwrap()["turn_id"], u64::MAX);
+    fs::remove_file(&fx.capture).unwrap();
+    let exhausted = run("no unused ID");
+    assert!(fs::read(&history).unwrap().starts_with(&before));
+    let additional: Vec<_> = jsonl(&history)
+        .into_iter()
+        .skip(records.len())
+        .filter(|r| r.get("turn_id").is_some())
+        .collect();
+    assert!(
+        additional.is_empty(),
+        "records appended after u64::MAX: {additional:?}"
+    );
+    assert!(
+        !fx.capture.exists(),
+        "provider received a request with an exhausted turn counter"
+    );
+    assert!(!exhausted.status.success());
+}
+
+// RFC §6.2, §9.1
+#[test]
+fn checkpoint_recovery_only_dispatches_a_complete_context_at_each_record_boundary() {
+    let old = [
+        section("session_init", 0, 1),
+        msg("system", 0, "old frozen"),
+        msg("user", 1, "history before compression"),
+        msg("assistant", 2, "previous answer"),
+    ];
+    let new = [
+        section("checkpoint", 3, 1),
+        msg("system", 3, "new frozen"),
+        msg("user", 4, "<checkpoint>\nsaved summary\n</checkpoint>"),
+    ];
+    let mut broken = Vec::new();
+    for committed in 0..=new.len() {
+        let fx = Fixture::new();
+        let root = &fx.dir.0;
+        fs::write(root.join("case.agent"), "current script").unwrap();
+        let history = root.join("history");
+        let before = [lines(&old), lines(&new[..committed])].concat();
+        fs::write(&history, &before).unwrap();
+        let out = fx.run(
+            fx.agent()
+                .args(["-c", "history", "case.agent", "--", "resume"]),
+        );
+        assert!(fs::read(&history).unwrap().starts_with(&before));
+        if committed == 0 || committed == new.len() {
+            expect_code(&out, 0);
+        }
+        if !fx.capture.exists() {
+            assert!(
+                !out.status.success(),
+                "resume succeeded without serving the new input"
+            );
+            continue;
+        }
+        let rows = jsonl(&fx.capture);
+        assert_eq!(rows[0]["type"], "header");
+        let context = &rows[1..];
+        let last = context.last().unwrap();
+        assert_eq!(last["role"], "user");
+        assert_eq!(last["text"], "<args>resume</args>");
+        let prior_visible = context
+            .first()
+            .is_some_and(|r| r["role"] == "system" && r["text"] == "old frozen")
+            && context
+                .iter()
+                .any(|r| r["text"] == "history before compression")
+            && context.iter().any(|r| r["text"] == "previous answer");
+        let checkpoint_visible = context.first().is_some_and(|r| r["role"] == "system")
+            && context.get(1).is_some_and(|r| {
+                r["role"] == "user"
+                    && r["text"].as_str().is_some_and(|s| {
+                        s.starts_with("<checkpoint>\n") && s.ends_with("\n</checkpoint>")
+                    })
+            });
+        match committed {
+            0 => assert!(prior_visible),
+            3 => {
+                assert!(checkpoint_visible);
+                assert_eq!(context[0]["text"], new[1]["text"]);
+                assert_eq!(context[1]["text"], new[2]["text"]);
+                assert!(!context.iter().any(|r| r["text"] == "previous answer"));
+            }
+            _ if !(prior_visible || checkpoint_visible) => {
+                broken.push((committed, context.to_vec()))
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        broken.is_empty(),
+        "provider saw incomplete checkpoint contexts: {broken:?}"
+    );
+}
+
+// RFC §6.2, §9.1
+#[test]
+fn initial_section_interruption_never_dispatches_without_a_frozen_system_message() {
+    let initial = [
+        section("session_init", 0, 1),
+        msg("system", 0, "original frozen prefix"),
+    ];
+    // Run the complete and empty controls before checking the interrupted case.
+    for committed in [2, 0, 1] {
+        let fx = Fixture::new();
+        let root = &fx.dir.0;
+        fs::write(root.join("case.agent"), "script on restart").unwrap();
+        let history = root.join("history");
+        let prefix = lines(&initial[..committed]);
+        fs::write(&history, &prefix).unwrap();
+        let out = fx.run(fx.agent().args([
+            "-c",
+            "history",
+            "--stderr",
+            "auto",
+            "--approval",
+            "ask",
+            "case.agent",
+            "--",
+            "resume",
+        ]));
+        assert!(fs::read(&history).unwrap().starts_with(&prefix));
+        if committed == 1 && !fx.capture.exists() {
+            assert!(!out.status.success());
+            continue;
+        }
+        expect_code(&out, 0);
+        let expected = if committed == 2 {
+            "original frozen prefix"
+        } else {
+            "script on restart"
+        };
+        let ir = jsonl(&fx.capture);
+        assert_eq!(ir[0]["type"], "header");
+        assert_eq!(
+            ir[1]["role"], "system",
+            "committed rows={committed}: {ir:?}"
+        );
+        assert_eq!(ir[1]["text"], expected);
+        assert_eq!(ir[1]["turn_id"], 0);
+        assert_eq!(ir.last().unwrap()["text"], "<args>resume</args>");
+        let wal = jsonl(&history);
+        assert!(
+            wal.iter()
+                .any(|r| r["role"] == "system" && r["turn_id"] == 0 && r["text"] == expected)
+        );
+    }
+}

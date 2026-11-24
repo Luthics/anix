@@ -89,6 +89,7 @@
 | [`hard_limit_allows_equality_and_blocks_the_first_provider_request_above_it`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L327) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
 | [`auto_compaction_runs_before_inference_and_rechecks_the_new_window_against_the_cap`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L357) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) |
 | [`builtin_compactor_uses_configured_provider_model_and_literal_or_file_prompt`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L416) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§8.2](../docs/v1.0.0-RFC.md?plain=1#L333) |
+| [`two_checkpoints_carry_folded_usage_once_and_refresh_the_prefix_across_processes`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L473) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) |
 
 ## `crates/os-agent-core/tests/rfc_runtime/configuration.rs`
 
@@ -229,6 +230,10 @@
 | [`nonblocking_wal_lock_excludes_second_process_and_is_released_on_close`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L196) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
 | [`resumed_session_reuses_frozen_prefix_and_appends_configuration_drift_once`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L215) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
 | [`all_live_anchors_across_three_successive_folds_match_forward_replay_and_usage`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L347) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`resume_compares_both_contract_fields_after_a_sparse_runtime_update`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L377) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`running_out_of_uint64_turn_ids_never_reuses_a_committed_anchor`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L461) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`checkpoint_recovery_only_dispatches_a_complete_context_at_each_record_boundary`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L503) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`initial_section_interruption_never_dispatches_without_a_frozen_system_message`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L580) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
 
 ## `crates/os-agent-proto/src/ctl.rs`
 
@@ -292,9 +297,10 @@
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`test_unavailable_landlock_warns_or_fails_before_inference`](../tests/test_linux_fallback.py#L36) | [§10.2](../docs/v1.0.0-RFC.md?plain=1#L524) |
-| [`test_doctor_detects_broken_pipes_and_ineffective_or_unavailable_flock`](../tests/test_linux_fallback.py#L49) | [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) |
-| [`test_inbox_polls_new_publications_when_kernel_notifications_are_unavailable`](../tests/test_linux_fallback.py#L76) | [§4.2](../docs/v1.0.0-RFC.md?plain=1#L142) |
+| [`test_archived_wal_growth_does_not_require_reading_the_archive_on_resume`](../tests/test_linux_fallback.py#L36) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`test_unavailable_landlock_warns_or_fails_before_inference`](../tests/test_linux_fallback.py#L84) | [§10.2](../docs/v1.0.0-RFC.md?plain=1#L524) |
+| [`test_doctor_detects_broken_pipes_and_ineffective_or_unavailable_flock`](../tests/test_linux_fallback.py#L97) | [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) |
+| [`test_inbox_polls_new_publications_when_kernel_notifications_are_unavailable`](../tests/test_linux_fallback.py#L124) | [§4.2](../docs/v1.0.0-RFC.md?plain=1#L142) |
 
 ## `tests/test_pdf_pages.py`
 

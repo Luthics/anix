@@ -1,4 +1,4 @@
-"""Linux RFC checks using syscall faults confined to the test-owned process."""
+"""Linux RFC checks using I/O accounting and faults confined to test processes."""
 import json
 import os
 from pathlib import Path
@@ -31,6 +31,54 @@ class KernelFallback(unittest.TestCase):
     def command(self, syscalls, fault, *args):
         return ["strace", "-f", "-qq", "-o", str(self.trace), "-e", f"trace={syscalls}",
                 "-e", f"inject={syscalls}:{fault}", str(self.binary), *args]
+
+    # RFC §6.2, §9.1
+    def test_archived_wal_growth_does_not_require_reading_the_archive_on_resume(self):
+        # Sample the core's actual read-byte counter while it waits on the mock.
+        # Logical reads remain visible even when the filesystem cache is warm.
+        mock = self.root / "mock"
+        script = mock.read_text().replace("/bin/cat > request", '/bin/cat /proc/"$PPID"/io > reads\n/bin/cat > request')
+        mock.write_text(script)
+        ts = "2026-01-02T03:04:05Z"
+        cfg = {"stderr": "explicit", "approval": "ask"}
+        init = {"type": "session_init", "ir_version": 1, "ts": ts, "config": cfg}
+        checkpoint = {"type": "checkpoint", "ir_version": 1, "turn_id": 3, "ts": ts, "config": cfg}
+
+        def message(role, tid, text):
+            return {"type": "message", "role": role, "turn_id": tid, "ts": ts, "text": text}
+
+        active = [checkpoint, message("system", 3, "active prefix"), message("user", 4, "<checkpoint>\ns\n</checkpoint>")]
+        counts = []
+        requests = []
+        sizes = (1 << 20, 32 << 20)
+        chunk = b"x" * (1 << 16)
+        for size in sizes:
+            path = self.root / f"history-{size}"
+            with path.open("wb") as f:
+                f.write(json.dumps(init).encode() + b"\n")
+                # Write a valid, large archived message in bounded memory.
+                row = json.dumps(message("system", 0, "ARCHIVE")).encode()
+                before, after = row.split(b"ARCHIVE")
+                f.write(before)
+                for _ in range(size // len(chunk)):
+                    f.write(chunk)
+                f.write(after + b"\n")
+                for record in [message("user", 1, "archived input"), message("assistant", 2, "archived answer"), *active]:
+                    f.write(json.dumps(record).encode() + b"\n")
+            out = subprocess.run([self.binary, "-q", "-c", path, "case.agent", "--", "resume"],
+                                 timeout=20, **self.process)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            stats = dict(line.split(": ") for line in (self.root / "reads").read_text().splitlines())
+            counts.append(int(stats["rchar"]))
+            request = [json.loads(line) for line in (self.root / "request").read_bytes().splitlines()]
+            self.assertEqual([(r["role"], r["text"]) for r in request[1:]],
+                             [("system", "active prefix"), ("user", "<checkpoint>\ns\n</checkpoint>"),
+                              ("user", "<args>resume</args>")])
+            requests.append(request)
+        self.assertEqual(requests[0], requests[1])
+        # Detect a scan proportional to the extra 31 MiB without prescribing
+        # a particular reverse-reader block size or a wall-clock limit.
+        self.assertLess(counts[1] - counts[0], (sizes[1] - sizes[0]) // 2, counts)
 
     # RFC §10.2
     def test_unavailable_landlock_warns_or_fails_before_inference(self):

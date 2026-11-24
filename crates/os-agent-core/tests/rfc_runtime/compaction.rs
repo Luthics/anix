@@ -467,3 +467,133 @@ printf '%s\n' '{"type":"text_delta","text":"local summary"}' '{"type":"done","fi
         );
     }
 }
+
+// RFC §6.1, §6.2, §9.1, §9.2, §9.3
+#[test]
+fn two_checkpoints_carry_folded_usage_once_and_refresh_the_prefix_across_processes() {
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    hook(&fx);
+    let fold =
+        r#"printf '%s\n' '{"op":"fold","from_turn":1,"summary":"early fold"}' > "$AGENT_CTL""#;
+    let compact = r#"printf '%s\n' '{"op":"compact"}' > "$AGENT_CTL""#;
+    scripted_provider(
+        &fx,
+        &[
+            with_usage(with_tools([tool("a", fold)]), counts(10, 3, 2, 1, 1)),
+            with_usage(with_tools([tool("b", compact)]), counts(13, 5, 3, 2, 2)),
+            with_usage(success_text("summary one"), counts(17, 7, 4, 2, 3)),
+            with_usage(success_text("first final"), counts(19, 11, 5, 3, 4)),
+            with_usage(with_tools([tool("e", compact)]), counts(23, 13, 7, 4, 5)),
+            with_usage(success_text("summary two"), counts(29, 17, 8, 4, 6)),
+            with_usage(success_text("second final"), counts(31, 19, 9, 5, 7)),
+            with_usage(success_text("resumed final"), counts(37, 23, 11, 5, 8)),
+        ],
+    );
+    let run = |prompt: &str, mode: &str, input: &str, usage: Value, session: Value| {
+        fs::write(root.join("case.agent"), prompt).unwrap();
+        expect_code(
+            &fx.run(fx.agent().args([
+                "-c",
+                "history",
+                "-y",
+                "--no-compact",
+                "--shell",
+                "/bin/sh",
+                "--stderr",
+                mode,
+                "case.agent",
+                "--",
+                input,
+            ])),
+            0,
+        );
+        let exit = &jsonl(&root.join("exit.json"))[0];
+        assert_eq!(exit["usage"], usage, "{input}");
+        assert_eq!(exit["session_usage"], session, "{input}");
+    };
+    run(
+        "first prefix",
+        "explicit",
+        "one",
+        counts(59, 26, 14, 8, 10),
+        counts(59, 26, 14, 8, 10),
+    );
+    let first_bytes = fs::read(root.join("history")).unwrap();
+    run(
+        "second prefix",
+        "auto",
+        "two",
+        counts(83, 49, 24, 13, 18),
+        counts(142, 75, 38, 21, 28),
+    );
+    let second_bytes = fs::read(root.join("history")).unwrap();
+    assert!(second_bytes.starts_with(&first_bytes));
+    run(
+        "unused third prefix",
+        "auto",
+        "three",
+        counts(37, 23, 11, 5, 8),
+        counts(179, 98, 49, 26, 36),
+    );
+    assert!(
+        fs::read(root.join("history"))
+            .unwrap()
+            .starts_with(&second_bytes)
+    );
+
+    let wal = jsonl(&root.join("history"));
+    let sections: Vec<_> = wal
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r["type"] == "checkpoint")
+        .collect();
+    assert_eq!(sections.len(), 2);
+    assert_eq!(wal.iter().filter(|r| r["type"] == "fold").count(), 1);
+    for ((index, cp), (mode, prefix, summary, usage, cumulative)) in sections.into_iter().zip([
+        (
+            "explicit",
+            "first prefix",
+            "summary one",
+            counts(17, 7, 4, 2, 3),
+            counts(40, 15, 9, 5, 6),
+        ),
+        (
+            "auto",
+            "second prefix",
+            "summary two",
+            counts(29, 17, 8, 4, 6),
+            counts(111, 56, 29, 16, 21),
+        ),
+    ]) {
+        assert_eq!(cp["ir_version"], 1);
+        assert_eq!(cp["compact_usage"], usage);
+        assert_eq!(cp["cumulative_usage"], cumulative);
+        assert_eq!(cp["config"]["stderr"], mode);
+        assert_eq!(cp["config"]["approval"], "auto");
+        assert_eq!(wal[index + 1]["role"], "system");
+        assert_eq!(wal[index + 1]["turn_id"], cp["turn_id"]);
+        assert_eq!(wal[index + 1]["text"], prefix);
+        assert_eq!(wal[index + 2]["role"], "user");
+        assert_eq!(
+            wal[index + 2]["text"],
+            format!("<checkpoint>\n{summary}\n</checkpoint>")
+        );
+    }
+    // Inference resumes with the new section only. The changed script takes
+    // effect at the second checkpoint, not when opening the WAL afterwards.
+    let ir = jsonl(&root.join("request-8"));
+    let text: Vec<_> = ir[1..]
+        .iter()
+        .map(|r| r["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        text,
+        [
+            "second prefix",
+            "<checkpoint>\nsummary two\n</checkpoint>",
+            "second final",
+            "<args>three</args>"
+        ]
+    );
+}

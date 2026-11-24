@@ -29,6 +29,7 @@
 | §§6.2、9.1–9.4、9.6 | 核对钩子之间传递的 JSONL、冻结与恢复后的文本、适配器发出的中途配置更新、实际 PID 与 PPID；用 XML 解析器提取技能路径，再由真实 msh 按该路径读取正文；分别验证整块 tips 屏蔽后的磁盘和首轮提示。 | [钩子](../crates/os-agent-core/tests/rfc_runtime/hooks.rs)、[适配器](../crates/provider-openai-responses/tests/rfc_responses.rs)、[完整链路](test_shell_pipeline.py) |
 | §§4.2、10.3 | 让 inotify 建立失败后再投递消息，核对 Provider、WAL、done 三处；对自检分别模拟管道创建失败、flock 不可用，以及两个独立独占锁都被错误授予。 | [Linux 系统调用故障注入](test_linux_fallback.py) |
 | §§4.1、4.3、6.1–6.4、9.1–9.2 | 从真实 msh 检查 fd 4–6 的类型和访问模式，重复打开输出侧信道并逐字节核对各自超过 1 MiB 的数据。向正在执行工具的 agent 发送 INT 或 TERM，验证 msh 子命令收到 TERM、WAL 解锁以及重启后的工具配对。对不可读媒体和外部压缩器返回的非法 UTF-8，分别检查 HTTP 请求和 checkpoint 是否提前产生。 | [进程与侧信道](test_shell_pipeline.py)、[适配器](../crates/provider-openai-responses/tests/rfc_responses.rs)、[压缩器](../crates/os-agent-core/tests/rfc_runtime/compaction.rs) |
+| §§6.1–6.2、9.1–9.3 | 在三个独立进程中折叠、压缩两次并恢复，逐项核对两次 checkpoint 的五字段前缀和、on-exit 的本次及会话用量、冻结提示词和摘要。把 WAL 分别截在初始化和压缩的每个完整记录边界，捕获恢复后的首个请求。Linux 用相同活跃窗口、1 MiB 和 32 MiB 的归档对照进程实际读取的字节数。 | [压缩记账](../crates/os-agent-core/tests/rfc_runtime/compaction.rs)、[WAL 恢复](../crates/os-agent-core/tests/rfc_runtime/wal.rs)、[读取量](test_linux_fallback.py) |
 
 ## 复跑
 
@@ -71,3 +72,6 @@ python3 tests/test_linux_fallback.py  # Linux
 - §7.2 待明确 64 KB 的精确字节数及 LF 是否计入。已将完全相同的帧交给发送端和接收端，比较两者在候选边界附近的判定。[#14](https://github.com/Luthics/os-agent/issues/14)
 - §7.1 待明确输出不足 40 行却超过字节阈值时的首尾重叠、单行裁剪和省略数口径。[#15](https://github.com/Luthics/os-agent/issues/15)
 - §§7.2、9.1 的媒体用例核对进入 WAL 和下一次 Provider 请求的 MIME 与绝对路径。非法帧如何反馈、同批其他帧如何处理，待规范确认。[#16](https://github.com/Luthics/os-agent/issues/16)
+- §6.2 的示例允许配置更新只含一个键。恢复用例从 session_init 和 checkpoint 分别开始，交替改变 stderr 和 approval，核对两次恢复产生的 WAL 事件与 Provider 输入。缺失键如何继承待确认。[#17](https://github.com/Luthics/os-agent/issues/17)
+- §§6.1、9.1 的编号用例成功提交最后两个 uint64 编号，再次恢复时检查是否复用旧编号。计数器耗尽时的退出码、只剩一个编号时允许落盘的内容待确认。[#18](https://github.com/Luthics/os-agent/issues/18)
+- §6.2 尚需规定分节的提交边界。用例覆盖 session_init 后缺冻结提示词、checkpoint 后缺冻结提示词或摘要，并与完整分节的结果对照。[#19](https://github.com/Luthics/os-agent/issues/19)
