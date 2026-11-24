@@ -255,3 +255,104 @@ fn unsupported_ir_version_and_missing_media_fail_before_http() {
         }
     }
 }
+
+#[test]
+fn adapter_reads_each_declared_media_type_from_disk_in_user_and_tool_messages() {
+    use base64::Engine;
+    use std::fs;
+    use std::os::unix::fs::DirBuilderExt;
+    use std::path::PathBuf;
+    struct Images(PathBuf);
+    impl Drop for Images {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("os-agent-media-{}-{nonce}", std::process::id()));
+    fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+    let images = Images(dir);
+    let samples: &[(&str, &[u8])] = &[
+        ("image/webp", include_bytes!("media/blue.webp")),
+        ("image/png", include_bytes!("media/blue.png")),
+        ("image/jpeg", include_bytes!("media/blue.jpeg")),
+        ("image/gif", include_bytes!("media/blue.gif")),
+    ];
+    let attachments: Vec<_> = samples
+        .iter()
+        .enumerate()
+        .map(|(idx, (mime, bytes))| {
+            let path = images.0.join(format!("source {idx}"));
+            fs::write(&path, bytes).unwrap();
+            json!({"mime":mime,"path":path})
+        })
+        .collect();
+    let mut tooldefs = head();
+    tooldefs["tools"] =
+        json!([{"name":"msh","description":"fixture","parameters":{"type":"object"}}]);
+    let rows = [
+        tooldefs,
+        prompt(),
+        json!({"role":"user","turn_id":1,"text":"user images","media":attachments[..2]}),
+        json!({"role":"assistant","turn_id":2,"tool_calls":[{"id":"a","name":"msh","arguments":{"cmd":"command"}}]}),
+        json!({"role":"tool","turn_id":3,"text":"tool images","tool_call_id":"a","media":attachments[2..]}),
+    ];
+    let (requests, out, _) = run(
+        &rows,
+        200,
+        &sse(&[json!({"type":"response.completed","response":{}})]),
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(requests.len(), 1);
+    let inputs = requests[0]["input"].as_array().unwrap();
+    assert_eq!(inputs[2]["call_id"], "a");
+    for (parts, expected, text) in [
+        (&inputs[0]["content"], &samples[..2], "user images"),
+        (&inputs[2]["output"], &samples[2..], "tool images"),
+    ] {
+        let parts = parts.as_array().unwrap();
+        assert_eq!(parts.len(), 1 + expected.len());
+        assert_eq!(parts[0]["text"], text);
+        for (part, (mime, bytes)) in parts[1..].iter().zip(expected) {
+            assert_eq!(part["type"], "input_image");
+            let url = part["image_url"].as_str().unwrap();
+            let encoded = url.strip_prefix(&format!("data:{mime};base64,")).unwrap();
+            assert_eq!(
+                base64::engine::general_purpose::STANDARD
+                    .decode(encoded)
+                    .unwrap(),
+                *bytes
+            );
+        }
+    }
+}
+
+#[test]
+fn response_usage_preserves_inclusive_totals_and_available_details() {
+    let usage = json!({"input_tokens":111,"output_tokens":75,
+        "input_tokens_details":{"cached_tokens":90},"output_tokens_details":{"reasoning_tokens":52}});
+    let (_, out, events) = run(
+        &[head(), prompt()],
+        200,
+        &sse(&[json!({"type":"response.completed","response":{"usage":usage}})]),
+    );
+    assert!(out.status.success());
+    let stats: Vec<_> = events.iter().filter(|r| r["type"] == "usage").collect();
+    assert_eq!(stats.len(), 1);
+    for (key, value) in [
+        ("input_tokens", 111),
+        ("output_tokens", 75),
+        ("cached_tokens", 90),
+        ("reasoning_tokens", 52),
+    ] {
+        assert_eq!(stats[0][key], value, "{key}");
+    }
+    assert_eq!(stats[0]["cache_write_tokens"].as_u64().unwrap_or(0), 0);
+}

@@ -208,3 +208,112 @@ fn resumed_session_reuses_frozen_prefix_and_appends_configuration_drift_once() {
         );
     }
 }
+
+/// An intentionally forward-only oracle for §6.2. It truncates a Vec when a
+/// fold occurs and never reads past events again; the implementation replays
+/// the same history in reverse from disk.
+#[derive(Clone)]
+struct FoldHistory {
+    rows: Vec<Value>,
+    visible: Vec<(u64, String, String)>,
+    last_id: u64,
+    input_tokens: u64,
+    output_tokens: u64,
+}
+
+impl FoldHistory {
+    fn append(&mut self, role: &str) {
+        self.last_id += 1;
+        let id = self.last_id;
+        let text = format!("{role}-{id}");
+        let mut row = msg(role, id, &text);
+        if role == "assistant" {
+            // Totals depend on IDs so a dropped or double-counted row is observable.
+            row["usage"] = json!({"input_tokens":id, "output_tokens":1});
+            self.input_tokens += id;
+            self.output_tokens += 1;
+        }
+        self.rows.push(row);
+        self.visible.push((id, role.to_owned(), text));
+    }
+
+    fn fold_at(&mut self, index: usize) {
+        let from = self.visible[index].0;
+        let to = self.last_id;
+        let summary = format!("summary-{}-{from}", self.rows.len());
+        self.rows
+            .push(json!({"type":"fold","ts":TS,"from_turn":from,"to_turn":to,"summary":summary}));
+        self.visible.truncate(index);
+        self.visible.push((
+            from,
+            "user".into(),
+            format!("<folded turns=\"{from}..{to}\">{summary}</folded>"),
+        ));
+    }
+
+    fn check(&self, path: &Path) {
+        fs::write(path, lines(&self.rows)).unwrap();
+        let replayed = replay(path);
+        assert_eq!(replayed.next_turn_id, self.last_id + 1);
+        assert_eq!(replayed.session_usage.input_tokens, self.input_tokens);
+        assert_eq!(replayed.session_usage.output_tokens, self.output_tokens);
+        let actual: Vec<_> = replayed
+            .messages
+            .iter()
+            .map(|m| {
+                let row = serde_json::to_value(m).unwrap();
+                (
+                    m.turn_id(),
+                    row["role"].as_str().unwrap().to_owned(),
+                    row["text"].as_str().unwrap().to_owned(),
+                )
+            })
+            .collect();
+        assert_eq!(actual, self.visible, "history: {:?}", self.rows);
+        let live_usage: Vec<_> = self
+            .visible
+            .iter()
+            .filter(|(_, role, _)| role == "assistant")
+            .map(|(id, _, _)| *id)
+            .collect();
+        assert_eq!(
+            replayed
+                .assistant_usages
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            live_usage
+        );
+    }
+}
+
+#[test]
+fn all_live_anchors_across_three_successive_folds_match_forward_replay_and_usage() {
+    let dir = TempDir::new();
+    let path = dir.0.join("model.wal");
+    let initial = FoldHistory {
+        rows: vec![section("session_init", 0, 1), msg("system", 0, "frozen")],
+        visible: vec![(0, "system".into(), "frozen".into())],
+        last_id: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+    };
+    let mut states = vec![initial];
+    for _ in 0..3 {
+        let mut next = Vec::new();
+        for mut state in states {
+            state.append("user");
+            state.append("assistant");
+            state.check(&path);
+            for i in 1..state.visible.len() {
+                let mut branch = state.clone();
+                branch.fold_at(i);
+                branch.check(&path);
+                next.push(branch);
+            }
+        }
+        states = next;
+    }
+    // 2 first-boundary choices, then 3 or 4, then 3..6; every generated leaf is checked.
+    assert_eq!(states.len(), 30);
+}

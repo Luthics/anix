@@ -340,3 +340,172 @@ fn project_search_stops_at_nearest_configuration_git_or_home_boundary() {
         "fixture-model"
     );
 }
+
+#[test]
+fn provider_resolution_injects_model_base_url_timeout_and_env_or_fallback_key() {
+    use super::executable;
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    let global = root.join("config/agent/config.toml");
+    fs::write(
+        &global,
+        fs::read_to_string(&global).unwrap()
+            + r#"
+[providers.alternate]
+bin="observe-env"
+base_url="http://127.0.0.1:1/fixture"
+timeout_sec=27
+api_key_env="LOCAL_KEY_FIXTURE"
+api_key="configured-placeholder"
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("case.agent"),
+        "---\nprovider: fixture\nmodel: front\n---\nbody",
+    )
+    .unwrap();
+    executable(
+        &root.join("observe-env"),
+        r#"#!/bin/sh
+/bin/cat >/dev/null
+printf '%s\n' "$AGENT_MODEL" "$AGENT_PROVIDER_BASE_URL" "$AGENT_PROVIDER_TIMEOUT_SEC" "$AGENT_PROVIDER_API_KEY" > actual
+printf '%s\n' '{"type":"text_delta","text":"ok"}' '{"type":"done","finish_reason":"stop"}'
+"#,
+    );
+    for (value, expected) in [
+        (None, "configured-placeholder"),
+        (Some(""), "configured-placeholder"),
+        (Some("env-placeholder"), "env-placeholder"),
+    ] {
+        let mut cmd = fx.agent();
+        cmd.env("AGENT_PROVIDER", "alternate")
+            .env("AGENT_MODEL", "env-model")
+            .args(["case.agent", "--", "go"]);
+        if let Some(v) = value {
+            cmd.env("LOCAL_KEY_FIXTURE", v);
+        }
+        expect_code(&fx.run(&mut cmd), 0);
+        let actual = fs::read_to_string(root.join("actual")).unwrap();
+        assert_eq!(
+            actual.lines().collect::<Vec<_>>(),
+            ["env-model", "http://127.0.0.1:1/fixture", "27", expected]
+        );
+    }
+}
+
+#[test]
+fn environment_approval_aliases_and_cli_override_produce_the_expected_tool_effects() {
+    use super::{scripted_provider, success_text, tool, with_tools};
+    for (yes, approval, opts, allowed) in [
+        (None, "deny", &[][..], false),
+        (None, "auto", &[][..], true),
+        (Some("1"), "", &[][..], true),
+        (Some("true"), "", &[][..], true),
+        (Some("true"), "", &["--approval", "deny"][..], false),
+    ] {
+        let fx = Fixture::new();
+        let root = &fx.dir.0;
+        fs::write(
+            root.join("case.agent"),
+            "---\napproval: deny\nstderr: auto\n---\nbody",
+        )
+        .unwrap();
+        scripted_provider(
+            &fx,
+            &[
+                with_tools([tool("x", "printf ran > marker")]),
+                success_text("human prose"),
+            ],
+        );
+        let mut cmd = fx.agent();
+        cmd.env("AGENT_SHELL", "/bin/sh")
+            .env("AGENT_STDERR", "explicit");
+        if let Some(y) = yes {
+            cmd.env("AGENT_YES", y);
+        }
+        if !approval.is_empty() {
+            cmd.env("AGENT_APPROVAL", approval);
+        }
+        let out = fx.run(cmd.args(opts).args(["case.agent", "--", "go"]));
+        expect_code(&out, 0);
+        assert!(out.stderr.is_empty() && out.stdout.is_empty());
+        assert_eq!(root.join("marker").exists(), allowed);
+        let req = jsonl(&root.join("request-2"));
+        assert_eq!(req[0]["meta"]["stderr_mode"], "explicit");
+        assert_eq!(
+            req.last().unwrap()["is_error"].as_bool().unwrap_or(false),
+            !allowed
+        );
+    }
+}
+
+#[test]
+fn invalid_resolved_environment_values_exit_two_before_contacting_the_provider() {
+    for (key, value) in [
+        ("AGENT_PROVIDER", "not-registered"),
+        ("AGENT_MAX_TURNS", "0"),
+        ("AGENT_MAX_TURNS", "4294967296"),
+        ("AGENT_MAX_TOKENS", "1023"),
+        ("AGENT_MAX_OUTPUT_TOKENS", "4294967296"),
+        ("AGENT_COMPACT_THRESHOLD", "-1"),
+        ("AGENT_APPROVAL", "unknown"),
+        ("AGENT_STDERR", "unknown"),
+        ("AGENT_IDLE_TIMEOUT", "-1"),
+    ] {
+        let fx = Fixture::new();
+        fs::write(fx.dir.0.join("case.agent"), "body").unwrap();
+        let out = fx.run(fx.agent().env(key, value).args(["case.agent", "--", "go"]));
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "{key}={value}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(!out.stderr.is_empty() && out.stdout.is_empty() && !fx.capture.exists());
+    }
+}
+
+#[test]
+fn global_and_project_config_reject_unknown_keys_before_any_inference() {
+    for where_ in ["config/agent", ".agent"] {
+        for text in [
+            "unrecognized=true",
+            "[defaults]\nunknown_limit=3",
+            "[providers.fixture]\nunknown_bin='other'",
+        ] {
+            let fx = Fixture::new();
+            let root = &fx.dir.0;
+            let dir = root.join(where_);
+            fs::create_dir_all(&dir).unwrap();
+            let config = dir.join("config.toml");
+            fs::write(config, text).unwrap();
+            fs::write(
+                root.join("case.agent"),
+                "---\nmodel: fixture-model\n---\nbody",
+            )
+            .unwrap();
+            // Use an existing built-in provider even if the deliberately replaced global
+            // file no longer defines "fixture". Its bin is a local recorder on PATH.
+            fs::copy(
+                root.join("record-provider"),
+                root.join("agent-provider-openai-responses"),
+            )
+            .unwrap();
+            let out = fx.run(fx.agent().args([
+                "--provider",
+                "openai-responses",
+                "case.agent",
+                "--",
+                "go",
+            ]));
+            assert_eq!(
+                out.status.code(),
+                Some(2),
+                "{where_}: {text:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert!(!out.stderr.is_empty() && !fx.capture.exists());
+        }
+    }
+}
