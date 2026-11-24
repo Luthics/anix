@@ -54,3 +54,4 @@ python3 tests/test_linux_fallback.py  # Linux
 - §6.1 尚需明确估算的字节集合、自动压缩在等值时的行为。§§6.2、9.2 尚需定义旧 WAL 中 opaque 来源未知时的处理，以及切回原 Provider 后如何恢复。[#5](https://github.com/Luthics/os-agent/issues/5) · [#6](https://github.com/Luthics/os-agent/issues/6)
 - §10.3 的发布安装入口待确认。§10.1 是容器镜像建议，§11 是 Non-Normative。Linux 的内核契约在真实内核与 musl 构建上验证。WSL2 的宿主集成尚未实机验证。
 - 失败尝试已上报用量的 WAL 记账与恢复、多词 safe_commands 的匹配规则和适用模式，各有独立讨论。[#8](https://github.com/Luthics/os-agent/issues/8) · [#9](https://github.com/Luthics/os-agent/issues/9)
+- §5.2 的编辑器失败或空文件场景已验证不会执行命令。下一步返还工具错误、重复询问还是退出，待规范确认。[#10](https://github.com/Luthics/os-agent/issues/10)

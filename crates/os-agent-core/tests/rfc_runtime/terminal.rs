@@ -122,16 +122,19 @@ impl Running {
         }
     }
     fn finish(&mut self, code: i32) {
+        assert_eq!(self.wait_for_exit(), code);
+    }
+    fn wait_for_exit(&mut self) -> i32 {
         let end = Instant::now() + Duration::from_secs(12);
         loop {
             if self.result.exists() {
-                assert_eq!(fs::read_to_string(&self.result).unwrap(), code.to_string());
                 self.slave.take();
                 self.master.take();
             }
             if let Some(status) = self.child.try_wait().unwrap() {
-                assert_eq!(status.code(), Some(code));
-                return;
+                let code = status.code().unwrap();
+                assert_eq!(fs::read_to_string(&self.result).unwrap(), code.to_string());
+                return code;
             }
             assert!(
                 Instant::now() < end,
@@ -298,8 +301,10 @@ fn unsuccessful_or_empty_terminal_edit_runs_neither_original_nor_edited_command(
             .stderr(Stdio::null());
         let mut child = Pty::open().spawn(cmd, root);
         child.until("printf original");
-        child.send(b"e\n");
-        child.finish(0);
+        // An implementation can decline the edit or prompt again. A queued
+        // refusal also terminates that second interaction without approving it.
+        child.send(b"e\nn\n\n");
+        child.wait_for_exit();
         let path = fs::read_to_string(root.join("edit-path")).unwrap();
         assert!(!Path::new(&path).exists());
         assert!(!root.join("ran").exists());

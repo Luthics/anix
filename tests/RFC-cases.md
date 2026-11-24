@@ -195,11 +195,11 @@
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`tty_stdin_uses_args_immediately_or_reads_input_through_eof`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L157) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) |
-| [`approval_choices_use_dev_tty_and_preserve_piped_stdin`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L189) | [§5.1](../docs/v1.0.0-RFC.md?plain=1#L184) · [§5.2](../docs/v1.0.0-RFC.md?plain=1#L190) |
-| [`unsuccessful_or_empty_terminal_edit_runs_neither_original_nor_edited_command`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L274) | [§5.2](../docs/v1.0.0-RFC.md?plain=1#L190) |
-| [`always_approval_is_scoped_to_executable_and_pid_even_with_the_same_wal`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L311) | [§5.1](../docs/v1.0.0-RFC.md?plain=1#L184) · [§5.2](../docs/v1.0.0-RFC.md?plain=1#L190) |
-| [`detached_session_requiring_approval_fails_with_42_without_executing_tool`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L373) | [§5.3](../docs/v1.0.0-RFC.md?plain=1#L199) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L279) |
+| [`tty_stdin_uses_args_immediately_or_reads_input_through_eof`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L160) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) |
+| [`approval_choices_use_dev_tty_and_preserve_piped_stdin`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L192) | [§5.1](../docs/v1.0.0-RFC.md?plain=1#L184) · [§5.2](../docs/v1.0.0-RFC.md?plain=1#L190) |
+| [`unsuccessful_or_empty_terminal_edit_runs_neither_original_nor_edited_command`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L277) | [§5.2](../docs/v1.0.0-RFC.md?plain=1#L190) |
+| [`always_approval_is_scoped_to_executable_and_pid_even_with_the_same_wal`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L316) | [§5.1](../docs/v1.0.0-RFC.md?plain=1#L184) · [§5.2](../docs/v1.0.0-RFC.md?plain=1#L190) |
+| [`detached_session_requiring_approval_fails_with_42_without_executing_tool`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L378) | [§5.3](../docs/v1.0.0-RFC.md?plain=1#L199) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L279) |
 
 ## `crates/os-agent-core/tests/rfc_runtime/trace.rs`
 
@@ -253,8 +253,10 @@
 | [`required_header_fields_and_types_cannot_be_dropped_or_moved`](../crates/os-agent-proto/tests/rfc_ir.rs#L35) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L389) |
 | [`golden_ir_keeps_frozen_text_extensions_and_attachment_references_without_opening_files`](../crates/os-agent-proto/tests/rfc_ir.rs#L67) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L389) |
 | [`tool_replies_form_a_bijection_and_are_contiguous`](../crates/os-agent-proto/tests/rfc_ir.rs#L90) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L389) |
-| [`assistant_requires_text_or_calls_even_with_reasoning_or_opaque_state`](../crates/os-agent-proto/tests/rfc_ir.rs#L118) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L389) |
-| [`ordinary_turns_increase_strictly_and_checkpoint_anchor_may_be_shared`](../crates/os-agent-proto/tests/rfc_ir.rs#L137) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L389) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L227) |
+| [`a_single_tool_result_cannot_close_two_calls_with_the_same_id`](../crates/os-agent-proto/tests/rfc_ir.rs#L118) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L389) |
+| [`required_message_fields_and_turn_id_types_hold_for_all_four_roles`](../crates/os-agent-proto/tests/rfc_ir.rs#L128) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L389) |
+| [`assistant_requires_text_or_calls_even_with_reasoning_or_opaque_state`](../crates/os-agent-proto/tests/rfc_ir.rs#L163) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L389) |
+| [`ordinary_turns_increase_strictly_and_checkpoint_anchor_may_be_shared`](../crates/os-agent-proto/tests/rfc_ir.rs#L182) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L389) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L227) |
 
 ## `crates/provider-openai-responses/tests/rfc_responses.rs`
 

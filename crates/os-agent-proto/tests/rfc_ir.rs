@@ -115,6 +115,51 @@ fn tool_replies_form_a_bijection_and_are_contiguous() {
 
 // RFC §9.1
 #[test]
+fn a_single_tool_result_cannot_close_two_calls_with_the_same_id() {
+    for id in ["call-a", "call-b"] {
+        assert!(valid(&[calls(&[id]), result(id, 3)]));
+        let rows = [calls(&[id, id]), result(id, 3)];
+        assert!(!valid(&rows), "one result closed two calls: {rows:?}");
+    }
+}
+
+// RFC §9.1
+#[test]
+fn required_message_fields_and_turn_id_types_hold_for_all_four_roles() {
+    for (row, required) in [
+        (message("system", 0, "s"), &["role", "turn_id", "text"][..]),
+        (message("user", 1, "u"), &["role", "turn_id", "text"][..]),
+        (message("assistant", 2, "a"), &["role", "turn_id"][..]),
+        (
+            result("t", 3),
+            &["role", "turn_id", "tool_call_id", "text"][..],
+        ),
+    ] {
+        // Check decoding separately from conversation pairing. A standalone
+        // tool row is a valid record and requires its assistant at dispatch.
+        let parses = |r| serde_json::from_value::<os_agent_proto::ir::IrMessage>(r).is_ok();
+        for key in required {
+            let mut missing = row.clone();
+            missing.as_object_mut().unwrap().remove(*key);
+            assert!(!parses(missing), "{} missing {key}", row["role"]);
+        }
+        for (value, accepted) in [
+            (json!(0), true),
+            (json!(u64::MAX), true),
+            (json!(-1), false),
+            (json!(1.5), false),
+            (json!("1"), false),
+            (Value::Null, false),
+        ] {
+            let mut changed = row.clone();
+            changed["turn_id"] = value.clone();
+            assert_eq!(parses(changed), accepted, "{} turn_id={value}", row["role"]);
+        }
+    }
+}
+
+// RFC §9.1
+#[test]
 fn assistant_requires_text_or_calls_even_with_reasoning_or_opaque_state() {
     for extra in [
         json!({}),
