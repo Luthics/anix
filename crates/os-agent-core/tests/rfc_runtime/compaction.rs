@@ -1,0 +1,216 @@
+//! RFC §§6.1–6.2 and 9.2–9.5. Use independently chosen totals and component
+//! counts to detect double counting across tools, compaction and resumed processes.
+use super::{Fixture, done, expect_code, jsonl, scripted_provider, success_text, tool, with_tools};
+use serde_json::{Value, json};
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
+
+fn counts(input: u64, output: u64, cached: u64, write: u64, reasoning: u64) -> Value {
+    json!({"input_tokens":input,"output_tokens":output,"cached_tokens":cached,"cache_write_tokens":write,"reasoning_tokens":reasoning})
+}
+fn with_usage(mut events: Vec<Value>, mut usage: Value) -> Vec<Value> {
+    usage["type"] = json!("usage");
+    events.insert(0, usage);
+    events
+}
+fn hook(fx: &Fixture) {
+    let dir = fx.dir.0.join("config/agent/hooks/on-exit.d");
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("report");
+    fs::write(&path, "#!/bin/sh\n/bin/cat > exit.json\n").unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+}
+#[test]
+fn full_compaction_and_resume_account_for_every_call_without_inflating_watermark() {
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    hook(&fx);
+    fs::write(root.join("case.agent"), "frozen prompt").unwrap();
+    let first = counts(50, 20, 10, 5, 7);
+    let summarize = counts(1230, 6000, 111, 22, 5000);
+    let third = json!({"input_tokens":7,"output_tokens":3});
+    let fourth = counts(10, 4, 1, 2, 3);
+    scripted_provider(
+        &fx,
+        &[
+            with_usage(
+                with_tools([tool(
+                    "c",
+                    r#"printf '%s\n' '{"op":"compact"}' > "$AGENT_CTL""#,
+                )]),
+                first.clone(),
+            ),
+            with_usage(success_text("summary text"), summarize.clone()),
+            with_usage(success_text("first done"), third),
+            with_usage(success_text("resume done"), fourth.clone()),
+        ],
+    );
+    let run = |quiet: bool| {
+        let mut cmd = fx.command_for("/bin/sh");
+        cmd.args(["-c",r#"exec "$1" -y --no-compact --max-tokens 1024 --shell /bin/sh -c history --stderr "$2" case.agent -- input 3>trace"#,"fixture",env!("CARGO_BIN_EXE_agent"),if quiet{"explicit"}else{"auto"}]);
+        let out = fx.run(&mut cmd);
+        expect_code(&out, 0);
+        String::from_utf8(out.stderr).unwrap()
+    };
+    let stderr = run(false);
+    let first_total = counts(1287, 6023, 121, 27, 5007);
+    let wal = jsonl(&root.join("history"));
+    let checkpoint = wal.iter().find(|r| r["type"] == "checkpoint").unwrap();
+    assert_eq!(checkpoint["compact_usage"], summarize);
+    assert_eq!(
+        checkpoint["cumulative_usage"],
+        counts(1280, 6020, 121, 27, 5007)
+    );
+    let assistant: Vec<_> = wal.iter().filter(|r| r["role"] == "assistant").collect();
+    assert_eq!(assistant.len(), 2);
+    assert_eq!(assistant[0]["usage"], first);
+    assert_eq!(assistant[1]["usage"]["input_tokens"], 7);
+    let summary_ir = jsonl(&root.join("request-2"));
+    assert_eq!(summary_ir[0]["tools"], json!([]));
+    let fresh = jsonl(&root.join("request-3"));
+    assert_eq!(fresh.len(), 3);
+    assert_eq!(fresh[1]["role"], "system");
+    assert_eq!(
+        fresh[2]["text"],
+        "<checkpoint>\nsummary text\n</checkpoint>"
+    );
+    for i in 1..=3 {
+        for r in jsonl(&root.join(format!("request-{i}"))) {
+            for key in [
+                "usage",
+                "session_usage",
+                "cumulative_usage",
+                "compact_usage",
+            ] {
+                assert!(r.get(key).is_none(), "{r}");
+            }
+        }
+    }
+    let totals = |run: &Value, session: &Value, watermark: u64| {
+        let trace = jsonl(&root.join("trace"));
+        let hook = &jsonl(&root.join("exit.json"))[0];
+        let end = trace.iter().find(|r| r["type"] == "run_end").unwrap();
+        for row in [hook, end] {
+            assert_eq!(&row["usage"], run);
+            assert_eq!(&row["session_usage"], session);
+            assert_eq!(
+                row["context"],
+                json!({"tokens":watermark,"max_tokens":1024})
+            );
+        }
+    };
+    totals(&first_total, &first_total, 10);
+    let summaries: Vec<_> = stderr
+        .lines()
+        .filter(|l| l.contains("ctx 10/1024"))
+        .collect();
+    assert_eq!(summaries.len(), 1);
+    assert!(summaries[0].contains("run") && summaries[0].contains("total"));
+    let quiet = run(true);
+    assert!(quiet.is_empty(), "{quiet}");
+    totals(&fourth, &counts(1297, 6027, 122, 29, 5010), 14);
+    let restored = jsonl(&root.join("request-4"));
+    assert!(restored.iter().any(|r| r["text"] == "first done"));
+    assert!(!restored.iter().any(|r| r.get("usage").is_some()));
+}
+
+#[test]
+fn tail_fold_aligns_to_assistant_and_removes_the_triggering_tool_call() {
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    fs::write(root.join("case.agent"), "frozen").unwrap();
+    scripted_provider(
+        &fx,
+        &[
+            with_tools([tool("a", "printf alpha"), tool("b", "printf beta")]),
+            with_tools([tool(
+                "fold",
+                r#"printf '%s\n' '{"op":"fold","from_turn":4,"summary":"recap"}' > "$AGENT_CTL""#,
+            )]),
+            success_text("finished"),
+            success_text("resumed"),
+        ],
+    );
+    let args = [
+        "-q",
+        "-y",
+        "--shell",
+        "/bin/sh",
+        "-c",
+        "history",
+        "case.agent",
+        "--",
+        "go",
+    ];
+    expect_code(&fx.run(fx.agent().args(args)), 0);
+    let first = jsonl(&root.join("request-1"));
+    let folded = jsonl(&root.join("request-3"));
+    assert_eq!(folded.len(), 4);
+    assert_eq!(first[1], folded[1]);
+    assert_eq!(first[2], folded[2]);
+    let record = jsonl(&root.join("history"))
+        .into_iter()
+        .find(|r| r["type"] == "fold")
+        .unwrap();
+    assert_eq!(record["from_turn"], 2);
+    let to = record["to_turn"].as_u64().unwrap();
+    assert!(to >= 5);
+    assert_eq!(folded[3]["role"], "user");
+    assert_eq!(
+        folded[3]["text"],
+        format!("<folded turns=\"2..{to}\">recap</folded>")
+    );
+    expect_code(&fx.run(fx.agent().args(args)), 0);
+    let restored = jsonl(&root.join("request-4"));
+    assert_eq!(restored[1..4], folded[1..4]);
+    assert!(restored[4]["turn_id"].as_u64().unwrap() > to);
+}
+
+#[test]
+fn external_compactor_receives_tool_free_ir_and_empty_or_failed_summary_is_fatal() {
+    for (script, code) in [
+        ("printf summary", 0),
+        (":", 1),
+        ("printf discarded; exit 9", 1),
+    ] {
+        let fx = Fixture::new();
+        let root = &fx.dir.0;
+        fs::write(root.join("case.agent"), "prompt").unwrap();
+        let conf = root.join("config/agent/config.toml");
+        let original = fs::read_to_string(&conf).unwrap();
+        fs::write(&conf, original + "\n[compact]\nbin='fixture-compact'\n").unwrap();
+        let compact = root.join("fixture-compact");
+        fs::write(
+            &compact,
+            format!("#!/bin/sh\n/bin/cat > compact.ir\n{script}\n"),
+        )
+        .unwrap();
+        fs::set_permissions(compact, fs::Permissions::from_mode(0o700)).unwrap();
+        scripted_provider(
+            &fx,
+            &[
+                with_tools([tool(
+                    "c",
+                    r#"printf '%s\n' '{"op":"compact"}' > "$AGENT_CTL""#,
+                )]),
+                vec![json!({"type":"text_delta","text":"done"}), done()],
+            ],
+        );
+        let out = fx.run(fx.agent().args([
+            "-q",
+            "-y",
+            "--shell",
+            "/bin/sh",
+            "-c",
+            "history",
+            "case.agent",
+            "--",
+            "go",
+        ]));
+        expect_code(&out, code);
+        assert_eq!(jsonl(&root.join("compact.ir"))[0]["tools"], json!([]));
+        let wal = jsonl(&root.join("history"));
+        assert_eq!(wal.iter().any(|r| r["type"] == "checkpoint"), code == 0);
+        assert_eq!(root.join("request-2").exists(), code == 0);
+    }
+}

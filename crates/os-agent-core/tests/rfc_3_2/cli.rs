@@ -1,100 +1,23 @@
 //! §3.2 rules 1, 3 and 4 through the shipping CLI. A local executable records
 //! exactly the IR seen by the provider. Its capture file also witnesses invocation.
 
-use std::fs::{self, File, Permissions};
-use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
-
+use super::fixture::Fixture;
 use serde_json::{Value, json};
+use std::fs;
 
-use super::TempDir;
-
-struct Fixture {
-    dir: TempDir,
-    capture: PathBuf,
+fn run_script(fixture: &Fixture, script: &[u8]) -> std::process::Output {
+    fs::write(fixture.dir.0.join("case.agent"), script).unwrap();
+    fixture.run(
+        fixture
+            .agent()
+            .args(["--stderr", "explicit", "case.agent", "--", "user input"]),
+    )
 }
 
 impl Fixture {
-    fn new() -> Self {
-        let dir = TempDir::new();
-        let config = dir.0.join("config/agent");
-        let hooks = config.join("hooks/pre-context.d");
-        fs::create_dir_all(&hooks).unwrap();
-        // Mask built-ins using §8.3 so the first system message is just the script body.
-        for name in ["00-posix-runtime", "20-skills", "30-tips"] {
-            fs::write(hooks.join(name), "").unwrap();
-        }
-        fs::write(
-            config.join("config.toml"),
-            r#"
-[defaults]
-model = "fixture-model"
-provider = "fixture"
-
-[providers.fixture]
-bin = "record-provider"
-timeout_sec = 2
-"#,
-        )
-        .unwrap();
-        let provider = dir.0.join("record-provider");
-        fs::write(
-            &provider,
-            r#"#!/bin/sh
-set -eu
-/bin/cat > request.jsonl
-printf '%s\n' '{"type":"text_delta","text":"ok"}' '{"type":"done","finish_reason":"stop"}'
-"#,
-        )
-        .unwrap();
-        fs::set_permissions(&provider, Permissions::from_mode(0o700)).unwrap();
-        let capture = dir.0.join("request.jsonl");
-        Self { dir, capture }
-    }
-
-    fn run(&self, script: &[u8]) -> (Option<i32>, Vec<u8>, Vec<u8>) {
-        let root = &self.dir.0;
-        fs::write(root.join("case.agent"), script).unwrap();
-        let stdout = root.join("stdout");
-        let stderr = root.join("stderr");
-        let mut child = Command::new(env!("CARGO_BIN_EXE_agent"))
-            .env_clear()
-            .env("HOME", root)
-            .env("PATH", root)
-            .env("XDG_CONFIG_HOME", root.join("config"))
-            .env("XDG_RUNTIME_DIR", root.join("run"))
-            .current_dir(root)
-            .args(["--stderr", "explicit", "case.agent", "--", "user input"])
-            .stdin(Stdio::null())
-            .stdout(File::create(&stdout).unwrap())
-            .stderr(File::create(&stderr).unwrap())
-            .spawn()
-            .unwrap();
-        // A regression that waits for input must fail the test without stalling the suite.
-        let deadline = Instant::now() + Duration::from_secs(10);
-        let status = loop {
-            if let Some(status) = child.try_wait().unwrap() {
-                break status;
-            }
-            if Instant::now() >= deadline {
-                let _ = child.kill();
-                let _ = child.wait();
-                panic!("agent timed out for {script:?}");
-            }
-            thread::sleep(Duration::from_millis(10));
-        };
-        (
-            status.code(),
-            fs::read(stdout).unwrap(),
-            fs::read(stderr).unwrap(),
-        )
-    }
-
     fn assert_rejected(&self, label: &str, source: &[u8]) {
-        let (code, stdout, stderr) = self.run(source);
+        let result = run_script(self, source);
+        let (code, stdout, stderr) = (result.status.code(), result.stdout, result.stderr);
         assert_eq!(
             code,
             Some(2),
@@ -120,7 +43,8 @@ printf '%s\n' '{"type":"text_delta","text":"ok"}' '{"type":"done","finish_reason
 fn crlf_script_reaches_the_provider_as_the_intended_system_message() {
     let fixture = Fixture::new();
     let source = "#!fixture --not-the-prompt\r\n---\r\nx-extra: [one, two]\r\nparams: {sample: 7}\r\n---\r\n\r\n  执行任务  \r\n\r\n第二行\r\n\r\n";
-    let (code, stdout, stderr) = fixture.run(source.as_bytes());
+    let result = run_script(&fixture, source.as_bytes());
+    let (code, stdout, stderr) = (result.status.code(), result.stdout, result.stderr);
     assert_eq!(code, Some(0), "{}", String::from_utf8_lossy(&stderr));
     assert!(stdout.is_empty());
     let ir = fs::read_to_string(fixture.capture).unwrap();
