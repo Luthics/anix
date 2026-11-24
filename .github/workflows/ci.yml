@@ -48,6 +48,7 @@ jobs:
         run: cargo xtest --no-fail-fast
       # RFC §3.1, §7.1
       - name: Smoke test binaries
+        if: ${{ !cancelled() }}
         run: |
           cargo build --workspace
           ./target/debug/agent --version

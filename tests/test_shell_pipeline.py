@@ -190,7 +190,7 @@ else:
         self.assertEqual(tool[0]["tool_call_id"], "read")
         self.assertEqual(tool[0]["text"].split("\n", 1)[1].rstrip("\n"), guide.read_text().rstrip("\n"))
 
-    # RFC §4.1
+    # RFC §4.1, §9.1
     def test_open_input_descriptor_defers_inference_until_eof(self):
         (self.root / "first.reply").write_text(
             '{"type":"text_delta","text":"ok"}\n{"type":"done","finish_reason":"stop"}\n')
@@ -201,7 +201,8 @@ else:
                 read_fd, write_fd = os.pipe()
                 reader = stack.enter_context(os.fdopen(read_fd, "rb", buffering=0))
                 writer = stack.enter_context(os.fdopen(write_fd, "wb", buffering=0))
-                writer.write(b"first-\xe4")
+                prefix = "first-\x00\r\n\x7f\u0080\u07ff\u0800\ufffd\u2028\U00010000\U0010ffff"
+                writer.write(prefix.encode("utf-8") + b"\xe4")
                 redirect = "" if fd == 0 else f"exec {fd}<&0; exec </dev/null; "
                 child = subprocess.Popen(["/bin/sh", "-c", redirect + 'exec "$@"', "fixture",
                                           self.agent, "-q", "case.agent"], stdin=reader, cwd=self.root,
@@ -226,13 +227,14 @@ else:
                         child.kill()
                         child.communicate()
                 self.assertEqual((child.returncode, out, err), (0, b"", b""))
-                rows = [json.loads(s) for s in request.read_text().splitlines()]
+                rows = [json.loads(line) for line in request.read_bytes().split(b"\n") if line]
                 users = [r["text"] for r in rows if r.get("role") == "user"]
                 self.assertEqual(len(users), 1)
+                expected = prefix + "中-last"
                 if fd == 0:
-                    self.assertEqual(users[0], "first-中-last")
+                    self.assertEqual(users[0], expected)
                 else:
-                    self.assertRegex(users[0], rf'^<input fd="{fd}">\n?first-中-last\n?</input>$')
+                    self.assertRegex(users[0], rf'^<input fd="{fd}">\n?{re.escape(expected)}\n?</input>$')
 
     # RFC §4.1, §9.5
     def test_inference_can_finish_with_an_open_trace_consumer_that_stops_reading(self):

@@ -60,3 +60,4 @@ python3 tests/test_linux_fallback.py  # Linux
 - 失败尝试已上报用量的 WAL 记账与恢复、多词 safe_commands 的匹配规则和适用模式，各有独立讨论。[#8](https://github.com/Luthics/os-agent/issues/8) · [#9](https://github.com/Luthics/os-agent/issues/9)
 - §5.2 的编辑器失败或空文件场景已验证不会执行命令。下一步返还工具错误、重复询问还是退出，待规范确认。[#10](https://github.com/Luthics/os-agent/issues/10)
 - §9.5 已覆盖 Trace 接收端断开和保持连接但停止读取。缓冲区写满后哪些完整帧可丢弃、恢复时如何处理半帧，待规范确认。[#11](https://github.com/Luthics/os-agent/issues/11)
+- §§4.1、4.2、9.1 中，stdin、附加 FD 和 Inbox 接收的原始字节如何转换为 UTF-8 用户消息，仍需明确非法编码的处理方式。合法 UTF-8 已覆盖分段写入、NUL 和 Unicode 边界。[#12](https://github.com/Luthics/os-agent/issues/12)
