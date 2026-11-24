@@ -54,6 +54,18 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 tests/test_distribution.py
 
+  linux-components:
+    name: PDF rendering and Linux kernel fallback
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils strace
+      - run: cargo build -p agent-tools -p os-agent-core
+      - run: python3 tests/test_pdf_pages.py
+      - run: python3 tests/test_linux_fallback.py
+
   linux-musl-static:
     name: Static Linux musl (x86_64)
     runs-on: ubuntu-latest

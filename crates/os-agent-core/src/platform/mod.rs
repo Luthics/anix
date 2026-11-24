@@ -89,16 +89,8 @@ mod tests {
             caps.dev_fd_available,
             "/dev/fd must exist on POSIX platforms"
         );
-        #[cfg(target_os = "linux")]
-        {
-            assert!(
-                caps.pidfd_supported,
-                "Linux >= 5.13 should support pidfd_open"
-            );
-            assert!(
-                caps.landlock_abi.unwrap_or(0) >= 1,
-                "Expected Landlock ABI >= 1 on Linux test host"
-            );
-        }
+        // §10.2 explicitly supports hosts where pidfd or Landlock is unavailable.
+        // If an ABI is reported, it must designate a supported, positive version.
+        assert_ne!(caps.landlock_abi, Some(0));
     }
 }
