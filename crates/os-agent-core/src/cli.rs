@@ -25,7 +25,8 @@ pub enum StderrArg {
 #[command(
     name = "agent",
     about = "OS Agent — POSIX-native Agent runtime",
-    disable_version_flag = true
+    disable_version_flag = true,
+    args_conflicts_with_subcommands = true
 )]
 pub struct Cli {
     /// Print version and supported ir_version.
@@ -104,8 +105,7 @@ pub struct Cli {
     /// Path to the `*.agent` script to execute.
     pub script: Option<PathBuf>,
 
-    /// Positional script arguments passed after `--`.
-    #[arg(last = true)]
+    /// Positional script arguments (passed directly or after `--`).
     pub script_args: Vec<String>,
 }
 
@@ -193,12 +193,57 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_script_and_args() {
+    fn parses_script_and_args_with_double_dash() {
         let cli = Cli::try_parse_from(["agent", "-y", "-q", "audit.agent", "--", "HEAD~1"])
             .expect("parse cli");
         assert!(cli.yes);
         assert!(cli.quiet);
         assert_eq!(cli.script, Some(PathBuf::from("audit.agent")));
         assert_eq!(cli.script_args, vec!["HEAD~1"]);
+
+        let cli = Cli::try_parse_from(["agent", "bash.agent", "-y", "--", "-q", "-n", "5"])
+            .expect("parse hyphenated args after --");
+        assert!(cli.yes);
+        assert!(!cli.quiet);
+        assert_eq!(cli.script, Some(PathBuf::from("bash.agent")));
+        assert_eq!(cli.script_args, vec!["-q", "-n", "5"]);
+    }
+
+    #[test]
+    fn parses_direct_and_quoted_script_args_without_double_dash() {
+        let cli = Cli::try_parse_from(["agent", "bash.agent", "git log -n 5"])
+            .expect("parse quoted string with embedded flags");
+        assert_eq!(cli.script, Some(PathBuf::from("bash.agent")));
+        assert_eq!(cli.script_args, vec!["git log -n 5"]);
+
+        let cli =
+            Cli::try_parse_from(["agent", "bash.agent", "-y", "-c", "", "check", "disk", "-q"])
+                .expect("parse mixed flags and direct positional args");
+        assert!(cli.yes);
+        assert!(cli.quiet);
+        assert_eq!(cli.context.as_deref(), Some(""));
+        assert_eq!(cli.script, Some(PathBuf::from("bash.agent")));
+        assert_eq!(cli.script_args, vec!["check", "disk"]);
+
+        let cli = Cli::try_parse_from(["agent", "bash.agent", ""])
+            .expect("parse empty quoted script arg");
+        assert_eq!(cli.script, Some(PathBuf::from("bash.agent")));
+        assert_eq!(cli.script_args, vec![""]);
+    }
+
+    #[test]
+    fn trust_subcommand_does_not_conflict_with_script_args() {
+        let cli = Cli::try_parse_from(["agent", "trust", "./proj"]).expect("parse trust");
+        assert!(
+            matches!(cli.command, Some(SubCommand::Trust { ref path }) if path == &PathBuf::from("./proj"))
+        );
+        assert_eq!(cli.script, None);
+        assert!(cli.script_args.is_empty());
+
+        let cli = Cli::try_parse_from(["agent", "./bash.agent", "trust", "me"])
+            .expect("parse script arg literally named trust");
+        assert!(cli.command.is_none());
+        assert_eq!(cli.script, Some(PathBuf::from("./bash.agent")));
+        assert_eq!(cli.script_args, vec!["trust", "me"]);
     }
 }
