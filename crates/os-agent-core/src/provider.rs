@@ -1,6 +1,7 @@
 //! External Provider adapter runner (`git-remote-*` pattern), streaming JSONL event parser,
 //! and main-process exponential backoff retry (1s / 2s / 4s, max 3 retries) (Section 9.2).
 
+use std::collections::HashSet;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
@@ -28,19 +29,36 @@ pub enum ProviderError {
     Trust(#[from] TrustError),
     #[error("provider `{provider}` timed out after {timeout_sec}s")]
     Timeout { provider: String, timeout_sec: u64 },
+    #[error("provider `{provider}` truncated before producing output: {message}")]
+    OutputTruncatedEmpty {
+        provider: String,
+        message: String,
+        usage: Option<TokenUsage>,
+    },
     #[error("interrupted by signal")]
     Interrupted(ExitCode),
     #[error("provider `{provider}` failed: {message}")]
-    Failed { provider: String, message: String },
+    Failed {
+        provider: String,
+        message: String,
+        usage: Option<TokenUsage>,
+    },
 }
 
 impl ProviderError {
     pub fn exit_code(&self) -> ExitCode {
         match self {
             Self::Trust(_) => ExitCode::PermissionDenied,
-            Self::Timeout { .. } => ExitCode::TimeoutOrBudget,
+            Self::Timeout { .. } | Self::OutputTruncatedEmpty { .. } => ExitCode::TimeoutOrBudget,
             Self::Interrupted(code) => *code,
             Self::Failed { .. } => ExitCode::RuntimeError,
+        }
+    }
+
+    pub fn usage(&self) -> Option<TokenUsage> {
+        match self {
+            Self::OutputTruncatedEmpty { usage, .. } | Self::Failed { usage, .. } => *usage,
+            Self::Trust(_) | Self::Timeout { .. } | Self::Interrupted(_) => None,
         }
     }
 }
@@ -61,11 +79,13 @@ struct SingleAttemptFailure {
     message: String,
     retryable: bool,
     timed_out: bool,
+    output_truncated_empty: bool,
     interrupted: Option<ExitCode>,
     provider_stderr: String,
     partial_text: String,
     partial_reasoning: String,
     last_delta_ts: Option<String>,
+    usage: Option<TokenUsage>,
     elapsed_ms: u64,
 }
 
@@ -92,6 +112,7 @@ pub fn invoke_provider(
     let ir_jsonl = stream.to_jsonl().map_err(|e| ProviderError::Failed {
         provider: provider_cfg.name.clone(),
         message: format!("failed to serialize Canonical IR: {e}"),
+        usage: None,
     })?;
 
     if tracer.is_enabled() {
@@ -105,6 +126,8 @@ pub fn invoke_provider(
     let (api_key, _) = provider_cfg.resolve_api_key();
 
     let max_attempts = 1 + RETRY_DELAYS_SEC.len();
+    let mut accumulated_failed_usage = TokenUsage::default();
+    let mut saw_failed_usage = false;
     for attempt in 1..=max_attempts {
         if let Some(code) = signals.termination_exit_code() {
             return Err(ProviderError::Interrupted(code));
@@ -153,6 +176,11 @@ pub fn invoke_provider(
                     return Err(ProviderError::Interrupted(code));
                 }
 
+                if let Some(ref u) = fail.usage {
+                    accumulated_failed_usage.add_assign(u);
+                    saw_failed_usage = true;
+                }
+
                 // Section 9.5: Persist rich `provider_error` trace on every failure/retry.
                 let mut err_fields = Map::new();
                 err_fields.insert("provider".into(), Value::String(provider_cfg.name.clone()));
@@ -180,12 +208,25 @@ pub fn invoke_provider(
                 if let Some(ts) = fail.last_delta_ts {
                     err_fields.insert("last_delta_ts".into(), Value::String(ts));
                 }
+                if let Some(u) = fail.usage
+                    && let Ok(val) = serde_json::to_value(u.normalized_5())
+                {
+                    err_fields.insert("usage".into(), val);
+                }
                 tracer.emit_event("provider_error", err_fields);
 
                 if fail.timed_out {
                     return Err(ProviderError::Timeout {
                         provider: provider_cfg.name.clone(),
                         timeout_sec: provider_cfg.timeout_sec,
+                    });
+                }
+
+                if fail.output_truncated_empty {
+                    return Err(ProviderError::OutputTruncatedEmpty {
+                        provider: provider_cfg.name.clone(),
+                        message: fail.message,
+                        usage: saw_failed_usage.then_some(accumulated_failed_usage),
                     });
                 }
 
@@ -217,6 +258,7 @@ pub fn invoke_provider(
                 return Err(ProviderError::Failed {
                     provider: provider_cfg.name.clone(),
                     message: detail,
+                    usage: saw_failed_usage.then_some(accumulated_failed_usage),
                 });
             }
         }
@@ -225,6 +267,7 @@ pub fn invoke_provider(
     Err(ProviderError::Failed {
         provider: provider_cfg.name.clone(),
         message: "provider retry attempts exhausted".into(),
+        usage: saw_failed_usage.then_some(accumulated_failed_usage),
     })
 }
 
@@ -281,11 +324,13 @@ fn run_single_attempt(
                 message: format!("failed to execute `{}`: {err}", bin_path.display()),
                 retryable: false,
                 timed_out: false,
+                output_truncated_empty: false,
                 interrupted: None,
                 provider_stderr: String::new(),
                 partial_text: String::new(),
                 partial_reasoning: String::new(),
                 last_delta_ts: None,
+                usage: None,
                 elapsed_ms: started.elapsed().as_millis() as u64,
             }));
         }
@@ -348,6 +393,7 @@ fn run_single_attempt(
     let mut text = String::new();
     let mut reasoning = String::new();
     let mut tool_calls: Vec<ToolCall> = Vec::new();
+    let mut seen_tool_call_ids: HashSet<String> = HashSet::new();
     let mut usage: Option<TokenUsage> = None;
     let mut provider_opaque: Option<Value> = None;
     let mut finish_reason: Option<String> = None;
@@ -422,11 +468,13 @@ fn run_single_attempt(
                         name,
                         arguments,
                     } => {
-                        tool_calls.push(ToolCall {
-                            id,
-                            name,
-                            arguments,
-                        });
+                        if !id.is_empty() && seen_tool_call_ids.insert(id.clone()) {
+                            tool_calls.push(ToolCall {
+                                id,
+                                name,
+                                arguments,
+                            });
+                        }
                     }
                     ProviderEvent::Usage {
                         input_tokens,
@@ -490,11 +538,13 @@ fn run_single_attempt(
             message: "interrupted by signal".into(),
             retryable: false,
             timed_out: false,
+            output_truncated_empty: false,
             interrupted,
             provider_stderr: String::new(),
             partial_text: text,
             partial_reasoning: reasoning,
             last_delta_ts,
+            usage,
             elapsed_ms,
         }));
     }
@@ -505,11 +555,13 @@ fn run_single_attempt(
             message: format!("provider timed out after {}s", provider_cfg.timeout_sec),
             retryable: false,
             timed_out: true,
+            output_truncated_empty: false,
             interrupted: None,
             provider_stderr: String::new(),
             partial_text: text,
             partial_reasoning: reasoning,
             last_delta_ts,
+            usage,
             elapsed_ms,
         }));
     }
@@ -524,11 +576,13 @@ fn run_single_attempt(
             message: format!("provider timed out after {}s", provider_cfg.timeout_sec),
             retryable: false,
             timed_out: true,
+            output_truncated_empty: false,
             interrupted: None,
             provider_stderr,
             partial_text: text,
             partial_reasoning: reasoning,
             last_delta_ts,
+            usage,
             elapsed_ms,
         }));
     }
@@ -555,11 +609,53 @@ fn run_single_attempt(
             message,
             retryable,
             timed_out: false,
+            output_truncated_empty: false,
             interrupted: None,
             provider_stderr,
             partial_text: text,
             partial_reasoning: reasoning,
             last_delta_ts,
+            usage,
+            elapsed_ms,
+        }));
+    }
+
+    let finish_reason = finish_reason.unwrap_or_else(|| "stop".into());
+
+    // Section 9.1: An assistant turn must NEVER have both empty `text` and empty `tool_calls`.
+    // Reject before writing to WAL so a reasoning-truncated or empty upstream reply can never
+    // poison a persistent `-c` session:
+    // - `length` / `max_tokens`: deterministic budget exhaustion -> fail fast (exit 124, no retry).
+    // - Other finish reasons: transient empty completion -> retryable with exponential backoff.
+    if text.is_empty() && tool_calls.is_empty() {
+        let is_length = matches!(finish_reason.as_str(), "length" | "max_tokens");
+        let (code, message, retryable) = if is_length {
+            (
+                "output_truncated_empty".into(),
+                "model exhausted output token limit without producing text or tool calls (increase --max-output-tokens or lower reasoning_effort)".into(),
+                false,
+            )
+        } else {
+            (
+                "empty_response".into(),
+                format!(
+                    "provider returned empty response (finish_reason={finish_reason}) with neither text nor tool calls"
+                ),
+                true,
+            )
+        };
+        return Err(Box::new(SingleAttemptFailure {
+            code,
+            message,
+            retryable,
+            timed_out: false,
+            output_truncated_empty: is_length,
+            interrupted: None,
+            provider_stderr,
+            partial_text: text,
+            partial_reasoning: reasoning,
+            last_delta_ts,
+            usage,
             elapsed_ms,
         }));
     }
@@ -570,7 +666,7 @@ fn run_single_attempt(
         tool_calls,
         usage,
         provider_opaque,
-        finish_reason: finish_reason.unwrap_or_else(|| "stop".into()),
+        finish_reason,
     })
 }
 
