@@ -6,6 +6,7 @@ use std::os::unix::fs::{PermissionsExt, symlink};
 
 use super::executable;
 
+// RFC §4.2, §6.2
 #[test]
 fn inbox_observes_only_published_files_in_ascii_order_and_moves_them_after_commit() {
     let fx = Fixture::new();
@@ -83,6 +84,7 @@ fn inbox_observes_only_published_files_in_ascii_order_and_moves_them_after_commi
     }
 }
 
+// RFC §5.1, §6.4
 #[test]
 fn deny_and_fail_on_deny_differ_in_exit_status_tool_reply_and_side_effects() {
     for (options, code, runs) in [
@@ -128,6 +130,7 @@ fn deny_and_fail_on_deny_differ_in_exit_status_tool_reply_and_side_effects() {
     }
 }
 
+// RFC §3.3, §6.4
 #[test]
 fn max_turns_stops_before_another_request_and_success_on_last_turn_is_allowed() {
     for first_is_final in [true, false] {
@@ -155,6 +158,7 @@ fn max_turns_stops_before_another_request_and_success_on_last_turn_is_allowed() 
     }
 }
 
+// RFC §8.3, §9.3
 #[test]
 fn pre_context_hooks_merge_in_ascii_order_with_override_and_two_masks() {
     let fx = Fixture::new();
@@ -185,6 +189,7 @@ fn pre_context_hooks_merge_in_ascii_order_with_override_and_two_masks() {
     );
 }
 
+// RFC §8.3
 #[test]
 fn new_and_modified_project_hooks_require_explicit_trust() {
     let fx = Fixture::new();
@@ -200,10 +205,7 @@ fn new_and_modified_project_hooks_require_explicit_trust() {
         expect_code(&out, 42);
         assert!(!root.join("ran").exists() && !fx.capture.exists());
         expect_code(&fx.run(fx.agent().args(["trust", "."])), 0);
-        let registry: serde_json::Value = serde_json::from_slice(
-            &fs::read(root.join(".local/state/agent/trusted.json")).unwrap(),
-        )
-        .unwrap();
+        let registry = trust_registry(root);
         let real = fs::canonicalize(&hook).unwrap();
         use sha2::{Digest, Sha256};
         let digest = format!("{:x}", Sha256::digest(fs::read(&hook).unwrap()));
@@ -218,6 +220,84 @@ fn new_and_modified_project_hooks_require_explicit_trust() {
     }
 }
 
+// RFC §8.3, §6.1
+#[test]
+fn project_provider_and_compactor_each_require_trust_after_a_content_change() {
+    use sha2::{Digest, Sha256};
+    for which in ["adapter", "summarizer"] {
+        let fx = Fixture::new();
+        let root = &fx.dir.0;
+        fs::write(root.join("case.agent"), "body").unwrap();
+        let project = root.join(".agent");
+        fs::create_dir_all(&project).unwrap();
+        let bin = root.join(which);
+        let config = if which == "adapter" {
+            let body = fs::read_to_string(root.join("record-provider")).unwrap();
+            executable(&bin, &body);
+            format!("[providers.fixture]\nbin='./{which}'\n")
+        } else {
+            executable(
+                &bin,
+                "#!/bin/sh\n/bin/cat > compact-input\nprintf summary\n",
+            );
+            let compact = r#"printf '%s\n' '{"op":"compact"}' > "$AGENT_CTL""#;
+            scripted_provider(
+                &fx,
+                &[
+                    with_tools([tool("compact", compact)]),
+                    success_text("finished"),
+                ],
+            );
+            format!("[compact]\nbin='./{which}'\n")
+        };
+        fs::write(project.join("config.toml"), config).unwrap();
+        let run = || {
+            fs::write(root.join("count"), "0\n").unwrap();
+            fx.run(
+                fx.agent()
+                    .args(["-q", "-y", "--shell", "/bin/sh", "case.agent", "--", "go"]),
+            )
+        };
+        let real = fs::canonicalize(&bin).unwrap();
+        let check_denial = || {
+            let result = run();
+            expect_code(&result, 42);
+            assert!(
+                String::from_utf8(result.stderr)
+                    .unwrap()
+                    .contains(real.to_str().unwrap())
+            );
+        };
+        let capture = if which == "adapter" {
+            &fx.capture
+        } else {
+            &root.join("compact-input")
+        };
+        check_denial();
+        assert!(!capture.exists());
+        expect_code(&fx.run(fx.agent().args(["trust", "."])), 0);
+        let registry = trust_registry(root);
+        let digest = format!("{:x}", Sha256::digest(fs::read(&bin).unwrap()));
+        assert_eq!(registry["hooks"][real.to_str().unwrap()]["sha256"], digest);
+        expect_code(&run(), 0);
+        assert!(capture.is_file());
+        fs::remove_file(capture).unwrap();
+        fs::write(
+            &bin,
+            fs::read_to_string(&bin).unwrap() + "\n# fixture revision\n",
+        )
+        .unwrap();
+        check_denial();
+        assert!(!capture.exists());
+    }
+}
+
+fn trust_registry(root: &std::path::Path) -> serde_json::Value {
+    serde_json::from_slice(&fs::read(root.join(".local/state/agent/trusted.json")).unwrap())
+        .unwrap()
+}
+
+// RFC §9.3, §9.5
 #[test]
 fn post_tool_filters_the_model_result_and_on_exit_failure_keeps_primary_status() {
     let fx = Fixture::new();
@@ -267,6 +347,7 @@ printf '%s\n' '{"turn_id":3,"tool_call_id":"t","cmd":"printf before","exit_code"
     );
 }
 
+// RFC §4.4, §9.4, §9.6
 #[test]
 fn frozen_context_lists_skill_metadata_and_tip_paths_but_leaves_bodies_on_disk() {
     let fx = Fixture::new();
@@ -329,6 +410,7 @@ fn frozen_context_lists_skill_metadata_and_tip_paths_but_leaves_bodies_on_disk()
     );
 }
 
+// RFC §9.2, §9.5
 #[test]
 fn provider_failure_after_partial_text_retries_with_unchanged_ir_and_emits_trace_evidence() {
     let fx = Fixture::new();

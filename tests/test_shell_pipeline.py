@@ -2,11 +2,15 @@
 
 Build both executables first. OS_AGENT_BIN_DIR can select another build.
 """
+from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
+import pty
+import re
 import subprocess
 import tempfile
+import tty
 import unittest
 
 
@@ -58,12 +62,79 @@ fi
         self.assertEqual((reply["role"], reply["tool_call_id"]), ("tool", "fixture-id"))
         return result, reply
 
+    # RFC §4.1, §4.3
+    def test_stdout_and_stderr_terminal_modes_are_independent(self):
+        cmd = r"""printf 'a\000\377b' > "$AGENT_OUT"; printf 'human\n' > "$AGENT_ERR" """
+        reply = [{"type": "reasoning_delta", "text": "reasoning-fixture"},
+                 {"type": "tool_call", "id": "tty-tool", "name": "msh", "arguments": {"cmd": cmd}},
+                 {"type": "done", "finish_reason": "tool_calls"}]
+        (self.root / "first.reply").write_text("".join(json.dumps(v) + "\n" for v in reply))
+
+        def channel(stack, is_terminal):
+            if not is_terminal:
+                stream = stack.enter_context(tempfile.TemporaryFile())
+
+                def read():
+                    stream.seek(0)
+                    return stream.read()
+                return stream, read
+            master, slave = pty.openpty()
+            stack.callback(os.close, master)
+            stack.callback(os.close, slave)
+            tty.setraw(slave)
+            os.set_blocking(master, False)
+
+            def read():
+                data = bytearray()
+                while True:
+                    try:
+                        chunk = os.read(master, 8192)
+                    except BlockingIOError:
+                        break
+                    if not chunk:
+                        break
+                    data.extend(chunk)
+                return bytes(data)
+            return slave, read
+
+        for out_tty in (True, False):
+            for err_tty in (True, False):
+                for mode in ("auto", "explicit"):
+                    with self.subTest(stdout_tty=out_tty, stderr_tty=err_tty, mode=mode), ExitStack() as stack:
+                        (self.root / "first.ir").unlink(missing_ok=True)
+                        out, read_out = channel(stack, out_tty)
+                        err, read_err = channel(stack, err_tty)
+                        result = subprocess.run([self.agent, "-y", "--stderr", mode, "case.agent", "--", "go"],
+                                                cwd=self.root, env=self.env, stdout=out, stderr=err,
+                                                stdin=subprocess.DEVNULL, timeout=20)
+                        payload, diagnostic = read_out(), read_err()
+                        self.assertEqual(result.returncode, 0, diagnostic)
+                        self.assertEqual(payload, b"a\0\xffb")
+                        if mode == "explicit":
+                            self.assertEqual(diagnostic, b"human\n")
+                            continue
+                        for marker in (b"reasoning-fixture", b"model finished", b"human\n"):
+                            self.assertIn(marker, diagnostic)
+                        lines = [line for line in diagnostic.split(b"\n") if b"[usage]" in line]
+                        self.assertEqual(len(lines), 1, diagnostic)
+                        self.assertRegex(lines[0], rb"ctx \d+/128000 \(\d+%\).*run\b")
+                        if err_tty:
+                            prefix = lines[0].split(b"[usage]", 1)[0]
+                            self.assertIn(b"\x1b[2m", prefix)
+                        # The fixture produces no controls itself. Strip SGR and
+                        # verify that the rest has no cursor motion or redraws.
+                        plain = re.sub(rb"\x1b\[[\d;]*m", b"", diagnostic)
+                        self.assertNotIn(b"\r", plain)
+                        self.assertNotIn(b"\x1b", plain)
+
+    # RFC §7.1, §6.4
     def test_real_shell_timeout_returns_an_error_tool_result_and_inference_continues(self):
         result, tool = self.invoke("exec /bin/sleep 15", {"MSH_TIMEOUT_SEC": "1"})
         self.assertTrue(tool["is_error"])
         self.assertTrue(tool["text"].startswith(f"[t{tool['turn_id']}] exit=124\n"))
         self.assertEqual(result.stdout, b"")
 
+    # RFC §7.1, §9.5
     def test_wire_file_has_raw_ansi_and_model_receives_cleaned_text(self):
         _, tool = self.invoke(r"printf '\033[31mfixture color\033[0m'")
         self.assertTrue(tool["text"].endswith("\nfixture color"), tool)
@@ -83,6 +154,7 @@ fi
         self.assertTrue(any("\x1b[31mfixture color\x1b[0m" in s for s in strings(trace)),
                         "the private wire trace did not retain the unfiltered tool output")
 
+    # RFC §2
     def test_path_precedes_libexec_and_explicit_shell_path_has_priority_over_both(self):
         override = self.root / "bin"
         override.mkdir()
@@ -147,9 +219,11 @@ while [ -f "child-$n.ir" ]; do n=$((n+1)); done
         self.assertIn("child instructions", child)
         self.assertNotIn("child instructions", parent)
 
+    # RFC §3.4, §5.1
     def test_nested_agent_uses_own_model_wal_and_budget_and_inherits_cli_auto(self):
         self.run_nested(("-y",), "ask", True)
 
+    # RFC §3.4, §5.1
     def test_nested_agent_inherits_cli_deny_over_its_own_auto_frontmatter(self):
         self.run_nested(("--approval", "deny"), "auto", False)
 

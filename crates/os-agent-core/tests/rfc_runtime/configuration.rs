@@ -6,6 +6,7 @@ use serde_json::json;
 
 use super::{Fixture, expect_code, jsonl};
 
+// RFC §3.3
 #[test]
 fn agent_name_has_exactly_the_documented_ascii_alphabet() {
     for byte in 0..=127u8 {
@@ -28,6 +29,7 @@ fn agent_name_has_exactly_the_documented_ascii_alphabet() {
     }
 }
 
+// RFC §3.3
 #[test]
 fn declared_fields_validate_type_enums_and_uint32_boundaries() {
     for (field, valid, invalid) in [
@@ -84,6 +86,7 @@ fn declared_fields_validate_type_enums_and_uint32_boundaries() {
     }
 }
 
+// RFC §3.3, §6.1
 #[test]
 fn threshold_fraction_floors_absolute_threshold_and_disable_cases() {
     for (input, limit, expected) in [
@@ -108,6 +111,7 @@ fn threshold_fraction_floors_absolute_threshold_and_disable_cases() {
     }
 }
 
+// RFC §3.4, §8.2
 #[test]
 fn every_subset_of_five_layers_selects_highest_priority_model_and_output_limit() {
     const MOCK: &str = "\n[providers.fixture]\nbin = 'record-provider'\n";
@@ -172,6 +176,171 @@ fn every_subset_of_five_layers_selects_highest_priority_model_and_output_limit()
     }
 }
 
+// RFC §3.3, §3.4, §8.2
+#[test]
+fn scalar_settings_resolve_for_every_subset_of_the_five_override_layers() {
+    use clap::Parser;
+    use os_agent_core::cli::Cli;
+    use os_agent_core::config::{AgentPaths, ResolvedConfig};
+
+    // Exercise the same resolver as the CLI. Launch twice to vary inherited
+    // variables without touching environment shared by parallel Rust tests.
+    const CHILD: &str = "OS_AGENT_RFC_RESOLVER_CHILD";
+    fn fields(layer: u32) -> Vec<(&'static str, serde_json::Value)> {
+        vec![
+            ("provider", json!(format!("provider-{layer}"))),
+            ("shell", json!(format!("shell-{layer}"))),
+            ("max_turns", json!(10 + layer)),
+            ("max_tokens", json!(4000 + layer)),
+            ("compact_threshold", json!(100 + layer)),
+            (
+                "approval",
+                json!(["ask", "deny", "auto"][(layer % 3) as usize]),
+            ),
+            (
+                "stderr",
+                json!(if layer % 2 == 1 { "explicit" } else { "auto" }),
+            ),
+        ]
+    }
+    let text = |value: &serde_json::Value| {
+        value
+            .as_str()
+            .map(String::from)
+            .unwrap_or_else(|| value.to_string())
+    };
+    let Some(child_mode) = std::env::var_os(CHILD) else {
+        for has_env in [false, true] {
+            let fx = Fixture::new();
+            let exe = std::env::current_exe().unwrap();
+            let mut child = fx.command_for(exe.to_str().unwrap());
+            child.env(CHILD, if has_env {"present"} else {"absent"})
+                .args(["--exact", "configuration::scalar_settings_resolve_for_every_subset_of_the_five_override_layers"]);
+            if has_env {
+                for (key, value) in fields(4) {
+                    child.env(format!("AGENT_{}", key.to_ascii_uppercase()), text(&value));
+                }
+                child
+                    .env("AGENT_CONTEXT", "env.wal")
+                    .env("AGENT_INBOX", "env-box")
+                    .env("AGENT_IDLE_TIMEOUT", "41");
+            }
+            let result = fx.run(&mut child);
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stdout)
+            );
+            assert!(String::from_utf8_lossy(&result.stdout).contains("1 passed"));
+        }
+        return;
+    };
+    let has_env = child_mode == "present";
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    fs::create_dir(root.join(".agent")).unwrap();
+    let config = |layer: u32, enabled: bool| {
+        let mut s = String::from("[defaults]\nmodel='fixture'\n");
+        if enabled {
+            for (key, value) in fields(layer) {
+                s.push_str(&format!("{key}={value}\n"));
+            }
+        }
+        s
+    };
+    let providers: String = (1..=5)
+        .map(|i| format!("[providers.provider-{i}]\nbin='local'\n"))
+        .collect();
+    for mask in 0..32_u32 {
+        let enabled = |layer: u32| mask & (1 << (layer - 1)) != 0;
+        if enabled(4) != has_env {
+            continue;
+        }
+        fs::write(
+            root.join("config/agent/config.toml"),
+            config(1, enabled(1)) + &providers,
+        )
+        .unwrap();
+        fs::write(root.join(".agent/config.toml"), config(2, enabled(2))).unwrap();
+        let mut source = String::from("---\n");
+        if enabled(3) {
+            for (key, value) in fields(3) {
+                source.push_str(&format!("{key}: {value}\n"));
+            }
+            source.push_str("context: front.wal\n");
+        }
+        source.push_str("---\nbody");
+        let mut args = vec![String::from("agent")];
+        if enabled(5) {
+            for (key, value) in fields(5) {
+                args.extend([format!("--{}", key.replace('_', "-")), text(&value)]);
+            }
+            args.extend(
+                ["-c", "cli.wal", "--inbox", "cli-box", "--idle-timeout", "0"].map(String::from),
+            );
+        }
+        args.push(String::from("case.agent"));
+        let cwd = root.canonicalize().unwrap();
+        let mut paths = AgentPaths::discover(&cwd).unwrap();
+        paths.global_config_dir = root.join("config/agent");
+        let cfg = ResolvedConfig::resolve(
+            &Cli::try_parse_from(args).unwrap(),
+            &parse_script_str(&source, "case").unwrap(),
+            paths,
+        )
+        .unwrap();
+        let winner = (1..=5).rev().find(|&n| enabled(n)).unwrap_or(0);
+        let expected = if winner == 0 {
+            json!(["openai-responses", "msh", 20, 128000, 102400, "ask", "auto"])
+        } else {
+            serde_json::Value::Array(fields(winner).into_iter().map(|(_, v)| v).collect())
+        };
+        assert_eq!(
+            json!([
+                cfg.provider,
+                cfg.shell,
+                cfg.max_turns,
+                cfg.max_tokens,
+                cfg.effective_compact_threshold(),
+                cfg.approval,
+                cfg.stderr
+            ]),
+            expected,
+            "mask {mask:05b}"
+        );
+        let context = if enabled(5) {
+            Some("cli.wal")
+        } else if has_env {
+            Some("env.wal")
+        } else if enabled(3) {
+            Some("front.wal")
+        } else {
+            None
+        };
+        let inbox = if enabled(5) {
+            Some("cli-box")
+        } else if has_env {
+            Some("env-box")
+        } else {
+            None
+        };
+        assert_eq!(cfg.context, context.map(|n| cwd.join(n)), "mask {mask:05b}");
+        assert_eq!(cfg.inbox, inbox.map(|n| cwd.join(n)), "mask {mask:05b}");
+        assert_eq!(
+            cfg.idle_timeout_sec,
+            if enabled(5) {
+                0
+            } else if has_env {
+                41
+            } else {
+                300
+            },
+            "mask {mask:05b}"
+        );
+    }
+}
+
+// RFC §3.3, §9.1
 #[test]
 fn output_limit_is_strictly_below_effective_context_budget_zero_omits_it() {
     let fx = Fixture::new();
@@ -210,6 +379,7 @@ fn output_limit_is_strictly_below_effective_context_budget_zero_omits_it() {
     }
 }
 
+// RFC §3.1, §3.4, §9.1
 #[test]
 fn params_merge_by_key_and_cli_values_preserve_json_types() {
     let fx = Fixture::new();
@@ -254,6 +424,7 @@ fn params_merge_by_key_and_cli_values_preserve_json_types() {
     );
 }
 
+// RFC §3.4
 #[test]
 fn empty_context_override_is_distinct_from_an_unset_variable() {
     for (env_path, cli_path, expected) in [
@@ -287,6 +458,7 @@ fn empty_context_override_is_distinct_from_an_unset_variable() {
     }
 }
 
+// RFC §8.1
 #[test]
 fn project_search_stops_at_nearest_configuration_git_or_home_boundary() {
     let fx = Fixture::new();
@@ -341,6 +513,7 @@ fn project_search_stops_at_nearest_configuration_git_or_home_boundary() {
     );
 }
 
+// RFC §2, §3.4, §8.2, §9.2
 #[test]
 fn provider_resolution_injects_model_base_url_timeout_and_env_or_fallback_key() {
     use super::executable;
@@ -394,6 +567,7 @@ printf '%s\n' '{"type":"text_delta","text":"ok"}' '{"type":"done","finish_reason
     }
 }
 
+// RFC §3.4, §5.1
 #[test]
 fn environment_approval_aliases_and_cli_override_produce_the_expected_tool_effects() {
     use super::{scripted_provider, success_text, tool, with_tools};
@@ -440,6 +614,7 @@ fn environment_approval_aliases_and_cli_override_produce_the_expected_tool_effec
     }
 }
 
+// RFC §3.4, §6.4
 #[test]
 fn invalid_resolved_environment_values_exit_two_before_contacting_the_provider() {
     for (key, value) in [
@@ -466,6 +641,7 @@ fn invalid_resolved_environment_values_exit_two_before_contacting_the_provider()
     }
 }
 
+// RFC §8.2, §6.4
 #[test]
 fn global_and_project_config_reject_unknown_keys_before_any_inference() {
     for where_ in ["config/agent", ".agent"] {

@@ -152,6 +152,7 @@ impl Drop for Running {
     }
 }
 
+// RFC §4.1
 #[test]
 fn tty_stdin_uses_args_immediately_or_reads_input_through_eof() {
     for args_present in [true, false] {
@@ -183,6 +184,7 @@ fn tty_stdin_uses_args_immediately_or_reads_input_through_eof() {
     }
 }
 
+// RFC §5.1, §5.2
 #[test]
 fn approval_choices_use_dev_tty_and_preserve_piped_stdin() {
     for choice in ["y", "n", "e", "a"] {
@@ -267,6 +269,106 @@ printf 'printf edited' > "$1"
     }
 }
 
+// RFC §5.2
+#[test]
+fn unsuccessful_or_empty_terminal_edit_runs_neither_original_nor_edited_command() {
+    for edit in [
+        r#"printf 'printf edited > ran' > "$1"; exit 1"#,
+        r#": > "$1""#,
+    ] {
+        let fx = Fixture::new();
+        let root = &fx.dir.0;
+        fs::write(root.join("case.agent"), "test").unwrap();
+        let editor = root.join("editor");
+        super::executable(
+            &editor,
+            &format!("#!/bin/sh\nprintf '%s' \"$1\" > edit-path\n{edit}\n"),
+        );
+        scripted_provider(
+            &fx,
+            &[
+                with_tools([tool("edit", "printf original > ran")]),
+                success_text("finished"),
+            ],
+        );
+        let mut cmd = terminal_command(&fx);
+        cmd.env("EDITOR", editor)
+            .args(["--shell", "/bin/sh", "case.agent", "--", "go"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut child = Pty::open().spawn(cmd, root);
+        child.until("printf original");
+        child.send(b"e\n");
+        child.finish(0);
+        let path = fs::read_to_string(root.join("edit-path")).unwrap();
+        assert!(!Path::new(&path).exists());
+        assert!(!root.join("ran").exists());
+    }
+}
+
+// RFC §5.1, §5.2
+#[test]
+fn always_approval_is_scoped_to_executable_and_pid_even_with_the_same_wal() {
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    fs::write(root.join("case.agent"), "test").unwrap();
+    let first = with_tools([
+        tool("one", "printf first"),
+        tool("two", "printf second"),
+        tool("other", "echo other"),
+    ]);
+    scripted_provider(
+        &fx,
+        &[
+            first,
+            success_text("done"),
+            with_tools([tool("new", "printf next-pid")]),
+            success_text("done"),
+        ],
+    );
+    for (n, prompt) in ["printf first", "printf next-pid"].iter().enumerate() {
+        let mut cmd = terminal_command(&fx);
+        cmd.args([
+            "--approval",
+            "ask",
+            "--shell",
+            "/bin/sh",
+            "-c",
+            "history",
+            "case.agent",
+            "--",
+            "go",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+        let mut child = Pty::open().spawn(cmd, root);
+        child.until(prompt);
+        child.send(if n == 0 { b"a\n" } else { b"y\n" });
+        if n == 0 {
+            child.until("echo other");
+            child.send(b"y\n");
+        }
+        child.finish(0);
+        fs::remove_file(root.join("terminal-status")).unwrap();
+    }
+    let rows = jsonl(&root.join("history"));
+    let results: Vec<_> = rows
+        .iter()
+        .filter(|r| r["role"] == "tool")
+        .map(|r| {
+            r["text"]
+                .as_str()
+                .unwrap()
+                .split_once('\n')
+                .unwrap()
+                .1
+                .trim_end()
+        })
+        .collect();
+    assert_eq!(results, ["first", "second", "other", "next-pid"]);
+}
+
+// RFC §5.3, §6.4
 #[test]
 fn detached_session_requiring_approval_fails_with_42_without_executing_tool() {
     let fx = Fixture::new();
