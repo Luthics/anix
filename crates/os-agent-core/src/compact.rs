@@ -10,6 +10,7 @@ use std::thread;
 use os_agent_proto::IR_VERSION;
 use os_agent_proto::exit_code::ExitCode;
 use os_agent_proto::ir::{HeaderTag, IrHeader, IrMessage, IrMeta, IrStream, StderrMode};
+use os_agent_proto::provider::TokenUsage;
 use os_agent_proto::wal::{WalConfigSnapshot, WalEvent};
 use serde_json::{Map, Value};
 use thiserror::Error;
@@ -52,44 +53,43 @@ impl CompactError {
     }
 }
 
-/// Conservative token estimator per Section 6.1.2:
-/// `last_usage_total + ceil(bytes_added_since_last_usage / 3)`.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct TokenBudgetTracker {
-    last_usage_total: Option<u64>,
-    bytes_since_usage: usize,
-}
-
-impl TokenBudgetTracker {
-    pub fn record_usage(&mut self, input_tokens: u64, output_tokens: u64) {
-        self.last_usage_total = Some(input_tokens.saturating_add(output_tokens));
-        self.bytes_since_usage = 0;
-    }
-
-    pub fn add_message_bytes(&mut self, msg: &IrMessage) {
-        if let Ok(s) = serde_json::to_string(msg) {
-            self.bytes_since_usage = self.bytes_since_usage.saturating_add(s.len());
+/// Compute current effective context watermark `T_cur` per Section 6.1.2:
+///
+/// 1. Locate the last surviving `role: "assistant"` message in `messages` carrying `usage`.
+/// 2. If found: `usage.input_tokens + usage.output_tokens + ceil(bytes_after_it / 3)`.
+/// 3. Otherwise (fresh session or right after `checkpoint` with no surviving assistant yet):
+///    `ceil(total_window_bytes / 3)`.
+///
+/// Built-in compactor usage is NEVER included in `T_cur`; after `aclr -t` tail folding pops
+/// trailing turns, the baseline automatically falls back to the last surviving assistant before
+/// the fold boundary.
+pub fn estimate_context_tokens(
+    messages: &[IrMessage],
+    assistant_usages: &BTreeMap<u64, TokenUsage>,
+) -> u64 {
+    if let Some((idx, base_usage)) = messages.iter().enumerate().rev().find_map(|(i, m)| {
+        if let IrMessage::Assistant { turn_id, .. } = m {
+            assistant_usages.get(turn_id).map(|u| (i, *u))
+        } else {
+            None
         }
-    }
-
-    pub fn reset(&mut self) {
-        self.last_usage_total = None;
-        self.bytes_since_usage = 0;
-    }
-
-    /// Estimate `T_cur` for the current active message window.
-    pub fn estimate_current_tokens(&self, messages: &[IrMessage]) -> u64 {
-        match self.last_usage_total {
-            Some(base) => base.saturating_add((self.bytes_since_usage as u64).div_ceil(3)),
-            None => {
-                let total_bytes: u64 = messages
-                    .iter()
-                    .filter_map(|m| serde_json::to_string(m).ok())
-                    .map(|s| s.len() as u64)
-                    .sum();
-                total_bytes.div_ceil(3)
-            }
-        }
+    }) {
+        let base = base_usage
+            .input_tokens
+            .saturating_add(base_usage.output_tokens);
+        let tail_bytes: u64 = messages[idx + 1..]
+            .iter()
+            .filter_map(|m| serde_json::to_string(m).ok())
+            .map(|s| s.len() as u64)
+            .sum();
+        base.saturating_add(tail_bytes.div_ceil(3))
+    } else {
+        let total_bytes: u64 = messages
+            .iter()
+            .filter_map(|m| serde_json::to_string(m).ok())
+            .map(|s| s.len() as u64)
+            .sum();
+        total_bytes.div_ceil(3)
     }
 }
 
@@ -100,16 +100,20 @@ pub struct CompactionOutcome {
     pub checkpoint_turn_id: u64,
     pub next_turn_id: u64,
     pub summary_len: usize,
+    pub compact_usage: Option<TokenUsage>,
+    pub cumulative_usage: TokenUsage,
 }
 
 /// Execute full compaction (auto-compact, `aclr -s`, or `SIGUSR1`), refresh frozen
-/// `role: "system"` via `pre-context.d/`, and append a WAL `checkpoint` section (Section 6.1 & 6.2).
+/// `role: "system"` via `pre-context.d/`, and append a WAL `checkpoint` section with
+/// `compact_usage` and prefix-sum `cumulative_usage` (Section 6.1 & 6.2).
 #[allow(clippy::too_many_arguments)]
 pub fn run_full_compaction(
     cfg: &ResolvedConfig,
     script_prompt: &str,
     current_messages: &[IrMessage],
     next_turn_id: u64,
+    session_usage_before_compact: TokenUsage,
     reason: &str,
     wal: &mut WalStore,
     signals: &SignalState,
@@ -138,8 +142,8 @@ pub fn run_full_compaction(
         messages: current_messages.to_vec(),
     };
 
-    let summary = if let Some(ref bin_spec) = cfg.compact.bin {
-        run_external_compactor(cfg, bin_spec, &compact_ir)?
+    let (summary, compact_usage) = if let Some(ref bin_spec) = cfg.compact.bin {
+        (run_external_compactor(cfg, bin_spec, &compact_ir)?, None)
     } else {
         run_builtin_compactor(cfg, compact_ir, signals, tracer)?
     };
@@ -149,6 +153,11 @@ pub fn run_full_compaction(
         return Err(CompactError::Failed(
             "compactor returned an empty summary".into(),
         ));
+    }
+
+    let mut cumulative_usage = session_usage_before_compact;
+    if let Some(ref cu) = compact_usage {
+        cumulative_usage.add_assign(cu);
     }
 
     // Refresh frozen `role: "system"` prefix by re-running `pre-context.d/` (Section 6.2.2).
@@ -187,6 +196,9 @@ pub fn run_full_compaction(
         format!("<checkpoint>\n{summary}\n</checkpoint>"),
     );
 
+    let normalized_compact = compact_usage.map(|u| u.normalized_5());
+    let normalized_cumulative = cumulative_usage.normalized_5();
+
     let ts = posix::timestamp_rfc3339_utc();
     wal.append(&WalEvent::Checkpoint {
         ir_version: IR_VERSION,
@@ -196,6 +208,8 @@ pub fn run_full_compaction(
             stderr: Some(cfg.stderr),
             approval: Some(cfg.approval),
         },
+        compact_usage: normalized_compact,
+        cumulative_usage: Some(normalized_cumulative),
     })?;
     wal.append_message(&system_msg)?;
     wal.append_message(&summary_msg)?;
@@ -204,6 +218,14 @@ pub fn run_full_compaction(
     fields.insert("reason".into(), Value::String(reason.to_owned()));
     fields.insert("checkpoint_turn".into(), Value::from(checkpoint_turn));
     fields.insert("summary_bytes".into(), Value::from(summary.len() as u64));
+    if let Some(cu) = normalized_compact
+        && let Ok(val) = serde_json::to_value(cu)
+    {
+        fields.insert("compact_usage".into(), val);
+    }
+    if let Ok(val) = serde_json::to_value(normalized_cumulative) {
+        fields.insert("cumulative_usage".into(), val);
+    }
     tracer.emit_event("compact", fields);
 
     Ok(CompactionOutcome {
@@ -211,6 +233,8 @@ pub fn run_full_compaction(
         checkpoint_turn_id: checkpoint_turn,
         next_turn_id: summary_turn.saturating_add(1),
         summary_len: summary.len(),
+        compact_usage,
+        cumulative_usage: normalized_cumulative,
     })
 }
 
@@ -301,7 +325,7 @@ fn run_builtin_compactor(
     mut compact_ir: IrStream,
     signals: &SignalState,
     tracer: &mut Tracer,
-) -> Result<String, CompactError> {
+) -> Result<(String, Option<TokenUsage>), CompactError> {
     let provider_name = cfg.compact.provider.as_deref().unwrap_or(&cfg.provider);
     let provider_cfg = cfg.providers.get(provider_name).ok_or_else(|| {
         CompactError::Failed(format!(
@@ -353,5 +377,5 @@ fn run_builtin_compactor(
         tracer,
     )?;
 
-    Ok(res.text)
+    Ok((res.text, res.usage))
 }

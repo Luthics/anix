@@ -8,21 +8,22 @@ use std::time::Duration;
 use os_agent_proto::IR_VERSION;
 use os_agent_proto::ctl::CtlFrame;
 use os_agent_proto::exit_code::ExitCode;
-use os_agent_proto::hooks::{OnExitPayload, PostToolPayload};
+use os_agent_proto::hooks::{ContextWatermark, OnExitPayload, PostToolPayload};
 use os_agent_proto::ir::{
     HeaderTag, IrHeader, IrMessage, IrMeta, IrStream, MediaAttachment, StderrMode,
 };
+use os_agent_proto::provider::TokenUsage;
 use os_agent_proto::wal::{WalConfigSnapshot, WalEvent};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
 use crate::approval::{ApprovalDecision, ApprovalGate};
-use crate::compact::{self, TokenBudgetTracker};
+use crate::compact;
 use crate::config::ResolvedConfig;
 use crate::fd::{self, InboxQueue};
 use crate::frontmatter::AgentScript;
 use crate::hooks;
 use crate::platform::{self, PreparedSandbox, posix};
-use crate::provider::{self, TokenUsage};
+use crate::provider;
 use crate::signal::{self, SignalState};
 use crate::trace::Tracer;
 use crate::wal::{self, WalStore};
@@ -89,7 +90,15 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
     let mut state = match SessionState::init(cfg, script, replayed, &mut wal) {
         Ok(s) => s,
         Err(code) => {
-            finish_session(cfg, code, 0, TokenUsage::default(), &mut tracer);
+            finish_session(
+                cfg,
+                code,
+                0,
+                TokenUsage::default(),
+                TokenUsage::default(),
+                0,
+                &mut tracer,
+            );
             return code;
         }
     };
@@ -104,7 +113,9 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                         cfg,
                         code,
                         state.turns_executed,
-                        state.total_usage,
+                        state.run_usage,
+                        state.session_usage,
+                        state.current_context_tokens(),
                         &mut tracer,
                     );
                     return code;
@@ -124,7 +135,9 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                         cfg,
                         code,
                         state.turns_executed,
-                        state.total_usage,
+                        state.run_usage,
+                        state.session_usage,
+                        state.current_context_tokens(),
                         &mut tracer,
                     );
                     return code;
@@ -142,7 +155,9 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                     cfg,
                     code,
                     state.turns_executed,
-                    state.total_usage,
+                    state.run_usage,
+                    state.session_usage,
+                    state.current_context_tokens(),
                     &mut tracer,
                 );
                 return code;
@@ -169,7 +184,9 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                             cfg,
                             code,
                             state.turns_executed,
-                            state.total_usage,
+                            state.run_usage,
+                            state.session_usage,
+                            state.current_context_tokens(),
                             &mut tracer,
                         );
                         return code;
@@ -181,7 +198,9 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                             cfg,
                             code,
                             state.turns_executed,
-                            state.total_usage,
+                            state.run_usage,
+                            state.session_usage,
+                            state.current_context_tokens(),
                             &mut tracer,
                         );
                         return code;
@@ -214,7 +233,9 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
         cfg,
         exit_code,
         state.turns_executed,
-        state.total_usage,
+        state.run_usage,
+        state.session_usage,
+        state.current_context_tokens(),
         &mut tracer,
     );
     exit_code
@@ -222,11 +243,15 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
 
 struct SessionState {
     messages: Vec<IrMessage>,
+    /// Per-turn `usage` for surviving active-window `assistant` messages (never written to IR).
+    assistant_usages: BTreeMap<u64, TokenUsage>,
     last_checkpoint_turn: u64,
     next_turn_id: u64,
     turns_executed: u32,
-    budget: TokenBudgetTracker,
-    total_usage: TokenUsage,
+    /// Cumulative 5-field usage for this process run (including built-in compactor calls).
+    run_usage: TokenUsage,
+    /// Cross-compaction cumulative 5-field usage across the WAL session.
+    session_usage: TokenUsage,
     pending_compact: bool,
 }
 
@@ -237,11 +262,9 @@ impl SessionState {
         replayed: wal::ReplayedSession,
         wal: &mut WalStore,
     ) -> Result<Self, ExitCode> {
-        let mut budget = TokenBudgetTracker::default();
-
         if replayed.is_fresh {
-            // Fresh session: run `pre-context.d/` (including built-ins 00-posix-runtime & 20-skills)
-            // and freeze the resulting `turn_id: 0` `role: "system"` prefix (Section 6.2.2).
+            // Fresh session: run `pre-context.d/` (including built-ins 00-posix-runtime, 20-skills,
+            // 30-tips) and freeze the resulting `turn_id: 0` `role: "system"` prefix (Section 6.2.2).
             let seed = IrStream {
                 header: make_ir_header(cfg),
                 messages: vec![IrMessage::system(0, &script.prompt)],
@@ -270,7 +293,6 @@ impl SessionState {
             let mut max_tid = 0u64;
             for msg in &processed.messages {
                 max_tid = max_tid.max(msg.turn_id());
-                budget.add_message_bytes(msg);
                 if let Err(err) = wal.append_message(msg) {
                     eprintln!("agent: {err}");
                     return Err(err.exit_code());
@@ -279,11 +301,12 @@ impl SessionState {
 
             return Ok(Self {
                 messages: processed.messages,
+                assistant_usages: BTreeMap::new(),
                 last_checkpoint_turn: 0,
                 next_turn_id: max_tid.saturating_add(1).max(1),
                 turns_executed: 0,
-                budget,
-                total_usage: TokenUsage::default(),
+                run_usage: TokenUsage::default(),
+                session_usage: TokenUsage::default(),
                 pending_compact: false,
             });
         }
@@ -332,17 +355,14 @@ impl SessionState {
             }
         }
 
-        for msg in &messages {
-            budget.add_message_bytes(msg);
-        }
-
         Ok(Self {
             messages,
+            assistant_usages: replayed.assistant_usages,
             last_checkpoint_turn: replayed.last_checkpoint_turn,
             next_turn_id,
             turns_executed: 0,
-            budget,
-            total_usage: TokenUsage::default(),
+            run_usage: TokenUsage::default(),
+            session_usage: replayed.session_usage,
             pending_compact: false,
         })
     }
@@ -360,9 +380,12 @@ impl SessionState {
             eprintln!("agent: {err}");
             return Err(err.exit_code());
         }
-        self.budget.add_message_bytes(&msg);
         self.messages.push(msg);
         Ok(())
+    }
+
+    fn current_context_tokens(&self) -> u64 {
+        compact::estimate_context_tokens(&self.messages, &self.assistant_usages)
     }
 
     fn build_ir_stream(&self, cfg: &ResolvedConfig) -> IrStream {
@@ -492,7 +515,7 @@ fn run_inference_cycle(
 
         // Check `SIGUSR1` / `aclr -s` / auto-compact threshold before calling Provider (Section 6.1.2).
         let sigusr1_compact = signals.take_compact_request();
-        let est_tokens = state.budget.estimate_current_tokens(&state.messages);
+        let est_tokens = state.current_context_tokens();
         let threshold_hit = cfg
             .effective_compact_threshold()
             .is_some_and(|th| est_tokens >= th);
@@ -512,6 +535,7 @@ fn run_inference_cycle(
                 &script.prompt,
                 &state.messages,
                 state.next_turn_id,
+                state.session_usage,
                 reason,
                 wal,
                 signals,
@@ -519,12 +543,13 @@ fn run_inference_cycle(
             ) {
                 Ok(outcome) => {
                     state.messages = outcome.new_messages;
+                    state.assistant_usages.clear();
                     state.last_checkpoint_turn = outcome.checkpoint_turn_id;
                     state.next_turn_id = outcome.next_turn_id;
-                    state.budget.reset();
-                    for m in &state.messages {
-                        state.budget.add_message_bytes(m);
+                    if let Some(ref cu) = outcome.compact_usage {
+                        state.run_usage.add_assign(cu);
                     }
+                    state.session_usage = outcome.cumulative_usage;
                 }
                 Err(err) => {
                     eprintln!("agent: {err}");
@@ -534,7 +559,7 @@ fn run_inference_cycle(
         }
 
         // Hard `max_tokens` circuit breaker (Section 6.1.2).
-        let est_after = state.budget.estimate_current_tokens(&state.messages);
+        let est_after = state.current_context_tokens();
         if est_after > u64::from(cfg.max_tokens) {
             eprintln!(
                 "agent: context token estimate ({est_after}) exceeds max_tokens ({})",
@@ -571,29 +596,15 @@ fn run_inference_cycle(
             }
         };
 
+        // Persist assistant turn cleanly (Section 6.2 & 9.2): `usage` is stored in WAL &
+        // `state.assistant_usages` for `T_cur`, and strictly stripped from Canonical IR.
+        let assistant_turn_id = state.alloc_turn_id();
         if let Some(u) = response.usage {
-            state.budget.record_usage(u.input_tokens, u.output_tokens);
-            state.total_usage.input_tokens = state
-                .total_usage
-                .input_tokens
-                .saturating_add(u.input_tokens);
-            state.total_usage.output_tokens = state
-                .total_usage
-                .output_tokens
-                .saturating_add(u.output_tokens);
-            if let Some(c) = u.cached_tokens {
-                state.total_usage.cached_tokens = Some(
-                    state
-                        .total_usage
-                        .cached_tokens
-                        .unwrap_or(0)
-                        .saturating_add(c),
-                );
-            }
+            state.run_usage.add_assign(&u);
+            state.session_usage.add_assign(&u);
+            state.assistant_usages.insert(assistant_turn_id, u);
         }
 
-        // Persist assistant turn cleanly (Section 6.2 & 9.2).
-        let assistant_turn_id = state.alloc_turn_id();
         let assistant_msg = IrMessage::Assistant {
             turn_id: assistant_turn_id,
             text: if response.text.is_empty() && !response.tool_calls.is_empty() {
@@ -611,7 +622,7 @@ fn run_inference_cycle(
             extra: BTreeMap::new(),
         };
 
-        if let Err(err) = wal.append_message(&assistant_msg) {
+        if let Err(err) = wal.append_message_with_usage(&assistant_msg, response.usage) {
             eprintln!("agent: {err}");
             return err.exit_code();
         }
@@ -650,7 +661,6 @@ fn run_inference_cycle(
                     eprintln!("agent: {err}");
                     return err.exit_code();
                 }
-                state.budget.add_message_bytes(&tool_msg);
                 state.messages.push(tool_msg);
                 continue;
             }
@@ -700,7 +710,6 @@ fn run_inference_cycle(
                         eprintln!("agent: {err}");
                         return err.exit_code();
                     }
-                    state.budget.add_message_bytes(&tool_msg);
                     state.messages.push(tool_msg);
                     continue;
                 }
@@ -844,7 +853,6 @@ fn run_inference_cycle(
                 eprintln!("agent: {err}");
                 return err.exit_code();
             }
-            state.budget.add_message_bytes(&tool_msg);
             state.messages.push(tool_msg);
 
             // Apply `aclr -t <N> "<summary>"` tail fold with Tool-Pair Closure (Section 6.1.3).
@@ -854,7 +862,10 @@ fn run_inference_cycle(
                 let to_turn = tool_turn_id;
 
                 // Pop all turns >= aligned_from (including the assistant(tool_call) that invoked aclr).
+                // Dropping folded turn IDs from `assistant_usages` automatically rolls `T_cur` back
+                // to the last surviving assistant before the fold boundary (Section 6.1.2).
                 state.messages.retain(|m| m.turn_id() < aligned_from);
+                state.assistant_usages.retain(|&tid, _| tid < aligned_from);
                 let folded_msg = IrMessage::user(
                     aligned_from,
                     format!("<folded turns=\"{aligned_from}..{to_turn}\">{summary}</folded>"),
@@ -870,12 +881,6 @@ fn run_inference_cycle(
                 }) {
                     eprintln!("agent: {err}");
                     return err.exit_code();
-                }
-
-                // Re-estimate tokens cleanly from remaining messages.
-                state.budget.reset();
-                for m in &state.messages {
-                    state.budget.add_message_bytes(m);
                 }
 
                 let mut ff = Map::new();
@@ -915,19 +920,50 @@ fn finish_session(
     cfg: &ResolvedConfig,
     exit_code: ExitCode,
     turns: u32,
-    usage: TokenUsage,
+    run_usage: TokenUsage,
+    session_usage: TokenUsage,
+    ctx_tokens: u64,
     tracer: &mut Tracer,
 ) {
-    let usage_json = json!({
-        "input_tokens": usage.input_tokens,
-        "output_tokens": usage.output_tokens,
-        "cached_tokens": usage.cached_tokens,
-    });
+    let run_norm = run_usage.normalized_5();
+    let session_norm = if cfg.context.is_some() {
+        session_usage.normalized_5()
+    } else {
+        run_norm
+    };
+    let context = ContextWatermark {
+        tokens: ctx_tokens,
+        max_tokens: cfg.max_tokens,
+    };
+
+    // Section 4.1: In `auto` mode, emit ONE static ANSI Dim `[usage]` summary line on `fd 2`
+    // before exit (no cursor movement / dynamic refresh). In `explicit` mode (`-q`), NEVER emit.
+    if cfg.stderr == StderrMode::Auto && (turns > 0 || !run_usage.is_zero()) {
+        let max_tok = u64::from(cfg.max_tokens).max(1);
+        let pct = (ctx_tokens.saturating_mul(100) + max_tok / 2) / max_tok;
+        let mut line = format!(
+            "[usage] ctx {}/{} ({}%) | run {}",
+            ctx_tokens,
+            cfg.max_tokens,
+            pct,
+            format_usage_summary(run_norm)
+        );
+        if cfg.context.is_some() {
+            line.push_str(&format!(" | total {}", format_usage_summary(session_norm)));
+        }
+        if posix::isatty(2) {
+            eprintln!("\x1b[2m{line}\x1b[0m");
+        } else {
+            eprintln!("{line}");
+        }
+    }
 
     let payload = OnExitPayload {
         exit_code: exit_code.as_i32(),
         turns,
-        usage: usage_json.clone(),
+        usage: run_norm,
+        session_usage: session_norm,
+        context,
         context_file: cfg
             .context
             .as_ref()
@@ -940,6 +976,37 @@ fn finish_session(
     let mut fields = Map::new();
     fields.insert("exit_code".into(), Value::from(exit_code.as_i32()));
     fields.insert("turns".into(), Value::from(turns));
-    fields.insert("usage".into(), usage_json);
+    if let Ok(v) = serde_json::to_value(run_norm) {
+        fields.insert("usage".into(), v);
+    }
+    if let Ok(v) = serde_json::to_value(session_norm) {
+        fields.insert("session_usage".into(), v);
+    }
+    if let Ok(v) = serde_json::to_value(context) {
+        fields.insert("context".into(), v);
+    }
     tracer.emit_event("run_end", fields);
+}
+
+fn format_usage_summary(u: TokenUsage) -> String {
+    let mut extras = Vec::new();
+    if u.cached() > 0 {
+        extras.push(format!("cached={}", u.cached()));
+    }
+    if u.cache_write() > 0 {
+        extras.push(format!("write={}", u.cache_write()));
+    }
+    if u.reasoning() > 0 {
+        extras.push(format!("reasoning={}", u.reasoning()));
+    }
+    if extras.is_empty() {
+        format!("in={} out={}", u.input_tokens, u.output_tokens)
+    } else {
+        format!(
+            "in={} out={} ({})",
+            u.input_tokens,
+            u.output_tokens,
+            extras.join(" ")
+        )
+    }
 }

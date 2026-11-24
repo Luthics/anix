@@ -449,10 +449,25 @@ fn dispatch_sse_frame(
                         .get("input_tokens_details")
                         .and_then(|d| d.get("cached_tokens"))
                         .and_then(Value::as_u64);
+                    let cache_write_tokens = usage
+                        .get("input_tokens_details")
+                        .and_then(|d| d.get("cache_write_tokens"))
+                        .and_then(Value::as_u64)
+                        .or_else(|| {
+                            usage
+                                .get("cache_creation_input_tokens")
+                                .and_then(Value::as_u64)
+                        });
+                    let reasoning_tokens = usage
+                        .get("output_tokens_details")
+                        .and_then(|d| d.get("reasoning_tokens"))
+                        .and_then(Value::as_u64);
                     emit_event(&ProviderEvent::Usage {
                         input_tokens,
                         output_tokens,
                         cached_tokens,
+                        cache_write_tokens,
+                        reasoning_tokens,
                     });
                 }
             }
