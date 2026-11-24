@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  check-test:
+    name: Clippy & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy (-D warnings)
+        run: cargo xclippy
+      - name: Unit tests
+        run: cargo xtest
+      - name: Smoke test binaries
+        run: |
+          cargo build --workspace
+          ./target/debug/agent --version
+          test "$(./target/debug/msh -c 'echo ok')" = "ok"
+
+  linux-musl-static:
+    name: Static Linux musl (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install musl-tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: musl-x86_64
+      - name: Build static release binaries
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+        run: cargo build --release --workspace --target x86_64-unknown-linux-musl
+      - name: Verify static linkage and smoke test
+        run: |
+          BIN_DIR="target/x86_64-unknown-linux-musl/release"
+          for bin in agent msh agent-provider-openai-responses aview aclr; do
+            file "${BIN_DIR}/${bin}"
+            if ldd "${BIN_DIR}/${bin}" 2>&1 | grep -q '=>'; then
+              echo "ERROR: ${bin} is dynamically linked" >&2
+              exit 1
+            fi
+          done
+          "${BIN_DIR}/agent" --version
+          test "$("${BIN_DIR}/msh" -c 'echo static-ok')" = "static-ok"
