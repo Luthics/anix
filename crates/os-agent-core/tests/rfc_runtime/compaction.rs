@@ -20,6 +20,116 @@ fn hook(fx: &Fixture) {
     fs::write(&path, "#!/bin/sh\n/bin/cat > exit.json\n").unwrap();
     fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
 }
+
+// RFC §6.1, §6.2, §9.2, §9.3, §9.5
+#[test]
+fn each_subset_of_optional_usage_details_preserves_inclusive_totals_through_exit() {
+    // Odd counts above the exact-integer range of binary64 and above u32.
+    // Keep input + output representable so the budget and all five counters
+    // have unambiguous expected values.
+    let input = 9_007_199_254_740_993;
+    let output = 4_294_967_297;
+    let details: [(&str, u64); 3] = [
+        ("cached_tokens", 4_294_967_315),
+        ("cache_write_tokens", 13),
+        ("reasoning_tokens", 19),
+    ];
+    for mask in 0..8 {
+        let fx = Fixture::new();
+        let root = &fx.dir.0;
+        hook(&fx);
+        fs::write(root.join("case.agent"), "usage fixture").unwrap();
+        let mut event = json!({"type":"usage","input_tokens":input,"output_tokens":output});
+        let mut expected = counts(input, output, 0, 0, 0);
+        for (bit, (field, n)) in details.iter().copied().enumerate() {
+            if mask & (1 << bit) != 0 {
+                event[field] = json!(n);
+                expected[field] = json!(n);
+            }
+        }
+        scripted_provider(
+            &fx,
+            &[vec![
+                json!({"type":"text_delta","text":"measured"}),
+                event,
+                done(),
+            ]],
+        );
+        let out = fx.run(fx.command_for("/bin/sh").args([
+            "-c",
+            r#"exec "$1" -q -c history case.agent -- go 3>trace"#,
+            "fixture",
+            env!("CARGO_BIN_EXE_agent"),
+        ]));
+        expect_code(&out, 0);
+        let wal = jsonl(&root.join("history"));
+        let assistant = wal.last().unwrap();
+        assert_eq!(assistant["role"], "assistant");
+        let saved = &assistant["usage"];
+        assert_eq!(saved["input_tokens"], input);
+        assert_eq!(saved["output_tokens"], output);
+        for (field, _) in details {
+            // §9.2 permits omission of an optional zero detail in the WAL.
+            let stored = saved.get(field).map(|v| v.as_u64().unwrap()).unwrap_or(0);
+            assert_eq!(
+                stored,
+                expected[field].as_u64().unwrap(),
+                "WAL mask={mask}, {field}"
+            );
+        }
+        let trace = jsonl(&root.join("trace"));
+        let response = trace.iter().find(|r| r["type"] == "llm_response").unwrap();
+        assert_eq!(response["usage"], expected, "llm_response mask={mask}");
+        let end = trace.iter().find(|r| r["type"] == "run_end").unwrap();
+        let hooks = jsonl(&root.join("exit.json"));
+        for report in [end, &hooks[0]] {
+            assert_eq!(report["usage"], expected, "mask={mask}");
+            assert_eq!(report["session_usage"], expected, "mask={mask}");
+            assert_eq!(report["context"]["tokens"], input + output, "mask={mask}");
+        }
+    }
+}
+
+// RFC §6.1, §6.2, §9.2, §9.3
+#[test]
+fn a_reported_zero_watermark_and_an_unreported_usage_use_different_budget_baselines() {
+    for reported in [false, true] {
+        let fx = Fixture::new();
+        let root = &fx.dir.0;
+        fs::write(root.join("case.agent"), "frozen prefix").unwrap();
+        hook(&fx);
+        let mut reply = success_text("finished");
+        if reported {
+            reply.insert(
+                0,
+                json!({"type":"usage","input_tokens":0,"output_tokens":0}),
+            );
+        }
+        scripted_provider(&fx, &[reply]);
+        expect_code(
+            &fx.run(
+                fx.agent()
+                    .args(["-q", "-c", "history", "case.agent", "--", "hello"]),
+            ),
+            0,
+        );
+        let exit = jsonl(&root.join("exit.json"));
+        assert_eq!(exit[0]["usage"], counts(0, 0, 0, 0, 0));
+        assert_eq!(exit[0]["session_usage"], exit[0]["usage"]);
+        let watermark = exit[0]["context"]["tokens"].as_u64().unwrap();
+        let wal = jsonl(&root.join("history"));
+        let last = wal.last().unwrap();
+        assert_eq!(last["role"], "assistant");
+        if reported {
+            assert_eq!(last["usage"]["input_tokens"], 0);
+            assert_eq!(last["usage"]["output_tokens"], 0);
+            assert_eq!(watermark, 0);
+        } else {
+            assert!(watermark > 0, "the nonempty window must be estimated");
+        }
+    }
+}
+
 // RFC §9.2, §6.1, §9.3, §9.5
 #[test]
 fn retry_usage_counts_every_charged_attempt_without_inflating_the_final_watermark() {

@@ -31,6 +31,24 @@
 | §§4.1、4.3、6.1–6.4、9.1–9.2 | 从真实 msh 检查 fd 4–6 的类型和访问模式，重复打开输出侧信道并逐字节核对各自超过 1 MiB 的数据。向正在执行工具的 agent 发送 INT 或 TERM，验证 msh 子命令收到 TERM、WAL 解锁以及重启后的工具配对。对不可读媒体和外部压缩器返回的非法 UTF-8，分别检查 HTTP 请求和 checkpoint 是否提前产生。 | [进程与侧信道](test_shell_pipeline.py)、[适配器](../crates/provider-openai-responses/tests/rfc_responses.rs)、[压缩器](../crates/os-agent-core/tests/rfc_runtime/compaction.rs) |
 | §§6.1–6.2、9.1–9.3 | 在三个独立进程中折叠、压缩两次并恢复，逐项核对两次 checkpoint 的五字段前缀和、on-exit 的本次及会话用量、冻结提示词和摘要。把 WAL 分别截在初始化和压缩的每个完整记录边界，捕获恢复后的首个请求。Linux 用相同活跃窗口、1 MiB 和 32 MiB 的归档对照进程实际读取的字节数。 | [压缩记账](../crates/os-agent-core/tests/rfc_runtime/compaction.rs)、[WAL 恢复](../crates/os-agent-core/tests/rfc_runtime/wal.rs)、[读取量](test_linux_fallback.py) |
 
+### §4.2 Inbox 的验收边界
+
+| 条款 | 可观察结果 |
+| --- | --- |
+| 启动与目录权限 | 在全新路径核对五个目录的 0700 权限。带初始输入时，从首个工具中发布消息，用预建队列作为对照，核对后续推理和 done 归档。[Inbox](../crates/os-agent-core/tests/rfc_runtime/inbox.rs) · [#21](https://github.com/Luthics/os-agent/issues/21) |
+| 原子投递与串行领取 | 三个并发发送方分别写完大消息再 rename；在工具闭合前观察 new、cur 与下一次请求，完成后逐条核对文件名顺序、WAL 及归档正文。[Inbox](../crates/os-agent-core/tests/rfc_runtime/inbox.rs) |
+| 失败与确认 | Provider 已发送工具调用和 done，进程随后退出 23。核对 agent 返回 1、诊断、工具副作用、WAL、待处理文件和恢复后的请求。进程崩溃后已领取消息的处置待明确。[Inbox](../crates/os-agent-core/tests/rfc_runtime/inbox.rs) · [#2](https://github.com/Luthics/os-agent/issues/2) |
+| 闲置与锁 | 让第二项任务的处理时间超过 1 秒闲置限额，期间从独立进程尝试打开 WAL。放行 Provider 后至少再等待 1 秒才能退出；退出后重新打开同一文件并核对两项已完成任务。默认限额 300 秒由配置测试验证，限额 0 的常驻与信号退出另测。[Inbox](../crates/os-agent-core/tests/rfc_runtime/inbox.rs) · [配置](../crates/os-agent-core/tests/rfc_runtime/configuration.rs) · [信号](../crates/os-agent-core/tests/rfc_runtime/signals.rs) |
+
+### §9.2 Provider 的验收边界
+
+| 条款 | 可观察结果 |
+| --- | --- |
+| 进程输入与配置 | 从真实 Provider 读取 stdin 至 EOF，核对 Canonical IR、model、base URL、timeout 和凭据来源。[配置](../crates/os-agent-core/tests/rfc_runtime/configuration.rs) |
+| 事件流与工具配对 | 回环 HTTP 服务逐个发送推理与文本增量。交错传输两个工具调用、逆序完成，用真实 msh 执行，从下一次 HTTP 请求和 WAL 核对每个 call_id、工具结果和本轮私有推理状态。[流式集成](test_provider_streaming.py) |
+| 计费 | 每个字段遍历 uint64 边界、越界数据和类型错误；八种可选明细组合逐项核对 WAL、Trace、on-exit 的包含式总数，并分别验证未上报与显式上报零值时的预算水位。[事件解码](../crates/os-agent-proto/tests/rfc_provider.rs) · [运行时计费](../crates/os-agent-core/tests/rfc_runtime/compaction.rs) |
+| 失败与重试 | 对照正常结束、缺 done、done 后非零退出及超时，检查退出码、诊断和已提交历史。逐次检查三次退避的最短间隔和重试请求；实际 429 与 503 由本地服务发出。[Provider 生命周期](../crates/os-agent-core/tests/rfc_runtime/provider.rs) · [Inbox](../crates/os-agent-core/tests/rfc_runtime/inbox.rs) · [HTTP 重试](test_provider_streaming.py) |
+
 ## 复跑
 
 §§4.1、6.2、9.2、9.5 的流式用例让本地 HTTP 服务逐帧暂停。真实适配器和 agent 必须先把对应增量写入 fd 3，服务才发送下一帧。HTTP 429、503 和成功应答也由同一服务产生，每次重试分别检查请求、Trace 与 WAL。[流式与 HTTP 重试](test_provider_streaming.py)
@@ -76,3 +94,5 @@ python3 tests/test_linux_fallback.py  # Linux
 - §§6.1、9.1 的编号用例成功提交最后两个 uint64 编号，再次恢复时检查是否复用旧编号。计数器耗尽时的退出码、只剩一个编号时允许落盘的内容待确认。[#18](https://github.com/Luthics/os-agent/issues/18)
 - §6.2 尚需规定分节的提交边界。用例覆盖 session_init 后缺冻结提示词、checkpoint 后缺冻结提示词或摘要，并与完整分节的结果对照。[#19](https://github.com/Luthics/os-agent/issues/19)
 - §6.1 的水位测试在恢复前交换两个 assistant 的用量，再以 fold 剪去后者，用退出码和实际 Provider 请求验证基准回退。若最后一条回答缺 usage、较早一条有 usage，仍需明确采用哪个基准。[#20](https://github.com/Luthics/os-agent/issues/20)
+- §4.2 的全新 Inbox 在首个工具尝试投递时还没有 tmp 目录。带初始输入启动时，队列对发送方的就绪时机待确认。[#21](https://github.com/Luthics/os-agent/issues/21)
+- §§9.2、9.5 尚需定义一次成功请求内 usage 的帧数、多次上报代表增量还是快照，以及 Trace 缺报的表示形式。[#22](https://github.com/Luthics/os-agent/issues/22)
