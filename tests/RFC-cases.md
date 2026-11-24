@@ -218,12 +218,13 @@
 | 测试 | RFC 条款 |
 | --- | --- |
 | [`every_partial_byte_write_of_a_final_record_fails_without_modifying_history`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L35) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
-| [`checkpoint_short_circuits_archived_history_and_handles_reverse_read_boundaries`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L63) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
-| [`overlapping_folds_keep_the_surviving_prefix_and_never_recycle_turn_ids`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L91) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
-| [`cli_rejects_corrupted_tails_and_unknown_section_versions_before_inference`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L127) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
-| [`nonblocking_wal_lock_excludes_second_process_and_is_released_on_close`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L150) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
-| [`resumed_session_reuses_frozen_prefix_and_appends_configuration_drift_once`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L169) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
-| [`all_live_anchors_across_three_successive_folds_match_forward_replay_and_usage`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L298) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`resuming_a_complete_last_object_without_lf_never_joins_two_wal_records`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L59) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`checkpoint_short_circuits_archived_history_and_handles_reverse_read_boundaries`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L109) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
+| [`overlapping_folds_keep_the_surviving_prefix_and_never_recycle_turn_ids`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L137) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
+| [`cli_rejects_corrupted_tails_and_unknown_section_versions_before_inference`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L173) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`nonblocking_wal_lock_excludes_second_process_and_is_released_on_close`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L196) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
+| [`resumed_session_reuses_frozen_prefix_and_appends_configuration_drift_once`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L215) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`all_live_anchors_across_three_successive_folds_match_forward_replay_and_usage`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L347) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
 
 ## `crates/os-agent-proto/src/ctl.rs`
 

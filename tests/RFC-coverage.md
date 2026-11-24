@@ -61,3 +61,4 @@ python3 tests/test_linux_fallback.py  # Linux
 - §5.2 的编辑器失败或空文件场景已验证不会执行命令。下一步返还工具错误、重复询问还是退出，待规范确认。[#10](https://github.com/Luthics/os-agent/issues/10)
 - §9.5 已覆盖 Trace 接收端断开和保持连接但停止读取。缓冲区写满后哪些完整帧可丢弃、恢复时如何处理半帧，待规范确认。[#11](https://github.com/Luthics/os-agent/issues/11)
 - §§4.1、4.2、9.1 中，stdin、附加 FD 和 Inbox 接收的原始字节如何转换为 UTF-8 用户消息，仍需明确非法编码的处理方式。合法 UTF-8 已覆盖分段写入、NUL 和 Unicode 边界。[#12](https://github.com/Luthics/os-agent/issues/12)
+- §6.2 需明确最后一个完整 JSON 对象缺少 LF 时的恢复策略。用例接受原样拒绝，或保留前缀并成功追加合法 JSONL，逐行检查恢复后的实际文件。[#13](https://github.com/Luthics/os-agent/issues/13)

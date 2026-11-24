@@ -34,36 +34,82 @@ fn replay(path: &Path) -> os_agent_core::wal::ReplayedSession {
 #[test]
 fn every_partial_byte_write_of_a_final_record_fails_without_modifying_history() {
     let dir = TempDir::new();
-    let path = dir.0.join("wal");
     let prefix = lines(&[section("session_init", 0, 1), msg("system", 0, "frozen")]);
     let tail = serde_json::to_vec(&msg("user", 1, "断点 🦀 \n \"quoted\"")).unwrap();
-    for cut in 0..=tail.len() {
+    for cut in 0..tail.len() {
+        let path = dir.0.join(format!("cut-{cut}.wal"));
         let input = [prefix.as_slice(), &tail[..cut]].concat();
         fs::write(&path, &input).unwrap();
         let result = WalStore::open(&path).unwrap().load_active_window();
         if cut == 0 {
             assert_eq!(result.unwrap().messages.len(), 1);
-        } else if cut < tail.len() {
+        } else {
             let err = result.unwrap_err();
             assert_eq!(err.exit_code().as_i32(), 1, "cut {cut}: {err}");
-        } else {
-            // A writer commits a complete record with a trailing newline.
-            let mut committed = input.clone();
-            committed.push(b'\n');
-            fs::write(&path, &committed).unwrap();
-            assert_eq!(replay(&path).messages.len(), 2);
-            continue;
         }
         assert_eq!(fs::read(&path).unwrap(), input, "cut {cut}");
     }
+    let committed = dir.0.join("committed.wal");
+    fs::write(&committed, [prefix, tail, vec![b'\n']].concat()).unwrap();
+    assert_eq!(replay(&committed).messages.len(), 2);
+}
+
+// RFC §6.2, §6.4
+#[test]
+fn resuming_a_complete_last_object_without_lf_never_joins_two_wal_records() {
+    let fx = Fixture::new();
+    fs::write(fx.dir.0.join("case.agent"), "fixture").unwrap();
+    let history = fx.dir.0.join("history");
+    let run = |message: &str| {
+        fx.run(
+            fx.agent()
+                .args(["-q", "-c", "history", "case.agent", "--", message]),
+        )
+    };
+    expect_code(&run("seed"), 0);
+    let mut prefix = fs::read(&history).unwrap();
+    assert_eq!(prefix.pop(), Some(b'\n'));
+    fs::write(&history, &prefix).unwrap();
+    fs::remove_file(&fx.capture).unwrap();
+
+    let result = run("after missing newline");
+    let bytes = fs::read(&history).unwrap();
+    // The missing-LF policy is open. Both rejection and acceptance must
+    // preserve the existing prefix. A successful append must remain JSONL.
+    assert!(bytes.starts_with(&prefix));
+    if !result.status.success() {
+        expect_code(&result, 1);
+        assert!(!result.stderr.is_empty());
+        assert_eq!(bytes, prefix);
+        assert!(!fx.capture.exists());
+        return;
+    }
+    assert!(bytes.ends_with(b"\n"));
+    let mut users = Vec::new();
+    for (i, line) in bytes[..bytes.len() - 1].split(|&b| b == b'\n').enumerate() {
+        let row: Value = serde_json::from_slice(line).unwrap_or_else(|e| {
+            panic!(
+                "successful resume left invalid JSONL on line {}: {e}",
+                i + 1
+            )
+        });
+        if row["role"] == "user" {
+            users.push(row["text"].as_str().unwrap().to_owned());
+        }
+    }
+    assert_eq!(
+        users,
+        ["<args>seed</args>", "<args>after missing newline</args>"]
+    );
+    expect_code(&run("resume again"), 0);
 }
 
 // RFC §6.2
 #[test]
 fn checkpoint_short_circuits_archived_history_and_handles_reverse_read_boundaries() {
     let dir = TempDir::new();
-    let path = dir.0.join("wal");
     for size in [65_535, 65_536, 65_537, 131_073] {
+        let path = dir.0.join(format!("boundary-{size}.wal"));
         let frozen = "界".repeat(size / 3) + &"x".repeat(size % 3);
         let summary = "<checkpoint>\nsummary\n</checkpoint>";
         let active = lines(&[
@@ -257,9 +303,12 @@ impl FoldHistory {
         ));
     }
 
-    fn check(&self, path: &Path) {
-        fs::write(path, lines(&self.rows)).unwrap();
-        let replayed = replay(path);
+    fn check(&self) {
+        // Each generated history represents an independent session.
+        let dir = TempDir::new();
+        let path = dir.0.join("model.wal");
+        fs::write(&path, lines(&self.rows)).unwrap();
+        let replayed = replay(&path);
         assert_eq!(replayed.next_turn_id, self.last_id + 1);
         assert_eq!(replayed.session_usage.input_tokens, self.input_tokens);
         assert_eq!(replayed.session_usage.output_tokens, self.output_tokens);
@@ -296,8 +345,6 @@ impl FoldHistory {
 // RFC §6.1, §6.2, §9.1
 #[test]
 fn all_live_anchors_across_three_successive_folds_match_forward_replay_and_usage() {
-    let dir = TempDir::new();
-    let path = dir.0.join("model.wal");
     let initial = FoldHistory {
         rows: vec![section("session_init", 0, 1), msg("system", 0, "frozen")],
         visible: vec![(0, "system".into(), "frozen".into())],
@@ -311,11 +358,11 @@ fn all_live_anchors_across_three_successive_folds_match_forward_replay_and_usage
         for mut state in states {
             state.append("user");
             state.append("assistant");
-            state.check(&path);
+            state.check();
             for i in 1..state.visible.len() {
                 let mut branch = state.clone();
                 branch.fold_at(i);
-                branch.check(&path);
+                branch.check();
                 next.push(branch);
             }
         }
