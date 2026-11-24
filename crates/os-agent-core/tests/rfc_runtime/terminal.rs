@@ -77,7 +77,16 @@ fn terminal_command(fx: &Fixture) -> Command {
     let mut cmd = fx.command_for("/bin/sh");
     cmd.args([
         "-c",
-        r#""$@"; rc=$?; trap '' HUP; printf '%s' "$rc" > "$HOME/status.tmp"; /bin/mv "$HOME/status.tmp" "$HOME/terminal-status"; exit "$rc""#,
+        r#"
+# The PTY cases supply exactly one input on fd 0. Do not turn a runner's
+# inherited descriptors into additional RFC §4.1 user messages.
+"$@" 3>&- 4<&- 5<&- 6<&- 7<&- 8<&- 9<&-
+rc=$?
+trap '' HUP
+printf '%s' "$rc" > "$HOME/status.tmp"
+/bin/mv "$HOME/status.tmp" "$HOME/terminal-status"
+exit "$rc"
+"#,
         "terminal-session",
         env!("CARGO_BIN_EXE_agent"),
     ]);
@@ -187,14 +196,13 @@ fn tty_stdin_uses_args_immediately_or_reads_input_through_eof() {
     }
 }
 
-// RFC §5.1, §5.2
+// RFC §4.1, §5.1, §5.2
 #[test]
 fn approval_choices_use_dev_tty_and_preserve_piped_stdin() {
     for choice in ["y", "n", "e", "a"] {
         let fx = Fixture::new();
         let root = &fx.dir.0;
         fs::write(root.join("case.agent"), "test").unwrap();
-        fs::write(root.join("stdin"), "from pipeline").unwrap();
         let edit = root.join("editor");
         fs::write(
             &edit,
@@ -218,10 +226,17 @@ printf 'printf edited' > "$1"
         let mut c = terminal_command(&fx);
         c.env("EDITOR", &edit)
             .args(["--approval", "ask", "--shell", "/bin/sh", "case.agent"])
-            .stdin(File::open(root.join("stdin")).unwrap())
+            .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         let mut running = pty.spawn(c, root);
+        running
+            .child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"from pipeline")
+            .unwrap();
         running.until("printf original");
         running.send(format!("{choice}\n").as_bytes());
         if choice == "n" {
@@ -231,10 +246,12 @@ printf 'printf edited' > "$1"
         }
         running.finish(0);
         let ir = jsonl(&root.join("request-2"));
-        assert!(
-            ir.iter()
-                .any(|m| m["role"] == "user" && m["text"] == "from pipeline")
-        );
+        let inputs: Vec<_> = ir
+            .iter()
+            .filter(|m| m["role"] == "user")
+            .map(|m| &m["text"])
+            .collect();
+        assert_eq!(inputs, ["from pipeline"], "approval choice {choice}");
         let result = ir.last().unwrap();
         assert_eq!(result["role"], "tool");
         let text = result["text"].as_str().unwrap();
