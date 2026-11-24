@@ -8,7 +8,11 @@ pub struct TempDir(pub PathBuf);
 
 impl TempDir {
     pub fn new() -> Self {
-        let path = std::env::temp_dir().join(format!("os-agent-test-{}", Uuid::new_v4()));
+        Self::under(&std::env::temp_dir())
+    }
+
+    pub fn under(parent: &std::path::Path) -> Self {
+        let path = parent.join(format!("os-agent-test-{}", Uuid::new_v4()));
         fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
         Self(path)
     }

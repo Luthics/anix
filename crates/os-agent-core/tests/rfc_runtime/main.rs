@@ -77,6 +77,9 @@ fn with_tools(calls: impl IntoIterator<Item = Value>) -> Vec<Value> {
         .collect()
 }
 mod compaction;
+mod doctor;
 mod lifecycle;
+mod signals;
 mod terminal;
+mod trace;
 mod wal;

@@ -176,3 +176,23 @@ fn nested_tool_receives_control_channels_tools_path_and_no_parent_wal_variable()
         ]
     );
 }
+
+#[test]
+fn script_arguments_accept_an_optional_separator_and_preserve_option_like_literals() {
+    let fx = Fixture::new();
+    fs::write(fx.dir.0.join("case.agent"), "body").unwrap();
+    for (args, user) in [
+        (&["case.agent", "hello", "two words"][..], "hello two words"),
+        (
+            &["case.agent", "--", "hello", "two words"][..],
+            "hello two words",
+        ),
+        (&["case.agent", "--", "-q", "--version"][..], "-q --version"),
+    ] {
+        expect_code(&fx.run(fx.agent().args(args)), 0);
+        assert_eq!(
+            jsonl(&fx.capture).last().unwrap()["text"],
+            format!("<args>{user}</args>")
+        );
+    }
+}
