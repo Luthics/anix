@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use os_agent_proto::IR_VERSION;
 use os_agent_proto::exit_code::ExitCode;
 use os_agent_proto::ir::{IrMessage, ToolCall};
+use os_agent_proto::provider::TokenUsage;
 use os_agent_proto::wal::{WalConfigSnapshot, WalEvent, WalRole};
 use thiserror::Error;
 
@@ -49,6 +50,11 @@ impl WalError {
 #[derive(Debug, Clone)]
 pub struct ReplayedSession {
     pub messages: Vec<IrMessage>,
+    /// Recorded `usage` for surviving `role: "assistant"` turns in `messages` (keyed by `turn_id`).
+    pub assistant_usages: BTreeMap<u64, TokenUsage>,
+    /// Exact cross-compaction 5-field cumulative usage (`checkpoint.cumulative_usage` + all
+    /// `assistant.usage` in this active window including turns pruned by `fold`).
+    pub session_usage: TokenUsage,
     pub latest_config: Option<WalConfigSnapshot>,
     pub last_checkpoint_turn: u64,
     pub next_turn_id: u64,
@@ -122,6 +128,8 @@ impl WalStore {
         let Some(ref mut file) = self.file else {
             return Ok(ReplayedSession {
                 messages: Vec::new(),
+                assistant_usages: BTreeMap::new(),
+                session_usage: TokenUsage::default(),
                 latest_config: None,
                 last_checkpoint_turn: 0,
                 next_turn_id: 1,
@@ -141,6 +149,8 @@ impl WalStore {
         if file_len == 0 {
             return Ok(ReplayedSession {
                 messages: Vec::new(),
+                assistant_usages: BTreeMap::new(),
+                session_usage: TokenUsage::default(),
                 latest_config: None,
                 last_checkpoint_turn: 0,
                 next_turn_id: 1,
@@ -152,6 +162,9 @@ impl WalStore {
         let mut is_first_nonempty = true;
         let mut skip_ge: u64 = u64::MAX;
         let mut collected_rev: Vec<IrMessage> = Vec::new();
+        let mut surviving_assistant_usages: BTreeMap<u64, TokenUsage> = BTreeMap::new();
+        let mut window_usage = TokenUsage::default();
+        let mut checkpoint_base_usage = TokenUsage::default();
         let mut latest_config: Option<WalConfigSnapshot> = None;
         let mut last_checkpoint_turn: u64 = 0;
         let mut max_turn_id: u64 = 0;
@@ -222,6 +235,7 @@ impl WalStore {
                     ir_version,
                     turn_id,
                     config,
+                    cumulative_usage,
                     ..
                 } => {
                     if ir_version != IR_VERSION {
@@ -229,6 +243,9 @@ impl WalStore {
                     }
                     if latest_config.is_none() {
                         latest_config = Some(config);
+                    }
+                    if let Some(cum) = cumulative_usage {
+                        checkpoint_base_usage = cum;
                     }
                     last_checkpoint_turn = turn_id;
                     max_turn_id = max_turn_id.max(turn_id);
@@ -277,9 +294,19 @@ impl WalStore {
                     is_error,
                     media,
                     provider_opaque,
+                    usage,
                     ..
                 } => {
                     max_turn_id = max_turn_id.max(turn_id);
+
+                    // Section 6.2.4 Rule 2: accumulate EVERY scanned `assistant.usage` in this
+                    // active window into `window_usage`, EVEN IF pruned by `fold` (`turn_id >= skip_ge`).
+                    if role == WalRole::Assistant
+                        && let Some(ref u) = usage
+                    {
+                        window_usage.add_assign(u);
+                    }
+
                     if turn_id >= skip_ge {
                         continue;
                     }
@@ -331,6 +358,9 @@ impl WalStore {
                                 skip_ge = skip_ge.min(turn_id);
                                 continue;
                             }
+                            if let Some(u) = usage {
+                                surviving_assistant_usages.insert(turn_id, u);
+                            }
                             collected_rev.push(IrMessage::Assistant {
                                 turn_id,
                                 text,
@@ -357,8 +387,22 @@ impl WalStore {
         // Final safeguard: drop any leading orphaned tool message (if a fold started mid-batch).
         let messages = drop_orphan_tools(collected_rev);
 
+        let surviving_ids: HashSet<u64> = messages
+            .iter()
+            .filter_map(|m| match m {
+                IrMessage::Assistant { turn_id, .. } => Some(*turn_id),
+                _ => None,
+            })
+            .collect();
+        surviving_assistant_usages.retain(|tid, _| surviving_ids.contains(tid));
+
+        let mut session_usage = checkpoint_base_usage;
+        session_usage.add_assign(&window_usage);
+
         Ok(ReplayedSession {
             messages,
+            assistant_usages: surviving_assistant_usages,
+            session_usage,
             latest_config,
             last_checkpoint_turn,
             next_turn_id: max_turn_id.saturating_add(1).max(1),
@@ -397,14 +441,22 @@ impl WalStore {
     }
 
     pub fn append_message(&mut self, msg: &IrMessage) -> Result<(), WalError> {
+        self.append_message_with_usage(msg, None)
+    }
+
+    pub fn append_message_with_usage(
+        &mut self,
+        msg: &IrMessage,
+        usage: Option<TokenUsage>,
+    ) -> Result<(), WalError> {
         let ts = posix::timestamp_rfc3339_utc();
-        let event = ir_message_to_wal_event(msg, ts);
+        let event = ir_message_to_wal_event(msg, ts, usage);
         self.append(&event)
     }
 }
 
 /// Convert an [`IrMessage`] into its corresponding [`WalEvent::Message`].
-pub fn ir_message_to_wal_event(msg: &IrMessage, ts: String) -> WalEvent {
+pub fn ir_message_to_wal_event(msg: &IrMessage, ts: String, usage: Option<TokenUsage>) -> WalEvent {
     match msg {
         IrMessage::System { turn_id, text, .. } => WalEvent::Message {
             turn_id: *turn_id,
@@ -417,6 +469,7 @@ pub fn ir_message_to_wal_event(msg: &IrMessage, ts: String) -> WalEvent {
             is_error: false,
             media: Vec::new(),
             provider_opaque: None,
+            usage: None,
         },
         IrMessage::User {
             turn_id,
@@ -434,6 +487,7 @@ pub fn ir_message_to_wal_event(msg: &IrMessage, ts: String) -> WalEvent {
             is_error: false,
             media: media.clone(),
             provider_opaque: None,
+            usage: None,
         },
         IrMessage::Assistant {
             turn_id,
@@ -453,6 +507,7 @@ pub fn ir_message_to_wal_event(msg: &IrMessage, ts: String) -> WalEvent {
             is_error: false,
             media: Vec::new(),
             provider_opaque: provider_opaque.clone(),
+            usage,
         },
         IrMessage::Tool {
             turn_id,
@@ -472,6 +527,7 @@ pub fn ir_message_to_wal_event(msg: &IrMessage, ts: String) -> WalEvent {
             is_error: *is_error,
             media: media.clone(),
             provider_opaque: None,
+            usage: None,
         },
     }
 }

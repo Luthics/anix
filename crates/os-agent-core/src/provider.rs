@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use os_agent_proto::exit_code::ExitCode;
 use os_agent_proto::ir::{IrStream, StderrMode, ToolCall};
-use os_agent_proto::provider::ProviderEvent;
+use os_agent_proto::provider::{ProviderEvent, TokenUsage};
 use serde_json::{Map, Value};
 use thiserror::Error;
 
@@ -43,14 +43,6 @@ impl ProviderError {
             Self::Failed { .. } => ExitCode::RuntimeError,
         }
     }
-}
-
-/// Token usage reported by a Provider turn.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct TokenUsage {
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cached_tokens: Option<u64>,
 }
 
 /// Aggregated result of a completed Provider inference turn.
@@ -148,12 +140,10 @@ pub fn invoke_provider(
                     "tool_calls".into(),
                     Value::from(result.tool_calls.len() as u64),
                 );
-                if let Some(u) = result.usage {
-                    resp_fields.insert("input_tokens".into(), Value::from(u.input_tokens));
-                    resp_fields.insert("output_tokens".into(), Value::from(u.output_tokens));
-                    if let Some(c) = u.cached_tokens {
-                        resp_fields.insert("cached_tokens".into(), Value::from(c));
-                    }
+                if let Some(u) = result.usage
+                    && let Ok(val) = serde_json::to_value(u.normalized_5())
+                {
+                    resp_fields.insert("usage".into(), val);
                 }
                 tracer.emit_event("llm_response", resp_fields);
                 return Ok(result);
@@ -442,11 +432,15 @@ fn run_single_attempt(
                         input_tokens,
                         output_tokens,
                         cached_tokens,
+                        cache_write_tokens,
+                        reasoning_tokens,
                     } => {
                         usage = Some(TokenUsage {
                             input_tokens,
                             output_tokens,
                             cached_tokens,
+                            cache_write_tokens,
+                            reasoning_tokens,
                         });
                     }
                     ProviderEvent::Opaque { data } => {

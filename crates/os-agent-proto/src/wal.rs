@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::ir::{ApprovalMode, MediaAttachment, StderrMode, ToolCall};
+use crate::provider::TokenUsage;
 
 /// Contract-level configuration recorded in `session_init`, `checkpoint`, and `runtime_update`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,6 +52,8 @@ pub enum WalEvent {
         media: Vec<MediaAttachment>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provider_opaque: Option<Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        usage: Option<TokenUsage>,
     },
     RuntimeUpdate {
         turn_id: u64,
@@ -69,6 +72,10 @@ pub enum WalEvent {
         turn_id: u64,
         ts: String,
         config: WalConfigSnapshot,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        compact_usage: Option<TokenUsage>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cumulative_usage: Option<TokenUsage>,
     },
 }
 
