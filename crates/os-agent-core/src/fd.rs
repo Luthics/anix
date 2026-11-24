@@ -16,6 +16,7 @@ const PIPE_DRAIN_AFTER_EXIT: Duration = Duration::from_millis(200);
 
 use os_agent_proto::ctl::{CtlFrame, MAX_CTL_FRAME_BYTES};
 use os_agent_proto::exit_code::ExitCode;
+use os_agent_proto::ir::ApprovalMode;
 
 use crate::platform::{self, DirWatcher, PreparedSandbox, posix};
 use crate::signal::SignalState;
@@ -137,6 +138,7 @@ pub fn run_msh_command(
     cmd_str: &str,
     cwd: &Path,
     msh_timeout_sec: u64,
+    approval: ApprovalMode,
     sandbox: Option<&PreparedSandbox>,
     signals: &SignalState,
 ) -> io::Result<MshOutput> {
@@ -192,6 +194,12 @@ pub fn run_msh_command(
     let parent_pid = unsafe { libc::getpid() };
     let sandbox_cloned = sandbox.cloned();
 
+    let approval_str = match approval {
+        ApprovalMode::Ask => "ask",
+        ApprovalMode::Auto => "auto",
+        ApprovalMode::Deny => "deny",
+    };
+
     let mut command = Command::new(shell_bin);
     command
         .arg("-c")
@@ -199,10 +207,22 @@ pub fn run_msh_command(
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        // Section 3.4: Prevent nested child agents from inheriting parent WAL file lock.
-        .env_remove("AGENT_CONTEXT")
+        .stderr(Stdio::piped());
+
+    // Section 3.4: Clear ALL `AGENT_*` environment variables before spawning `msh`,
+    // keeping ONLY the observability whitelist (`AGENT_LOG`, `AGENT_TRACE_LEVEL`),
+    // then actively inject the parent's resolved `AGENT_APPROVAL` and side-channel vars.
+    for (key, _) in std::env::vars_os() {
+        let key_str = key.to_string_lossy();
+        if key_str.starts_with("AGENT_") && key_str != "AGENT_LOG" && key_str != "AGENT_TRACE_LEVEL"
+        {
+            command.env_remove(&key);
+        }
+    }
+
+    command
         .env("PATH", new_path)
+        .env("AGENT_APPROVAL", approval_str)
         .env("AGENT_OUT", "/dev/fd/4")
         .env("AGENT_ERR", "/dev/fd/5")
         .env("AGENT_CTL", "/dev/fd/6")
