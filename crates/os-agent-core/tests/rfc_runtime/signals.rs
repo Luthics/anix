@@ -1,9 +1,10 @@
 //! RFC §§4.2, 6.1–6.4. Deliver real signals to processes started by the test.
 use super::background::{Agent, until};
+use super::inbox::publish;
 use super::{Fixture, expect_code, jsonl, scripted_provider, success_text};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 // RFC §6.3, §6.4, §6.2
@@ -42,12 +43,6 @@ exit 1
         scripted_provider(&fx, &[success_text("finished after resume")]);
         expect_code(&fx.run(fx.agent().args(opts)), 0);
     }
-}
-
-fn publish(root: &Path, name: &str, text: &str) {
-    let tmp = root.join("mail/tmp").join(name);
-    fs::write(&tmp, text).unwrap();
-    fs::rename(tmp, root.join("mail/new").join(name)).unwrap();
 }
 
 // RFC §4.2, §6.2, §6.3

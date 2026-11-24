@@ -1,10 +1,18 @@
 //! §4.2. Hold a tool open while multiple independent publishers finish their renames.
 use super::background::{Agent, until};
-use super::{Fixture, jsonl, scripted_provider, success_text, tool, with_tools};
+use super::{Fixture, expect_code, jsonl, scripted_provider, success_text, tool, with_tools};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::sync::Barrier;
 use std::thread;
+use std::time::{Duration, Instant};
+
+pub(super) fn publish(root: &Path, name: &str, text: &str) {
+    let tmp = root.join("mail/tmp").join(name);
+    fs::write(&tmp, text).unwrap();
+    fs::rename(tmp, root.join("mail/new").join(name)).unwrap();
+}
 
 // RFC §4.2, §6.2
 #[test]
@@ -105,4 +113,229 @@ while [ ! -f release ] && [ "$i" -lt 240 ]; do /bin/sleep 0.1; i=$((i+1)); done
             *body
         );
     }
+}
+
+// RFC §4.2, §6.2, §9.1
+#[test]
+fn a_publisher_can_queue_work_while_the_initial_cli_task_is_running() {
+    // A real publisher runs as part of the first task. It uses the same
+    // close-then-rename protocol whether or not the Inbox already exists.
+    for precreated in [true, false] {
+        let fx = Fixture::new();
+        let root = &fx.dir.0;
+        fs::write(root.join("case.agent"), "queue prompt").unwrap();
+        if precreated {
+            for dir in ["tmp", "new", "cur", "done"] {
+                fs::create_dir_all(root.join("mail").join(dir)).unwrap();
+            }
+        }
+        let enqueue = r#"printf 'queued body' > mail/tmp/100-20-1 && /bin/mv mail/tmp/100-20-1 mail/new/100-20-1"#;
+        scripted_provider(
+            &fx,
+            &[
+                with_tools([tool("publish", enqueue)]),
+                success_text("initial complete"),
+                success_text("queued complete"),
+            ],
+        );
+        let out = fx.run(fx.agent().args([
+            "-q",
+            "-y",
+            "--shell",
+            "/bin/sh",
+            "--inbox",
+            "mail",
+            "--idle-timeout",
+            "1",
+            "-c",
+            "history",
+            "case.agent",
+            "--",
+            "initial",
+        ]));
+        expect_code(&out, 0);
+        let tool_result = jsonl(&root.join("request-2")).pop().unwrap();
+        assert_eq!(tool_result["role"], "tool");
+        assert_eq!(tool_result["tool_call_id"], "publish");
+        assert_ne!(
+            tool_result["is_error"], true,
+            "precreated={precreated}: {tool_result}"
+        );
+        let archived = root.join("mail/done/100-20-1");
+        assert!(
+            archived.is_file(),
+            "publication was not consumed (precreated={precreated}): {tool_result}"
+        );
+        assert_eq!(fs::read(archived).unwrap(), b"queued body");
+        let queued = jsonl(&root.join("request-3"));
+        assert_eq!(queued[2]["text"], "<args>initial</args>");
+        let tail = &queued[queued.len() - 2..];
+        assert_eq!(tail[0]["text"], "initial complete");
+        assert_eq!(tail[1]["role"], "user");
+        assert!(
+            tail[1]["text"]
+                .as_str()
+                .unwrap()
+                .starts_with("<input source=\"100-20-1\">")
+        );
+        let wal = jsonl(&root.join("history"));
+        assert_eq!(wal.last().unwrap()["text"], "queued complete");
+    }
+}
+
+// RFC §4.2, §6.2
+#[test]
+fn idle_timeout_starts_after_the_last_job_finishes_and_releases_the_wal() {
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    scripted_provider(
+        &fx,
+        &[
+            success_text("first complete"),
+            success_text("second complete"),
+            success_text("reopened"),
+        ],
+    );
+    let provider = root.join("record-provider");
+    let script = fs::read_to_string(&provider).unwrap().replace(
+        "/bin/cat \"$HOME/reply-$n\"",
+        r#"if [ "$n" = 1 ] || [ "$n" = 2 ]; then
+    : > "busy-$n"
+    i=0
+    while [ ! -f "release-$n" ] && [ "$i" -lt 200 ]; do /bin/sleep 0.05; i=$((i+1)); done
+    [ -f "release-$n" ] || exit 1
+fi
+/bin/cat "$HOME/reply-$n""#,
+    );
+    fs::write(provider, script).unwrap();
+    for dir in ["tmp", "new"] {
+        fs::create_dir_all(root.join("mail").join(dir)).unwrap();
+    }
+    publish(root, "100-20-1", "first");
+    let mut agent = Agent::start(
+        &fx,
+        &[
+            "-q",
+            "--inbox",
+            "mail",
+            "--idle-timeout",
+            "1",
+            "-c",
+            "history",
+            "case.agent",
+        ],
+    );
+    until("first task inside provider", || {
+        root.join("busy-1").exists()
+    });
+    publish(root, "100-20-2", "second");
+    assert!(root.join("mail/new/100-20-2").is_file());
+    fs::write(root.join("release-1"), "").unwrap();
+    until("second task inside provider", || {
+        root.join("busy-2").exists()
+    });
+    assert!(root.join("mail/done/100-20-1").is_file());
+    thread::sleep(Duration::from_millis(1100));
+    assert!(agent.0.try_wait().unwrap().is_none());
+    assert!(root.join("mail/cur/100-20-2").is_file());
+    expect_code(
+        &fx.run(
+            fx.agent()
+                .args(["-c", "history", "case.agent", "--", "lock probe"]),
+        ),
+        1,
+    );
+    let released = Instant::now();
+    fs::write(root.join("release-2"), "").unwrap();
+    agent.finish(0);
+    assert!(
+        released.elapsed() >= Duration::from_secs(1),
+        "idle timer included time spent in the provider"
+    );
+    assert!(root.join("mail/done/100-20-2").is_file());
+    expect_code(
+        &fx.run(
+            fx.agent()
+                .args(["-c", "history", "case.agent", "--", "after idle exit"]),
+        ),
+        0,
+    );
+    let ir = jsonl(&root.join("request-3"));
+    let replies: Vec<_> = ir
+        .iter()
+        .filter(|r| r["role"] == "assistant")
+        .map(|r| r["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(replies, ["first complete", "second complete"]);
+}
+
+// RFC §4.2, §6.2, §6.4, §9.2
+#[test]
+fn provider_nonzero_after_done_keeps_the_failed_inbox_task_unacknowledged() {
+    let fx = Fixture::new();
+    let root = &fx.dir.0;
+    fs::write(root.join("case.agent"), "queue prompt").unwrap();
+    for dir in ["tmp", "new"] {
+        fs::create_dir_all(root.join("mail").join(dir)).unwrap();
+    }
+    publish(root, "100-20-1", "first payload");
+    publish(root, "100-20-2", "later payload");
+    scripted_provider(
+        &fx,
+        &[
+            with_tools([tool("uncommitted", "printf unexpected > tool-output")]),
+            success_text("after failure"),
+        ],
+    );
+    let provider = root.join("record-provider");
+    fs::write(
+        &provider,
+        fs::read_to_string(&provider).unwrap()
+            + "\nif [ \"$n\" = 1 ]; then printf 'failure after done\\n' >&2; exit 23; fi\n",
+    )
+    .unwrap();
+    let out = fx.run(fx.agent().args([
+        "-q",
+        "-y",
+        "--shell",
+        "/bin/sh",
+        "--inbox",
+        "mail",
+        "--idle-timeout",
+        "1",
+        "-c",
+        "history",
+        "case.agent",
+    ]));
+    expect_code(&out, 1);
+    assert!(String::from_utf8_lossy(&out.stderr).contains("failure after done"));
+    assert!(!root.join("tool-output").exists());
+    assert!(!root.join("request-2").exists());
+    assert!(!root.join("mail/done/100-20-1").exists());
+    assert_eq!(
+        fs::read(root.join("mail/new/100-20-2")).unwrap(),
+        b"later payload"
+    );
+    let wal = jsonl(&root.join("history"));
+    assert!(
+        wal.iter()
+            .any(|r| r["role"] == "user" && r["text"].as_str().unwrap().contains("first payload"))
+    );
+    assert!(
+        wal.iter()
+            .all(|r| r["role"] != "assistant" && r["role"] != "tool")
+    );
+    expect_code(
+        &fx.run(
+            fx.agent()
+                .args(["-c", "history", "case.agent", "--", "reopen"]),
+        ),
+        0,
+    );
+    let resumed = jsonl(&root.join("request-2"));
+    assert!(
+        resumed
+            .iter()
+            .all(|r| r["role"] != "assistant" && r["role"] != "tool")
+    );
 }

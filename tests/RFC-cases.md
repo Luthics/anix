@@ -143,7 +143,10 @@
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`concurrent_publications_wait_for_tool_closure_and_preserve_each_complete_body`](../crates/os-agent-core/tests/rfc_runtime/inbox.rs#L11) | [§4.2](../docs/v1.0.0-RFC.md?plain=1#L142) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
+| [`concurrent_publications_wait_for_tool_closure_and_preserve_each_complete_body`](../crates/os-agent-core/tests/rfc_runtime/inbox.rs#L19) | [§4.2](../docs/v1.0.0-RFC.md?plain=1#L142) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
+| [`a_publisher_can_queue_work_while_the_initial_cli_task_is_running`](../crates/os-agent-core/tests/rfc_runtime/inbox.rs#L120) | [§4.2](../docs/v1.0.0-RFC.md?plain=1#L142) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`idle_timeout_starts_after_the_last_job_finishes_and_releases_the_wal`](../crates/os-agent-core/tests/rfc_runtime/inbox.rs#L188) | [§4.2](../docs/v1.0.0-RFC.md?plain=1#L142) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
+| [`provider_nonzero_after_done_keeps_the_failed_inbox_task_unacknowledged`](../crates/os-agent-core/tests/rfc_runtime/inbox.rs#L274) | [§4.2](../docs/v1.0.0-RFC.md?plain=1#L142) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
 
 ## `crates/os-agent-core/tests/rfc_runtime/io.rs`
 
@@ -192,11 +195,11 @@
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`interruption_reaps_the_provider_discards_partial_assistant_and_releases_lock`](../crates/os-agent-core/tests/rfc_runtime/signals.rs#L11) | [§6.3](../docs/v1.0.0-RFC.md?plain=1#L268) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
-| [`idle_process_holds_wal_and_usr2_snapshots_exact_ir_at_a_safe_boundary`](../crates/os-agent-core/tests/rfc_runtime/signals.rs#L55) | [§4.2](../docs/v1.0.0-RFC.md?plain=1#L142) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§6.3](../docs/v1.0.0-RFC.md?plain=1#L268) |
-| [`usr1_forces_one_tool_free_compaction_before_the_next_inbox_inference`](../crates/os-agent-core/tests/rfc_runtime/signals.rs#L122) | [§6.3](../docs/v1.0.0-RFC.md?plain=1#L268) · [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) |
-| [`interruption_waits_three_seconds_then_stops_a_provider_that_handles_term_without_exiting`](../crates/os-agent-core/tests/rfc_runtime/signals.rs#L175) | [§6.3](../docs/v1.0.0-RFC.md?plain=1#L268) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
-| [`abrupt_parent_exit_stops_the_active_provider_or_shell_child`](../crates/os-agent-core/tests/rfc_runtime/signals.rs#L215) | [§10.2](../docs/v1.0.0-RFC.md?plain=1#L524) |
+| [`interruption_reaps_the_provider_discards_partial_assistant_and_releases_lock`](../crates/os-agent-core/tests/rfc_runtime/signals.rs#L12) | [§6.3](../docs/v1.0.0-RFC.md?plain=1#L268) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
+| [`idle_process_holds_wal_and_usr2_snapshots_exact_ir_at_a_safe_boundary`](../crates/os-agent-core/tests/rfc_runtime/signals.rs#L50) | [§4.2](../docs/v1.0.0-RFC.md?plain=1#L142) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§6.3](../docs/v1.0.0-RFC.md?plain=1#L268) |
+| [`usr1_forces_one_tool_free_compaction_before_the_next_inbox_inference`](../crates/os-agent-core/tests/rfc_runtime/signals.rs#L117) | [§6.3](../docs/v1.0.0-RFC.md?plain=1#L268) · [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) |
+| [`interruption_waits_three_seconds_then_stops_a_provider_that_handles_term_without_exiting`](../crates/os-agent-core/tests/rfc_runtime/signals.rs#L170) | [§6.3](../docs/v1.0.0-RFC.md?plain=1#L268) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`abrupt_parent_exit_stops_the_active_provider_or_shell_child`](../crates/os-agent-core/tests/rfc_runtime/signals.rs#L210) | [§10.2](../docs/v1.0.0-RFC.md?plain=1#L524) |
 
 ## `crates/os-agent-core/tests/rfc_runtime/terminal.rs`
 
