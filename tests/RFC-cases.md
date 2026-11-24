@@ -135,6 +135,7 @@
 | [`each_missing_or_non_executable_private_binary_is_identified`](../crates/os-agent-core/tests/rfc_runtime/doctor.rs#L31) | [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) · [§2](../docs/v1.0.0-RFC.md?plain=1#L23) |
 | [`doctor_distinguishes_required_missing_empty_and_fallback_credentials`](../crates/os-agent-core/tests/rfc_runtime/doctor.rs#L62) | [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) |
 | [`invalid_global_or_project_toml_and_unusable_runtime_directory_report_failure`](../crates/os-agent-core/tests/rfc_runtime/doctor.rs#L91) | [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) |
+| [`doctor_and_the_runtime_can_use_a_configured_default_provider_on_path`](../crates/os-agent-core/tests/rfc_runtime/doctor.rs#L114) | [§2](../docs/v1.0.0-RFC.md?plain=1#L23) · [§3.1](../docs/v1.0.0-RFC.md?plain=1#L39) · [§8.2](../docs/v1.0.0-RFC.md?plain=1#L333) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) |
 
 ## `crates/os-agent-core/tests/rfc_runtime/hooks.rs`
 
@@ -313,7 +314,8 @@
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`test_installed_pipeline_and_fold`](../tests/test_distribution.py#L66) | [§1.2](../docs/v1.0.0-RFC.md?plain=1#L15) · [§2](../docs/v1.0.0-RFC.md?plain=1#L23) · [§3.1](../docs/v1.0.0-RFC.md?plain=1#L39) · [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) · [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) · [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§4.4](../docs/v1.0.0-RFC.md?plain=1#L172) · [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
+| [`test_reinstall_keeps_shell_startup_files_and_private_tools_out_of_the_user_bin`](../tests/test_distribution.py#L90) | [§2](../docs/v1.0.0-RFC.md?plain=1#L23) · [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) |
+| [`test_installed_pipeline_and_fold`](../tests/test_distribution.py#L117) | [§1.2](../docs/v1.0.0-RFC.md?plain=1#L15) · [§2](../docs/v1.0.0-RFC.md?plain=1#L23) · [§3.1](../docs/v1.0.0-RFC.md?plain=1#L39) · [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) · [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) · [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§4.4](../docs/v1.0.0-RFC.md?plain=1#L172) · [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
 
 ## `tests/test_linux_fallback.py`
 

@@ -108,3 +108,22 @@ fn invalid_global_or_project_toml_and_unusable_runtime_directory_report_failure(
     expect_code(&out, 1);
     assert!(!out.stderr.is_empty());
 }
+
+// RFC §2, §3.1, §8.2, §9.2, §10.3
+#[test]
+fn doctor_and_the_runtime_can_use_a_configured_default_provider_on_path() {
+    let fx = installation("", "");
+    let root = &fx.dir.0;
+    // All five required paths have executable fixtures. The selected provider
+    // is an additional executable on the user's PATH.
+    fs::write(root.join("config/agent/config.toml"),
+        "[defaults]\nprovider='fixture'\nmodel='local'\n[providers.fixture]\nbin='record-provider'\napi_key_env=''\napi_key=''\n").unwrap();
+    fs::write(root.join("case.agent"), "prompt").unwrap();
+    expect_code(
+        &fx.run(fx.agent().args(["-q", "case.agent", "--", "go"])),
+        0,
+    );
+    assert!(fx.capture.is_file());
+    let diagnosis = fx.run(fx.agent().arg("--doctor"));
+    expect_code(&diagnosis, 0);
+}

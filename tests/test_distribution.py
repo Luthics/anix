@@ -61,7 +61,58 @@ class Responses(JsonRequest):
         self.wfile.write(data)
 
 
+def install(root):
+    # Cargo's cache/toolchain belong to the build environment. All installed
+    # artifacts and all subsequent agent processes use a fresh HOME.
+    build_env = dict(os.environ, HOME=str(root), OS_AGENT_PREFIX=str(root / ".local"),
+                     XDG_CONFIG_HOME=str(root / ".config"),
+                     XDG_STATE_HOME=str(root / ".local/state"),
+                     XDG_RUNTIME_DIR=str(root / "run"))
+    for var, subdir in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")]:
+        build_env.setdefault(var, str(Path.home() / subdir))
+    build_env.pop("CARGO_TARGET_DIR", None)
+    bootstrap = os.environ.get("OS_AGENT_BOOTSTRAP")
+    if bootstrap:
+        # Match the documented sh-on-stdin invocation. Test the release
+        # script itself, before the fixture provisions its loopback API.
+        release_env = {k: build_env[k] for k in (
+            "HOME", "PATH", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR")}
+        with Path(bootstrap).open("rb") as source:
+            subprocess.run(["/bin/sh"], stdin=source, cwd=root, env=release_env,
+                           stdout=subprocess.PIPE, check=True, timeout=600)
+    else:
+        subprocess.run(["bash", str(REPO / "scripts/install-local.sh")], check=True,
+                       cwd=REPO, env=build_env, stdout=subprocess.PIPE, timeout=600)
+
+
 class Distribution(unittest.TestCase):
+    # RFC §2, §10.3
+    def test_reinstall_keeps_shell_startup_files_and_private_tools_out_of_the_user_bin(self):
+        with tempfile.TemporaryDirectory(prefix="agent reinstall ") as home:
+            root = Path(home)
+            user_bin = root / ".local/bin"
+            user_bin.mkdir(parents=True)
+            existing = user_bin / "existing-command"
+            existing.write_bytes(b"#!/bin/sh\nexit 0\n")
+            existing.chmod(0o755)
+            startup = {name: f"# {name}\nexport LANG=C\n".encode()
+                       for name in (".bashrc", ".bash_profile", ".profile", ".zprofile", ".zshenv")}
+            for name, data in startup.items():
+                (root / name).write_bytes(data)
+            (root / ".zshrc").symlink_to(".zprofile")
+            for iteration in (1, 2):
+                with self.subTest(installation=iteration):
+                    install(root)
+                    for name, data in startup.items():
+                        self.assertEqual((root / name).read_bytes(), data)
+                    self.assertEqual(os.readlink(root / ".zshrc"), ".zprofile")
+                    self.assertEqual({p.name for p in user_bin.iterdir()}, {"existing-command", "agent"})
+                    self.assertEqual(existing.read_bytes(), b"#!/bin/sh\nexit 0\n")
+                    for rel in ("bin/agent", "libexec/agent/msh", "libexec/agent/agent-provider-openai-responses",
+                                "libexec/agent/tools/aview", "libexec/agent/tools/aclr"):
+                        path = root / ".local" / rel
+                        self.assertTrue(path.is_file() and os.access(path, os.X_OK), path)
+
     # RFC §1.2, §2, §3.1, §10.3, §7.2, §6.1, §4.4, §9.6
     def test_installed_pipeline_and_fold(self):
         with tempfile.TemporaryDirectory(prefix="agent-fhs-") as home:
@@ -69,27 +120,7 @@ class Distribution(unittest.TestCase):
             prefix = root / ".local"
             for name in (".bashrc", ".zshrc", ".profile"):
                 (root / name).write_bytes(b"# fixture rc\n")
-            # Cargo's cache/toolchain belong to the build environment. All installed
-            # artifacts and all subsequent agent processes use a fresh HOME.
-            build_env = dict(os.environ, HOME=home, OS_AGENT_PREFIX=str(prefix),
-                             XDG_CONFIG_HOME=str(root / ".config"),
-                             XDG_STATE_HOME=str(root / ".local/state"),
-                             XDG_RUNTIME_DIR=str(root / "run"))
-            for var, subdir in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")]:
-                build_env.setdefault(var, str(Path.home() / subdir))
-            build_env.pop("CARGO_TARGET_DIR", None)
-            bootstrap = os.environ.get("OS_AGENT_BOOTSTRAP")
-            if bootstrap:
-                # Match the documented sh-on-stdin invocation. Test the release
-                # script itself, before the fixture provisions its loopback API.
-                release_env = {k: build_env[k] for k in (
-                    "HOME", "PATH", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR")}
-                with Path(bootstrap).open("rb") as source:
-                    subprocess.run(["/bin/sh"], stdin=source, cwd=root, env=release_env,
-                                   stdout=subprocess.PIPE, check=True, timeout=600)
-            else:
-                subprocess.run(["bash", str(REPO / "scripts/install-local.sh")], check=True,
-                               cwd=REPO, env=build_env, stdout=subprocess.PIPE, timeout=600)
+            install(root)
             for name in (".bashrc", ".zshrc", ".profile"):
                 self.assertEqual((root / name).read_bytes(), b"# fixture rc\n")
             self.assertEqual({p.name for p in (prefix / "bin").iterdir()}, {"agent"})

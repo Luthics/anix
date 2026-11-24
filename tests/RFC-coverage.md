@@ -31,6 +31,17 @@
 | §§4.1、4.3、6.1–6.4、9.1–9.2 | 从真实 msh 检查 fd 4–6 的类型和访问模式，重复打开输出侧信道并逐字节核对各自超过 1 MiB 的数据。向正在执行工具的 agent 发送 INT 或 TERM，验证 msh 子命令收到 TERM、WAL 解锁以及重启后的工具配对。对不可读媒体和外部压缩器返回的非法 UTF-8，分别检查 HTTP 请求和 checkpoint 是否提前产生。 | [进程与侧信道](test_shell_pipeline.py)、[适配器](../crates/provider-openai-responses/tests/rfc_responses.rs)、[压缩器](../crates/os-agent-core/tests/rfc_runtime/compaction.rs) |
 | §§6.1–6.2、9.1–9.3 | 在三个独立进程中折叠、压缩两次并恢复，逐项核对两次 checkpoint 的五字段前缀和、on-exit 的本次及会话用量、冻结提示词和摘要。把 WAL 分别截在初始化和压缩的每个完整记录边界，捕获恢复后的首个请求。Linux 用相同活跃窗口、1 MiB 和 32 MiB 的归档对照进程实际读取的字节数。 | [压缩记账](../crates/os-agent-core/tests/rfc_runtime/compaction.rs)、[WAL 恢复](../crates/os-agent-core/tests/rfc_runtime/wal.rs)、[读取量](test_linux_fallback.py) |
 
+### §§2、3、8.1–8.2、10.3 脚本、配置与安装的验收边界
+
+| 条款 | 可观察结果 |
+| --- | --- |
+| §2、§10.3 FHS 与重装 | 在含空格的临时 HOME 连续安装两次。每次核对五个二进制的位置和执行位、用户 bin 里的既有命令，以及五份 shell 启动文件和 .zshrc 软链。另从安装后的 shebang 驱动完整任务。默认使用仓库安装脚本，发行版入口见 [#7](https://github.com/Luthics/os-agent/issues/7)。[安装测试](test_distribution.py) |
+| §2 可执行文件查找 | 为同名 Provider 分别放置两个 PATH 候选和一个 libexec 候选，改变执行位、移除候选，再测试显式绝对路径、相对路径及直接路径缺失。每次从实际启动的进程捕获请求。msh 另有同类查找与工具 PATH 验证。[Provider](../crates/os-agent-core/tests/rfc_runtime/configuration.rs) · [msh](test_shell_pipeline.py) |
+| §3.1 CLI | 直接运行脚本及带 `--` 的脚本参数，检查首条用户消息。通过 Provider IR 核对 `--param` 的空串、空白、等号、JSON 数字、null、结构值和非法 JSON 回退。缺键或缺等号时检查退出码与诊断。[CLI 输入](../crates/os-agent-core/tests/rfc_runtime/io.rs) · [参数转换](../crates/os-agent-core/tests/rfc_runtime/configuration.rs) |
+| §3.2 文件语法 | 枚举编码边界、shebang、分隔行、换行格式和 EOF。对 YAML 的唯一键、锚点、别名及六种块标量写法，在正常 CLI 入口检查实际 IR 或退出码。尾部换行同时核对字段位于分节中间与末尾两种布局。[编码](../crates/os-agent-core/tests/rfc_3_2/encoding.rs) · [语法](../crates/os-agent-core/tests/rfc_3_2/grammar.rs) · [CLI](../crates/os-agent-core/tests/rfc_3_2/cli.rs) |
+| §§3.3–3.4、8.1–8.2 配置 | 对五层覆盖的所有子集检查标量。交替选择两个 Provider，核对独有键、同名键及嵌套字典整体替换。两个项目从各自的嵌套 cwd 执行同一外部脚本，读取实际 model、IR 的 cwd 和 WAL，随后重开首个项目验证会话隔离。[配置测试](../crates/os-agent-core/tests/rfc_runtime/configuration.rs) |
+| §10.3 自检 | 分别移除五个安装文件及执行位、损坏全局与项目配置、改变凭据与运行目录；Linux 额外观察匿名管道及两次独占锁探测。自定义 Provider 在 PATH 中可执行时，对照运行时与 doctor 的结果。[doctor](../crates/os-agent-core/tests/rfc_runtime/doctor.rs) · [Linux](test_linux_fallback.py) |
+
 ### §4.2 Inbox 的验收边界
 
 | 条款 | 可观察结果 |
@@ -96,3 +107,9 @@ python3 tests/test_linux_fallback.py  # Linux
 - §6.1 的水位测试在恢复前交换两个 assistant 的用量，再以 fold 剪去后者，用退出码和实际 Provider 请求验证基准回退。若最后一条回答缺 usage、较早一条有 usage，仍需明确采用哪个基准。[#20](https://github.com/Luthics/os-agent/issues/20)
 - §4.2 的全新 Inbox 在首个工具尝试投递时还没有 tmp 目录。带初始输入启动时，队列对发送方的就绪时机待确认。[#21](https://github.com/Luthics/os-agent/issues/21)
 - §§9.2、9.5 尚需定义一次成功请求内 usage 的帧数、多次上报代表增量还是快照，以及 Trace 缺报的表示形式。[#22](https://github.com/Luthics/os-agent/issues/22)
+- §3.2 的 YAML 块标量位于分隔行前时，实际 Provider 参数丢失一个尾部换行。用同一值后接另一字段作为对照。[YAML 1.2.2 §8.1.1.2](https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator) · [#23](https://github.com/Luthics/os-agent/issues/23)
+- §3.3 声明绝对压缩阈值为 uint32；现有实现在最大值加一时仍启动推理。已分别验证合法的禁用值和越界值。[#24](https://github.com/Luthics/os-agent/issues/24)
+- §2 允许从 PATH 解析 Provider，§10.3 需要明确自检对配置选中的额外适配器如何应用这条规则。[#25](https://github.com/Luthics/os-agent/issues/25)
+- §3.3 对含非标识符字符的文件名尚需定义默认 name。Trace 用例覆盖合规的多点文件名及显式指定 name 的情况。[#26](https://github.com/Luthics/os-agent/issues/26)
+- §3.1 尚需明确同一 CLI 层中别名与完整选项的冲突，以及多次传入同名参数键的处理方式。[#27](https://github.com/Luthics/os-agent/issues/27)
+- §§2、8.1 对带斜杠的相对组件路径尚需指定基准目录。实测仅添加一个空项目配置目录就可能改变全局配置所选的 Provider。[#28](https://github.com/Luthics/os-agent/issues/28)
