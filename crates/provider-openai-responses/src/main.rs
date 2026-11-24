@@ -68,6 +68,17 @@ fn main() -> StdExitCode {
         }
     };
 
+    if let Err(err) = stream.validate_invariants() {
+        let message = err.to_string();
+        emit_event(&ProviderEvent::Error {
+            code: "invalid_ir".into(),
+            message: message.clone(),
+            retryable: false,
+        });
+        eprintln!("agent-provider-openai-responses: {message}");
+        return ExitCode::UsageError.into();
+    }
+
     let body = match build_responses_request(&stream, &env.model) {
         Ok(body) => body,
         Err(err) => {

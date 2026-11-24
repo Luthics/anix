@@ -335,6 +335,14 @@ impl WalStore {
                             });
                         }
                         WalRole::Assistant => {
+                            // Self-heal any legacy/corrupted empty assistant turn (neither text
+                            // nor tool_calls) so historical WAL files can never violate Section 9.1
+                            // on replay; its `usage` was already accumulated into `window_usage`.
+                            let has_text = text.as_deref().is_some_and(|t| !t.is_empty());
+                            if !has_text && tool_calls.is_empty() {
+                                continue;
+                            }
+
                             // Rule 3 (Tool-Pair Closure during reverse-read):
                             // If this assistant carries `tool_calls`, verify EVERY tool_call ID
                             // is matched by contiguous surviving `Tool` messages immediately
@@ -673,5 +681,140 @@ impl<'a> ReverseLineReader<'a> {
             chunk.extend_from_slice(&self.buffer);
             self.buffer = chunk;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use os_agent_proto::ir::{HeaderTag, IrHeader, IrMeta, IrStream, StderrMode};
+
+    fn dummy_header() -> IrHeader {
+        IrHeader {
+            ir_version: IR_VERSION,
+            record_type: HeaderTag::Header,
+            tools: Vec::new(),
+            max_output_tokens: None,
+            params: BTreeMap::new(),
+            meta: IrMeta {
+                stderr_mode: StderrMode::Auto,
+                cwd: "/tmp".into(),
+                turn_budget: None,
+                extra: BTreeMap::new(),
+            },
+            extra: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn replay_skips_empty_assistant_and_prunes_unclosed_tool_calls_preserving_usage() {
+        let tmp =
+            std::env::temp_dir().join(format!("os-agent-wal-test-{}.jsonl", uuid::Uuid::new_v4()));
+        {
+            let mut store = WalStore::open(&tmp).expect("open wal");
+            store
+                .append(&WalEvent::SessionInit {
+                    ir_version: IR_VERSION,
+                    ts: "2026-11-25T00:00:00Z".into(),
+                    config: WalConfigSnapshot {
+                        stderr: None,
+                        approval: None,
+                    },
+                })
+                .unwrap();
+            store.append_message(&IrMessage::system(0, "sys")).unwrap();
+            store.append_message(&IrMessage::user(1, "hello")).unwrap();
+            // Legacy/empty assistant turn (neither text nor tool_calls) with real usage:
+            store
+                .append_message_with_usage(
+                    &IrMessage::Assistant {
+                        turn_id: 2,
+                        text: Some(String::new()),
+                        reasoning: Some("thinking...".into()),
+                        tool_calls: Vec::new(),
+                        provider_opaque: None,
+                        extra: BTreeMap::new(),
+                    },
+                    Some(TokenUsage {
+                        input_tokens: 100,
+                        output_tokens: 20,
+                        cached_tokens: None,
+                        cache_write_tokens: None,
+                        reasoning_tokens: Some(20),
+                    }),
+                )
+                .unwrap();
+            // Unclosed tool_calls turn interrupted mid-execution:
+            store
+                .append_message_with_usage(
+                    &IrMessage::Assistant {
+                        turn_id: 3,
+                        text: None,
+                        reasoning: None,
+                        tool_calls: vec![
+                            ToolCall {
+                                id: "c1".into(),
+                                name: "msh".into(),
+                                arguments: serde_json::json!({"cmd": "true"}),
+                            },
+                            ToolCall {
+                                id: "c2".into(),
+                                name: "msh".into(),
+                                arguments: serde_json::json!({"cmd": "sleep 99"}),
+                            },
+                        ],
+                        provider_opaque: None,
+                        extra: BTreeMap::new(),
+                    },
+                    Some(TokenUsage {
+                        input_tokens: 200,
+                        output_tokens: 40,
+                        cached_tokens: None,
+                        cache_write_tokens: None,
+                        reasoning_tokens: None,
+                    }),
+                )
+                .unwrap();
+            store
+                .append_message(&IrMessage::Tool {
+                    turn_id: 4,
+                    tool_call_id: "c1".into(),
+                    is_error: false,
+                    text: "[t4] exit=0\n".into(),
+                    media: Vec::new(),
+                    extra: BTreeMap::new(),
+                })
+                .unwrap();
+        }
+
+        let mut store = WalStore::open(&tmp).expect("reopen wal");
+        let replayed = store.load_active_window().expect("replay wal");
+        let _ = std::fs::remove_file(&tmp);
+
+        // Both the empty assistant and the unclosed tool_calls batch (plus its partial tool `c1`)
+        // must be dropped, leaving a strictly valid Canonical IR stream.
+        assert_eq!(replayed.messages.len(), 2);
+        assert!(matches!(
+            replayed.messages[0],
+            IrMessage::System { turn_id: 0, .. }
+        ));
+        assert!(matches!(
+            replayed.messages[1],
+            IrMessage::User { turn_id: 1, .. }
+        ));
+        assert!(replayed.assistant_usages.is_empty());
+
+        // Billing ledger must still retain usage from both dropped turns!
+        assert_eq!(replayed.session_usage.input_tokens, 300);
+        assert_eq!(replayed.session_usage.output_tokens, 60);
+        assert_eq!(replayed.session_usage.reasoning(), 20);
+
+        let stream = IrStream {
+            header: dummy_header(),
+            messages: replayed.messages,
+        };
+        stream
+            .validate_invariants()
+            .expect("replayed stream must satisfy invariants");
     }
 }

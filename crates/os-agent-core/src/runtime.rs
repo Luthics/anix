@@ -552,6 +552,12 @@ fn run_inference_cycle(
                     state.session_usage = outcome.cumulative_usage;
                 }
                 Err(err) => {
+                    if let compact::CompactError::Provider(ref pe) = err
+                        && let Some(u) = pe.usage()
+                    {
+                        state.run_usage.add_assign(&u);
+                        state.session_usage.add_assign(&u);
+                    }
                     eprintln!("agent: {err}");
                     return err.exit_code();
                 }
@@ -589,6 +595,10 @@ fn run_inference_cycle(
         ) {
             Ok(r) => r,
             Err(err) => {
+                if let Some(u) = err.usage() {
+                    state.run_usage.add_assign(&u);
+                    state.session_usage.add_assign(&u);
+                }
                 if !matches!(err, provider::ProviderError::Interrupted(_)) {
                     eprintln!("agent: {err}");
                 }
