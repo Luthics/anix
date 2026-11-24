@@ -1,8 +1,11 @@
 //! §§9.1–9.2. Exercise stdin, the actual loopback HTTP request, SSE, stdout,
 //! stderr and the process exit status. No upstream account or network is used.
 use serde_json::{Value, json};
+use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -300,26 +303,63 @@ fn unsupported_ir_version_and_missing_media_fail_before_http() {
     }
 }
 
-// RFC §9.1, §9.2
-#[test]
-fn adapter_reads_each_declared_media_type_from_disk_in_user_and_tool_messages() {
-    use base64::Engine;
-    use std::fs;
-    use std::os::unix::fs::DirBuilderExt;
-    use std::path::PathBuf;
-    struct Images(PathBuf);
-    impl Drop for Images {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
+struct Images(PathBuf);
+
+impl Drop for Images {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
     }
+}
+
+fn media_directory() -> Images {
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
     let dir = std::env::temp_dir().join(format!("os-agent-media-{}-{nonce}", std::process::id()));
     fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
-    let images = Images(dir);
+    Images(dir)
+}
+
+// RFC §9.1, §9.2, §6.4
+#[test]
+fn unreadable_media_emits_a_permanent_error_before_dispatch() {
+    let images = media_directory();
+    let denied = images.0.join("private.png");
+    fs::write(&denied, include_bytes!("media/blue.png")).unwrap();
+    fs::set_permissions(&denied, fs::Permissions::from_mode(0o000)).unwrap();
+    let mut unreadable = vec![&images.0];
+    // Privileged test processes can still read mode 000. A directory always
+    // exercises a failing read, including on those runners.
+    if let Err(err) = fs::File::open(&denied) {
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+        unreadable.push(&denied);
+    }
+    for path in unreadable {
+        let rows = [
+            head(),
+            prompt(),
+            json!({"role":"user","turn_id":1,"text":"image",
+            "media":[{"mime":"image/png","path":path}]}),
+        ];
+        let (requests, out, events) = run(&rows, 200, "");
+        assert!(requests.is_empty(), "unexpected HTTP request for {path:?}");
+        assert_eq!(out.status.code(), Some(1), "{path:?}");
+        assert!(
+            events.iter().any(|e| e["type"] == "error"
+                && e["code"] == "media_not_found"
+                && e["retryable"] == false),
+            "{events:?}"
+        );
+        assert!(events.iter().all(|e| e["type"] != "done"));
+    }
+}
+
+// RFC §9.1, §9.2
+#[test]
+fn adapter_reads_each_declared_media_type_from_disk_in_user_and_tool_messages() {
+    use base64::Engine;
+    let images = media_directory();
     let samples: &[(&str, &[u8])] = &[
         ("image/webp", include_bytes!("media/blue.webp")),
         ("image/png", include_bytes!("media/blue.png")),

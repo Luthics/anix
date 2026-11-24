@@ -232,6 +232,7 @@ fn tail_fold_aligns_to_assistant_and_removes_the_triggering_tool_call() {
 fn external_compactor_receives_tool_free_ir_and_empty_or_failed_summary_is_fatal() {
     for (script, code) in [
         ("printf summary", 0),
+        (r"printf 'valid prefix\377tail'", 1),
         (":", 1),
         ("printf discarded; exit 9", 1),
     ] {

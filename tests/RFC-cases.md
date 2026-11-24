@@ -83,10 +83,10 @@
 | [`full_compaction_and_resume_account_for_every_call_without_inflating_watermark`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L84) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
 | [`tail_fold_aligns_to_assistant_and_removes_the_triggering_tool_call`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L179) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
 | [`external_compactor_receives_tool_free_ir_and_empty_or_failed_summary_is_fatal`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L232) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
-| [`fresh_window_counts_utf8_bytes_in_groups_of_three`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L302) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) |
-| [`hard_limit_allows_equality_and_blocks_the_first_provider_request_above_it`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L318) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
-| [`auto_compaction_runs_before_inference_and_rechecks_the_new_window_against_the_cap`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L348) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) |
-| [`builtin_compactor_uses_configured_provider_model_and_literal_or_file_prompt`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L407) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§8.2](../docs/v1.0.0-RFC.md?plain=1#L333) |
+| [`fresh_window_counts_utf8_bytes_in_groups_of_three`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L303) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) |
+| [`hard_limit_allows_equality_and_blocks_the_first_provider_request_above_it`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L319) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`auto_compaction_runs_before_inference_and_rechecks_the_new_window_against_the_cap`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L349) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) |
+| [`builtin_compactor_uses_configured_provider_model_and_literal_or_file_prompt`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L408) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§8.2](../docs/v1.0.0-RFC.md?plain=1#L333) |
 
 ## `crates/os-agent-core/tests/rfc_runtime/configuration.rs`
 
@@ -265,14 +265,15 @@
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`maps_request_and_streams_text_reasoning_usage_and_done`](../crates/provider-openai-responses/tests/rfc_responses.rs#L128) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
-| [`runtime_update_stays_in_chronological_input_and_frozen_instructions_keep_their_bytes`](../crates/provider-openai-responses/tests/rfc_responses.rs#L171) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
-| [`repeated_sse_notifications_emit_one_complete_tool_call`](../crates/provider-openai-responses/tests/rfc_responses.rs#L210) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
-| [`transient_http_errors_are_retryable_but_adapter_never_retries_itself`](../crates/provider-openai-responses/tests/rfc_responses.rs#L238) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
-| [`missing_terminal_event_is_not_reported_as_success`](../crates/provider-openai-responses/tests/rfc_responses.rs#L254) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
-| [`unsupported_ir_version_and_missing_media_fail_before_http`](../crates/provider-openai-responses/tests/rfc_responses.rs#L274) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
-| [`adapter_reads_each_declared_media_type_from_disk_in_user_and_tool_messages`](../crates/provider-openai-responses/tests/rfc_responses.rs#L305) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
-| [`response_usage_preserves_inclusive_totals_and_available_details`](../crates/provider-openai-responses/tests/rfc_responses.rs#L384) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`maps_request_and_streams_text_reasoning_usage_and_done`](../crates/provider-openai-responses/tests/rfc_responses.rs#L131) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`runtime_update_stays_in_chronological_input_and_frozen_instructions_keep_their_bytes`](../crates/provider-openai-responses/tests/rfc_responses.rs#L174) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`repeated_sse_notifications_emit_one_complete_tool_call`](../crates/provider-openai-responses/tests/rfc_responses.rs#L213) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`transient_http_errors_are_retryable_but_adapter_never_retries_itself`](../crates/provider-openai-responses/tests/rfc_responses.rs#L241) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`missing_terminal_event_is_not_reported_as_success`](../crates/provider-openai-responses/tests/rfc_responses.rs#L257) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`unsupported_ir_version_and_missing_media_fail_before_http`](../crates/provider-openai-responses/tests/rfc_responses.rs#L277) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`unreadable_media_emits_a_permanent_error_before_dispatch`](../crates/provider-openai-responses/tests/rfc_responses.rs#L326) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`adapter_reads_each_declared_media_type_from_disk_in_user_and_tool_messages`](../crates/provider-openai-responses/tests/rfc_responses.rs#L360) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`response_usage_preserves_inclusive_totals_and_available_details`](../crates/provider-openai-responses/tests/rfc_responses.rs#L424) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
 
 ## `tests/test_distribution.py`
 
@@ -304,9 +305,11 @@
 | [`test_open_input_descriptor_defers_inference_until_eof`](../tests/test_shell_pipeline.py#L194) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) |
 | [`test_inference_can_finish_with_an_open_trace_consumer_that_stops_reading`](../tests/test_shell_pipeline.py#L238) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
 | [`test_msh_timeout_signals_the_whole_group_and_grants_three_seconds_before_kill`](../tests/test_shell_pipeline.py#L274) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
-| [`test_stdout_and_stderr_terminal_modes_are_independent`](../tests/test_shell_pipeline.py#L312) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§4.3](../docs/v1.0.0-RFC.md?plain=1#L156) |
-| [`test_real_shell_timeout_returns_an_error_tool_result_and_inference_continues`](../tests/test_shell_pipeline.py#L377) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
-| [`test_wire_file_has_raw_ansi_and_model_receives_cleaned_text`](../tests/test_shell_pipeline.py#L384) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
-| [`test_path_precedes_libexec_and_explicit_shell_path_has_priority_over_both`](../tests/test_shell_pipeline.py#L404) | [§2](../docs/v1.0.0-RFC.md?plain=1#L23) |
-| [`test_nested_agent_uses_own_model_wal_and_budget_and_inherits_cli_auto`](../tests/test_shell_pipeline.py#L469) | [§3.4](../docs/v1.0.0-RFC.md?plain=1#L102) · [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) |
-| [`test_nested_agent_inherits_cli_deny_over_its_own_auto_frontmatter`](../tests/test_shell_pipeline.py#L473) | [§3.4](../docs/v1.0.0-RFC.md?plain=1#L102) · [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) |
+| [`test_interrupting_a_live_msh_discards_its_partial_result_and_replays_a_closed_history`](../tests/test_shell_pipeline.py#L312) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§6.3](../docs/v1.0.0-RFC.md?plain=1#L268) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity`](../tests/test_shell_pipeline.py#L365) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§4.3](../docs/v1.0.0-RFC.md?plain=1#L156) |
+| [`test_stdout_and_stderr_terminal_modes_are_independent`](../tests/test_shell_pipeline.py#L405) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§4.3](../docs/v1.0.0-RFC.md?plain=1#L156) |
+| [`test_real_shell_timeout_returns_an_error_tool_result_and_inference_continues`](../tests/test_shell_pipeline.py#L470) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`test_wire_file_has_raw_ansi_and_model_receives_cleaned_text`](../tests/test_shell_pipeline.py#L477) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`test_path_precedes_libexec_and_explicit_shell_path_has_priority_over_both`](../tests/test_shell_pipeline.py#L497) | [§2](../docs/v1.0.0-RFC.md?plain=1#L23) |
+| [`test_nested_agent_uses_own_model_wal_and_budget_and_inherits_cli_auto`](../tests/test_shell_pipeline.py#L562) | [§3.4](../docs/v1.0.0-RFC.md?plain=1#L102) · [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) |
+| [`test_nested_agent_inherits_cli_deny_over_its_own_auto_frontmatter`](../tests/test_shell_pipeline.py#L566) | [§3.4](../docs/v1.0.0-RFC.md?plain=1#L102) · [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) |

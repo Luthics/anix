@@ -28,6 +28,7 @@
 | §§4.1、6.2、7.1、9.5 | 分段写入保持打开的管道，核对 EOF 前后的首条请求；将 Trace socket 填满并持续保持连接；观察子进程组收到 TERM 后的存活时间和最后一个 FIFO 写端关闭；通过内核文件大小限制制造 WAL 短写，核对原文件前缀及恢复结果。 | [POSIX 进程与工具链](test_shell_pipeline.py) |
 | §§6.2、9.1–9.4、9.6 | 核对钩子之间传递的 JSONL、冻结与恢复后的文本、适配器发出的中途配置更新、实际 PID 与 PPID；用 XML 解析器提取技能路径，再由真实 msh 按该路径读取正文；分别验证整块 tips 屏蔽后的磁盘和首轮提示。 | [钩子](../crates/os-agent-core/tests/rfc_runtime/hooks.rs)、[适配器](../crates/provider-openai-responses/tests/rfc_responses.rs)、[完整链路](test_shell_pipeline.py) |
 | §§4.2、10.3 | 让 inotify 建立失败后再投递消息，核对 Provider、WAL、done 三处；对自检分别模拟管道创建失败、flock 不可用，以及两个独立独占锁都被错误授予。 | [Linux 系统调用故障注入](test_linux_fallback.py) |
+| §§4.1、4.3、6.1–6.4、9.1–9.2 | 从真实 msh 检查 fd 4–6 的类型和访问模式，重复打开输出侧信道并逐字节核对各自超过 1 MiB 的数据。向正在执行工具的 agent 发送 INT 或 TERM，验证 msh 子命令收到 TERM、WAL 解锁以及重启后的工具配对。对不可读媒体和外部压缩器返回的非法 UTF-8，分别检查 HTTP 请求和 checkpoint 是否提前产生。 | [进程与侧信道](test_shell_pipeline.py)、[适配器](../crates/provider-openai-responses/tests/rfc_responses.rs)、[压缩器](../crates/os-agent-core/tests/rfc_runtime/compaction.rs) |
 
 ## 复跑
 

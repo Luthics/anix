@@ -308,6 +308,99 @@ else:
             self.assertTrue(select.select([reader], [], [], 1)[0], "a group member still holds the FIFO")
             self.assertEqual(reader.read(1), b"")
 
+    # RFC §6.2, §6.3, §6.4, §9.1
+    def test_interrupting_a_live_msh_discards_its_partial_result_and_replays_a_closed_history(self):
+        (self.root / "wait_for_signal.py").write_text('''import signal, time
+from pathlib import Path
+def stop(signum, frame):
+    Path("observed-signal").write_text(str(signum))
+    raise SystemExit(0)
+signal.signal(signal.SIGTERM, stop)
+print("partial tool result", flush=True)
+Path("tool-ready").touch()
+time.sleep(12)
+''')
+        events = [{"type": "tool_call", "id": "active", "name": "msh",
+                   "arguments": {"cmd": 'exec "$WITNESS" wait_for_signal.py'}},
+                  {"type": "done", "finish_reason": "tool_calls"}]
+        (self.root / "first.reply").write_text("".join(json.dumps(e) + "\n" for e in events))
+        for sig, code in [(signal.SIGINT, 130), (signal.SIGTERM, 143)]:
+            with self.subTest(signal=sig):
+                for name in ("first.ir", "second.ir", "tool-ready", "observed-signal"):
+                    (self.root / name).unlink(missing_ok=True)
+                wal = self.root / (sig.name + ".wal")
+                args = [self.agent, "-q", "-y", "-c", wal, "case.agent", "--"]
+                with subprocess.Popen([*args, "before"], cwd=self.root, stdin=subprocess.DEVNULL,
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                      env={**self.env, "WITNESS": sys.executable}) as child:
+                    try:
+                        deadline = time.monotonic() + 8
+                        while not (self.root / "tool-ready").exists():
+                            self.assertIsNone(child.poll(), "agent exited before msh was ready")
+                            self.assertLess(time.monotonic(), deadline, "msh never became ready")
+                            time.sleep(0.01)
+                        child.send_signal(sig)
+                        stdout, stderr = child.communicate(timeout=7)
+                    finally:
+                        if child.poll() is None:
+                            child.kill()
+                            child.communicate()
+                self.assertEqual(child.returncode, code, stderr)
+                self.assertEqual(stdout, b"")
+                self.assertEqual(int((self.root / "observed-signal").read_text()), signal.SIGTERM)
+                self.assertFalse((self.root / "second.ir").exists())
+                with wal.open("rb") as locked:
+                    fcntl.flock(locked, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    rows = [json.loads(line) for line in locked]
+                self.assertFalse(any(r.get("role") == "tool" for r in rows))
+                resumed = subprocess.run([*args, "resume"], cwd=self.root, env=self.env,
+                                         stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
+                self.assertEqual(resumed.returncode, 0, resumed.stderr)
+                rows = [json.loads(line) for line in (self.root / "second.ir").read_text().splitlines()]
+                self.assertEqual([r["text"] for r in rows if r.get("role") == "user"],
+                                 ["<args>before</args>", "<args>resume</args>"])
+                self.assertFalse(any(r.get("tool_calls") or r.get("role") == "tool" for r in rows))
+
+    # RFC §4.1, §4.3
+    def test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity(self):
+        stdout = bytes(range(256)) * 4097 + b"stdout-end"
+        stderr = bytes(reversed(range(256))) * 4099 + b"stderr-end"
+        (self.root / "output").write_bytes(stdout)
+        (self.root / "diagnostic").write_bytes(stderr)
+        (self.root / "observe.py").write_text('''import fcntl, json, os, stat
+from pathlib import Path
+null, stdin = os.stat("/dev/null"), os.fstat(0)
+print(json.dumps({
+    "null_stdin": stat.S_ISCHR(stdin.st_mode) and stdin.st_rdev == null.st_rdev,
+    "write_pipes": [stat.S_ISFIFO(os.fstat(fd).st_mode) and
+                    (fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE) == os.O_WRONLY
+                    for fd in (4, 5, 6)],
+}))
+for name, channel in (("output","AGENT_OUT"), ("diagnostic","AGENT_ERR")):
+    with Path(name).open("rb") as src:
+        while chunk := src.read(65521):
+            with open(os.environ[channel], "wb") as dst:
+                dst.write(chunk)
+''')
+        cmd = 'exec "$FIXTURE_PYTHON" observe.py'
+        events = [{"type":"tool_call", "id":"relay", "name":"msh", "arguments":{"cmd":cmd}},
+                  {"type":"done", "finish_reason":"tool_calls"}]
+        (self.root / "first.reply").write_text("".join(json.dumps(e) + "\n" for e in events))
+        out = subprocess.run([self.agent, "-y", "-q", "case.agent", "--", "go"], cwd=self.root,
+                             stdin=subprocess.DEVNULL, capture_output=True, timeout=20,
+                             env={**self.env, "FIXTURE_PYTHON": sys.executable})
+        self.assertEqual(out.returncode, 0, out.stderr[-160:])
+        for actual, expected in ((out.stdout, stdout), (out.stderr, stderr)):
+            self.assertEqual(len(actual), len(expected))
+            self.assertTrue(actual == expected, "relayed bytes changed")
+        msgs = [json.loads(line) for line in (self.root / "second.ir").read_text().splitlines()]
+        result = [item for item in msgs if item.get("role") == "tool"]
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["tool_call_id"], "relay")
+        header, report = result[0]["text"].split("\n", 1)
+        self.assertEqual(header, f'[t{result[0]["turn_id"]}] exit=0')
+        self.assertEqual(json.loads(report), {"null_stdin": True, "write_pipes": [True]*3})
+
     # RFC §4.1, §4.3
     def test_stdout_and_stderr_terminal_modes_are_independent(self):
         cmd = r"""printf 'a\000\377b' > "$AGENT_OUT"; printf 'human\n' > "$AGENT_ERR" """
