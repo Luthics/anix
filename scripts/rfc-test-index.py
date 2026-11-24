@@ -40,7 +40,9 @@ def python_tests(source):
 
 def build_index():
     sections = {}
-    for line, heading in enumerate((ROOT / RFC).read_text().splitlines(), 1):
+    # GitHub line anchors count LF bytes. The RFC also contains a vertical tab
+    # inside a table cell, which str.splitlines() would count as a new line.
+    for line, heading in enumerate((ROOT / RFC).read_bytes().decode("utf-8").split("\n"), 1):
         match = re.match(r"^#{2,3} (\d+(?:\.\d+)?)(?:\\\.)?\s", heading)
         if match:
             sections[match[1]] = line
@@ -50,8 +52,8 @@ def build_index():
     files = sorted([*(ROOT / "crates").rglob("*.rs"), *(ROOT / "tests").rglob("*.py")])
     count = 0
     for path in files:
-        source = path.read_text()
-        lines = source.splitlines()
+        source = path.read_bytes().decode("utf-8")
+        lines = source.split("\n")
         tests = list(rust_tests(lines) if path.suffix == ".rs" else python_tests(source))
         if not tests:
             continue
