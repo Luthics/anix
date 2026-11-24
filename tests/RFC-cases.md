@@ -125,12 +125,15 @@
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`pre_context_failure_forwards_stderr_and_stops_before_inference`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L10) | [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) |
-| [`post_tool_failure_stops_before_later_hooks_tools_and_provider_turns`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L36) | [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) |
-| [`on_exit_timeout_is_local_to_one_hook_and_preserves_the_primary_exit_code`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L72) | [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
-| [`each_skill_search_layer_wins_once_and_the_body_stays_out_of_the_index`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L109) | [§9.4](../docs/v1.0.0-RFC.md?plain=1#L461) |
-| [`tips_are_restored_after_version_drift_and_fall_back_to_runtime_when_state_is_unwritable`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L172) | [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
-| [`background_tip_is_indexed_in_ascii_order_and_can_be_overridden_or_masked_individually`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L211) | [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
+| [`pre_context_filters_can_rewrite_and_append_conversation_records_before_freezing`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L10) | [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
+| [`pre_context_failure_forwards_stderr_and_stops_before_inference`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L81) | [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) |
+| [`post_tool_failure_stops_before_later_hooks_tools_and_provider_turns`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L107) | [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) |
+| [`on_exit_timeout_is_local_to_one_hook_and_preserves_the_primary_exit_code`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L143) | [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`each_skill_search_layer_wins_once_and_the_body_stays_out_of_the_index`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L180) | [§9.4](../docs/v1.0.0-RFC.md?plain=1#L461) |
+| [`tips_are_restored_after_version_drift_and_fall_back_to_runtime_when_state_is_unwritable`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L243) | [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
+| [`masking_the_whole_tips_hook_suppresses_both_its_index_and_first_run_files`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L282) | [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
+| [`an_empty_merged_tips_index_costs_no_prompt_bytes`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L333) | [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
+| [`background_tip_is_indexed_in_ascii_order_and_can_be_overridden_or_masked_individually`](../crates/os-agent-core/tests/rfc_runtime/hooks.rs#L367) | [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
 
 ## `crates/os-agent-core/tests/rfc_runtime/inbox.rs`
 
@@ -263,12 +266,13 @@
 | 测试 | RFC 条款 |
 | --- | --- |
 | [`maps_request_and_streams_text_reasoning_usage_and_done`](../crates/provider-openai-responses/tests/rfc_responses.rs#L128) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
-| [`repeated_sse_notifications_emit_one_complete_tool_call`](../crates/provider-openai-responses/tests/rfc_responses.rs#L171) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
-| [`transient_http_errors_are_retryable_but_adapter_never_retries_itself`](../crates/provider-openai-responses/tests/rfc_responses.rs#L199) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
-| [`missing_terminal_event_is_not_reported_as_success`](../crates/provider-openai-responses/tests/rfc_responses.rs#L215) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
-| [`unsupported_ir_version_and_missing_media_fail_before_http`](../crates/provider-openai-responses/tests/rfc_responses.rs#L235) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
-| [`adapter_reads_each_declared_media_type_from_disk_in_user_and_tool_messages`](../crates/provider-openai-responses/tests/rfc_responses.rs#L266) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
-| [`response_usage_preserves_inclusive_totals_and_available_details`](../crates/provider-openai-responses/tests/rfc_responses.rs#L345) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`runtime_update_stays_in_chronological_input_and_frozen_instructions_keep_their_bytes`](../crates/provider-openai-responses/tests/rfc_responses.rs#L171) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`repeated_sse_notifications_emit_one_complete_tool_call`](../crates/provider-openai-responses/tests/rfc_responses.rs#L210) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`transient_http_errors_are_retryable_but_adapter_never_retries_itself`](../crates/provider-openai-responses/tests/rfc_responses.rs#L238) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`missing_terminal_event_is_not_reported_as_success`](../crates/provider-openai-responses/tests/rfc_responses.rs#L254) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`unsupported_ir_version_and_missing_media_fail_before_http`](../crates/provider-openai-responses/tests/rfc_responses.rs#L274) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`adapter_reads_each_declared_media_type_from_disk_in_user_and_tool_messages`](../crates/provider-openai-responses/tests/rfc_responses.rs#L305) | [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`response_usage_preserves_inclusive_totals_and_available_details`](../crates/provider-openai-responses/tests/rfc_responses.rs#L384) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
 
 ## `tests/test_distribution.py`
 
@@ -280,7 +284,9 @@
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`test_unavailable_landlock_warns_or_fails_before_inference`](../tests/test_linux_fallback.py#L11) | [§10.2](../docs/v1.0.0-RFC.md?plain=1#L524) |
+| [`test_unavailable_landlock_warns_or_fails_before_inference`](../tests/test_linux_fallback.py#L36) | [§10.2](../docs/v1.0.0-RFC.md?plain=1#L524) |
+| [`test_doctor_detects_broken_pipes_and_ineffective_or_unavailable_flock`](../tests/test_linux_fallback.py#L49) | [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) |
+| [`test_inbox_polls_new_publications_when_kernel_notifications_are_unavailable`](../tests/test_linux_fallback.py#L76) | [§4.2](../docs/v1.0.0-RFC.md?plain=1#L142) |
 
 ## `tests/test_pdf_pages.py`
 
@@ -292,9 +298,15 @@
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`test_stdout_and_stderr_terminal_modes_are_independent`](../tests/test_shell_pipeline.py#L66) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§4.3](../docs/v1.0.0-RFC.md?plain=1#L156) |
-| [`test_real_shell_timeout_returns_an_error_tool_result_and_inference_continues`](../tests/test_shell_pipeline.py#L131) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
-| [`test_wire_file_has_raw_ansi_and_model_receives_cleaned_text`](../tests/test_shell_pipeline.py#L138) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
-| [`test_path_precedes_libexec_and_explicit_shell_path_has_priority_over_both`](../tests/test_shell_pipeline.py#L158) | [§2](../docs/v1.0.0-RFC.md?plain=1#L23) |
-| [`test_nested_agent_uses_own_model_wal_and_budget_and_inherits_cli_auto`](../tests/test_shell_pipeline.py#L223) | [§3.4](../docs/v1.0.0-RFC.md?plain=1#L102) · [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) |
-| [`test_nested_agent_inherits_cli_deny_over_its_own_auto_frontmatter`](../tests/test_shell_pipeline.py#L227) | [§3.4](../docs/v1.0.0-RFC.md?plain=1#L102) · [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) |
+| [`test_trace_envelope_identifies_the_live_process_and_effective_agent_name`](../tests/test_shell_pipeline.py#L76) | [§3.3](../docs/v1.0.0-RFC.md?plain=1#L85) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`test_wal_append_failure_preserves_the_prefix_and_reopens_according_to_tail_state`](../tests/test_shell_pipeline.py#L108) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`test_skill_index_round_trips_xml_metadata_and_msh_reads_the_indexed_file_on_demand`](../tests/test_shell_pipeline.py#L151) | [§9.4](../docs/v1.0.0-RFC.md?plain=1#L461) · [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) |
+| [`test_open_input_descriptor_defers_inference_until_eof`](../tests/test_shell_pipeline.py#L194) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) |
+| [`test_inference_can_finish_with_an_open_trace_consumer_that_stops_reading`](../tests/test_shell_pipeline.py#L238) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`test_msh_timeout_signals_the_whole_group_and_grants_three_seconds_before_kill`](../tests/test_shell_pipeline.py#L274) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`test_stdout_and_stderr_terminal_modes_are_independent`](../tests/test_shell_pipeline.py#L312) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§4.3](../docs/v1.0.0-RFC.md?plain=1#L156) |
+| [`test_real_shell_timeout_returns_an_error_tool_result_and_inference_continues`](../tests/test_shell_pipeline.py#L377) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`test_wire_file_has_raw_ansi_and_model_receives_cleaned_text`](../tests/test_shell_pipeline.py#L384) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`test_path_precedes_libexec_and_explicit_shell_path_has_priority_over_both`](../tests/test_shell_pipeline.py#L404) | [§2](../docs/v1.0.0-RFC.md?plain=1#L23) |
+| [`test_nested_agent_uses_own_model_wal_and_budget_and_inherits_cli_auto`](../tests/test_shell_pipeline.py#L469) | [§3.4](../docs/v1.0.0-RFC.md?plain=1#L102) · [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) |
+| [`test_nested_agent_inherits_cli_deny_over_its_own_auto_frontmatter`](../tests/test_shell_pipeline.py#L473) | [§3.4](../docs/v1.0.0-RFC.md?plain=1#L102) · [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) |

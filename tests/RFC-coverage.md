@@ -25,6 +25,9 @@
 | §§6.2、7.1、9.1–9.2、9.5 | 对连续三次折叠的所有活跃锚点，用独立正向模型逐步核对逆读窗口和消耗；四种格式的实际图像经用户和工具消息传入，逐字节比对适配器 HTTP 数据；真实 msh 的超时、shell 解析和 wire 原始输出有独立断言。 | [WAL 正向模型](../crates/os-agent-core/tests/rfc_runtime/wal.rs)、[媒体与计费](../crates/provider-openai-responses/tests/rfc_responses.rs)、[shell 链路](test_shell_pipeline.py) |
 | §§6.1–6.2、7.2、9.2 | 同一工具连续写两个合法 fold，逐条核对 WAL；对媒体测试合并写入、跨 UTF-8 字节拆写、重复附件和重启。失败尝试上报用量后成功重试，分别核对实际计费与最后上下文水位。 | [控制帧接收](../crates/os-agent-core/tests/rfc_runtime/control.rs)、[预算与计费](../crates/os-agent-core/tests/rfc_runtime/compaction.rs) |
 | §§3.4、4.1、5.1–5.2、8.3 | 枚举五层配置的 32 个子集，核对预算、压缩阈值、shell、Provider、审批、stderr、队列和会话路径。在八种终端组合下核对真实字节与静态汇总。分进程验证 Always 的作用域、编辑取消，以及自定义 Provider 和压缩器内容变更后的信任校验。 | [配置](../crates/os-agent-core/tests/rfc_runtime/configuration.rs)、[终端输出](test_shell_pipeline.py)、[审批](../crates/os-agent-core/tests/rfc_runtime/terminal.rs)、[信任](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs) |
+| §§4.1、6.2、7.1、9.5 | 分段写入保持打开的管道，核对 EOF 前后的首条请求；将 Trace socket 填满并持续保持连接；观察子进程组收到 TERM 后的存活时间和最后一个 FIFO 写端关闭；通过内核文件大小限制制造 WAL 短写，核对原文件前缀及恢复结果。 | [POSIX 进程与工具链](test_shell_pipeline.py) |
+| §§6.2、9.1–9.4、9.6 | 核对钩子之间传递的 JSONL、冻结与恢复后的文本、适配器发出的中途配置更新、实际 PID 与 PPID；用 XML 解析器提取技能路径，再由真实 msh 按该路径读取正文；分别验证整块 tips 屏蔽后的磁盘和首轮提示。 | [钩子](../crates/os-agent-core/tests/rfc_runtime/hooks.rs)、[适配器](../crates/provider-openai-responses/tests/rfc_responses.rs)、[完整链路](test_shell_pipeline.py) |
+| §§4.2、10.3 | 让 inotify 建立失败后再投递消息，核对 Provider、WAL、done 三处；对自检分别模拟管道创建失败、flock 不可用，以及两个独立独占锁都被错误授予。 | [Linux 系统调用故障注入](test_linux_fallback.py) |
 
 ## 复跑
 
@@ -52,6 +55,7 @@ python3 tests/test_linux_fallback.py  # Linux
 
 - 无 frontmatter 的空行及 CRLF 字节语义、Inbox 领取后崩溃的恢复策略、非法 fold 的退出码归属、默认适配器的免鉴权流程，各有独立讨论。[#1](https://github.com/Luthics/os-agent/issues/1) · [#2](https://github.com/Luthics/os-agent/issues/2) · [#3](https://github.com/Luthics/os-agent/issues/3) · [#4](https://github.com/Luthics/os-agent/issues/4)
 - §6.1 尚需明确估算的字节集合、自动压缩在等值时的行为。§§6.2、9.2 尚需定义旧 WAL 中 opaque 来源未知时的处理，以及切回原 Provider 后如何恢复。[#5](https://github.com/Luthics/os-agent/issues/5) · [#6](https://github.com/Luthics/os-agent/issues/6)
-- §10.3 的发布安装入口待确认。§10.1 是容器镜像建议，§11 是 Non-Normative。Linux 的内核契约在真实内核与 musl 构建上验证。WSL2 的宿主集成尚未实机验证。
+- §10.3 的发布安装入口待确认。§10.1 是容器镜像建议，§11 是 Non-Normative。Linux 的内核契约在真实内核与 musl 构建上验证。WSL2 验证按项目要求暂缓。
 - 失败尝试已上报用量的 WAL 记账与恢复、多词 safe_commands 的匹配规则和适用模式，各有独立讨论。[#8](https://github.com/Luthics/os-agent/issues/8) · [#9](https://github.com/Luthics/os-agent/issues/9)
 - §5.2 的编辑器失败或空文件场景已验证不会执行命令。下一步返还工具错误、重复询问还是退出，待规范确认。[#10](https://github.com/Luthics/os-agent/issues/10)
+- §9.5 已覆盖 Trace 接收端断开和保持连接但停止读取。缓冲区写满后哪些完整帧可丢弃、恢复时如何处理半帧，待规范确认。[#11](https://github.com/Luthics/os-agent/issues/11)
