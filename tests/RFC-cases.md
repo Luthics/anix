@@ -82,13 +82,13 @@
 | 测试 | RFC 条款 |
 | --- | --- |
 | [`retry_usage_counts_every_charged_attempt_without_inflating_the_final_watermark`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L25) | [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
-| [`full_compaction_and_resume_account_for_every_call_without_inflating_watermark`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L84) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
-| [`tail_fold_aligns_to_assistant_and_removes_the_triggering_tool_call`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L179) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
-| [`external_compactor_receives_tool_free_ir_and_empty_or_failed_summary_is_fatal`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L232) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
-| [`fresh_window_counts_utf8_bytes_in_groups_of_three`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L303) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) |
-| [`hard_limit_allows_equality_and_blocks_the_first_provider_request_above_it`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L319) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
-| [`auto_compaction_runs_before_inference_and_rechecks_the_new_window_against_the_cap`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L349) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) |
-| [`builtin_compactor_uses_configured_provider_model_and_literal_or_file_prompt`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L408) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§8.2](../docs/v1.0.0-RFC.md?plain=1#L333) |
+| [`full_compaction_and_resume_account_for_every_call_without_inflating_watermark`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L84) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§9.3](../docs/v1.0.0-RFC.md?plain=1#L455) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`tail_fold_aligns_to_assistant_and_removes_the_triggering_tool_call`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L187) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`external_compactor_receives_tool_free_ir_and_empty_or_failed_summary_is_fatal`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L240) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`fresh_window_counts_utf8_bytes_in_groups_of_three`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L311) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) |
+| [`hard_limit_allows_equality_and_blocks_the_first_provider_request_above_it`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L327) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`auto_compaction_runs_before_inference_and_rechecks_the_new_window_against_the_cap`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L357) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) |
+| [`builtin_compactor_uses_configured_provider_model_and_literal_or_file_prompt`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L416) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§8.2](../docs/v1.0.0-RFC.md?plain=1#L333) |
 
 ## `crates/os-agent-core/tests/rfc_runtime/configuration.rs`
 
@@ -210,10 +210,11 @@
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`regular_fd3_separates_events_deltas_and_wire_and_omits_provider_key`](../crates/os-agent-core/tests/rfc_runtime/trace.rs#L56) | [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) · [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) |
-| [`wire_trace_only_writes_full_ir_into_a_private_file`](../crates/os-agent-core/tests/rfc_runtime/trace.rs#L85) | [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
-| [`journal_receives_events_on_fd3_fallback_and_never_receives_wire_ir`](../crates/os-agent-core/tests/rfc_runtime/trace.rs#L113) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
-| [`disconnected_trace_recipient_does_not_change_payload_stderr_or_exit_status`](../crates/os-agent-core/tests/rfc_runtime/trace.rs#L154) | [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`events_distinguish_tool_approval_from_execution_and_record_an_applied_fold`](../crates/os-agent-core/tests/rfc_runtime/trace.rs#L16) | [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) · [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`regular_fd3_separates_events_deltas_and_wire_and_omits_provider_key`](../crates/os-agent-core/tests/rfc_runtime/trace.rs#L118) | [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) · [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) |
+| [`wire_trace_only_writes_full_ir_into_a_private_file`](../crates/os-agent-core/tests/rfc_runtime/trace.rs#L147) | [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`journal_receives_events_on_fd3_fallback_and_never_receives_wire_ir`](../crates/os-agent-core/tests/rfc_runtime/trace.rs#L175) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`disconnected_trace_recipient_does_not_change_payload_stderr_or_exit_status`](../crates/os-agent-core/tests/rfc_runtime/trace.rs#L216) | [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
 
 ## `crates/os-agent-core/tests/rfc_runtime/wal.rs`
 
@@ -282,7 +283,7 @@
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`test_installed_pipeline_and_fold`](../tests/test_distribution.py#L80) | [§2](../docs/v1.0.0-RFC.md?plain=1#L23) · [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) · [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) · [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§4.4](../docs/v1.0.0-RFC.md?plain=1#L172) · [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
+| [`test_installed_pipeline_and_fold`](../tests/test_distribution.py#L66) | [§1.2](../docs/v1.0.0-RFC.md?plain=1#L15) · [§2](../docs/v1.0.0-RFC.md?plain=1#L23) · [§3.1](../docs/v1.0.0-RFC.md?plain=1#L39) · [§10.3](../docs/v1.0.0-RFC.md?plain=1#L531) · [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) · [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§4.4](../docs/v1.0.0-RFC.md?plain=1#L172) · [§9.6](../docs/v1.0.0-RFC.md?plain=1#L488) |
 
 ## `tests/test_linux_fallback.py`
 
@@ -297,6 +298,13 @@
 | 测试 | RFC 条款 |
 | --- | --- |
 | [`test_single_file_and_stdin_render_the_selected_pages`](../tests/test_pdf_pages.py#L51) | [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) |
+
+## `tests/test_provider_streaming.py`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`test_each_delta_reaches_trace_before_the_upstream_sends_its_next_frame`](../tests/test_provider_streaming.py#L88) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`test_http_429_and_503_are_traced_by_the_core_before_replaying_the_request`](../tests/test_provider_streaming.py#L121) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
 
 ## `tests/test_shell_pipeline.py`
 

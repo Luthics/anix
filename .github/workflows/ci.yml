@@ -57,6 +57,9 @@ jobs:
       - name: Test installed five-binary pipeline
         if: ${{ !cancelled() }}
         run: python3 tests/test_distribution.py
+      - name: Test live Responses streaming and HTTP retries
+        if: ${{ !cancelled() }}
+        run: python3 tests/test_provider_streaming.py
       - name: Test agent and msh together
         if: ${{ !cancelled() }}
         run: |

@@ -79,7 +79,7 @@ fn retry_usage_counts_every_charged_attempt_without_inflating_the_final_watermar
     }
 }
 
-// RFC §6.1, §6.2, §9.2
+// RFC §6.1, §6.2, §9.2, §9.3, §9.5
 #[test]
 fn full_compaction_and_resume_account_for_every_call_without_inflating_watermark() {
     let fx = Fixture::new();
@@ -113,6 +113,13 @@ fn full_compaction_and_resume_account_for_every_call_without_inflating_watermark
         String::from_utf8(out.stderr).unwrap()
     };
     let stderr = run(false);
+    let compact_events = || {
+        jsonl(&root.join("trace"))
+            .iter()
+            .filter(|r| r["type"] == "compact")
+            .count()
+    };
+    assert_eq!(compact_events(), 1);
     let first_total = counts(1287, 6023, 121, 27, 5007);
     let wal = jsonl(&root.join("history"));
     let checkpoint = wal.iter().find(|r| r["type"] == "checkpoint").unwrap();
@@ -167,6 +174,7 @@ fn full_compaction_and_resume_account_for_every_call_without_inflating_watermark
     assert_eq!(summaries.len(), 1);
     assert!(summaries[0].contains("run") && summaries[0].contains("total"));
     let quiet = run(true);
+    assert_eq!(compact_events(), 0);
     assert!(quiet.is_empty(), "{quiet}");
     totals(&fourth, &counts(1297, 6027, 122, 29, 5010), 14);
     let restored = jsonl(&root.join("request-4"));

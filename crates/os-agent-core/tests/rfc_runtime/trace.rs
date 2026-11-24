@@ -1,5 +1,7 @@
 //! RFC §§4.1 and 9.5. Observe where the agent actually sends each class of data.
-use super::{Fixture, TempDir, done, expect_code, scripted_provider};
+use super::{
+    Fixture, TempDir, done, expect_code, jsonl, scripted_provider, success_text, tool, with_tools,
+};
 use serde_json::{Value, json};
 use std::fs;
 use std::io::Read;
@@ -8,6 +10,66 @@ use std::path::Path;
 
 const PROMPT: &str = "private-fixture-system-text";
 const KEY: &str = "trace-test-placeholder-credential";
+
+// RFC §5.1, §6.1, §9.5
+#[test]
+fn events_distinguish_tool_approval_from_execution_and_record_an_applied_fold() {
+    for policy in ["auto", "deny"] {
+        let fx = Fixture::new();
+        let root = &fx.dir.0;
+        fs::write(root.join("case.agent"), "trace fixture").unwrap();
+        scripted_provider(
+            &fx,
+            &[
+                with_tools([
+                    tool("first", "printf a >> ran"),
+                    tool(
+                        "second",
+                        r#"printf b >> ran; printf '%s\n' '{"op":"fold","from_turn":1,"summary":"recap"}' > "$AGENT_CTL""#,
+                    ),
+                ]),
+                success_text("finished"),
+            ],
+        );
+        let out = fx.run(fx.command_for("/bin/sh").env("AGENT_TRACE_LEVEL", "events").args([
+            "-c", r#"exec "$1" -q --approval "$2" --shell /bin/sh -c history case.agent -- go 3>trace"#,
+            "fixture", env!("CARGO_BIN_EXE_agent"), policy,
+        ]));
+        expect_code(&out, 0);
+        let trace = jsonl(&root.join("trace"));
+        let kinds: Vec<_> = trace.iter().map(|r| r["type"].as_str().unwrap()).collect();
+        let tool_events: Vec<_> = kinds
+            .iter()
+            .copied()
+            .filter(|k| matches!(*k, "tool_approval" | "tool_start" | "tool_end"))
+            .collect();
+        let folded = jsonl(&root.join("history"))
+            .iter()
+            .any(|r| r["type"] == "fold");
+        assert_eq!(
+            kinds.iter().filter(|k| **k == "fold").count(),
+            usize::from(folded)
+        );
+        if policy == "auto" {
+            assert_eq!(
+                tool_events,
+                [
+                    "tool_approval",
+                    "tool_start",
+                    "tool_end",
+                    "tool_approval",
+                    "tool_start",
+                    "tool_end"
+                ]
+            );
+            assert_eq!(fs::read(root.join("ran")).unwrap(), b"ab");
+            assert!(folded);
+        } else {
+            assert_eq!(tool_events, ["tool_approval", "tool_approval"]);
+            assert!(!root.join("ran").exists() && !folded);
+        }
+    }
+}
 
 fn fixture() -> Fixture {
     let fx = Fixture::new();

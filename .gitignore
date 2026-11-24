@@ -2,6 +2,7 @@
 /target/
 **/*.rs.bk
 *.pdb
+/tests/__pycache__/
 
 # OS / Editor
 .DS_Store

@@ -13,7 +13,9 @@ import tempfile
 import threading
 import unittest
 import zlib
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import HTTPServer
+
+from http_fixture import JsonRequest
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -29,23 +31,7 @@ def one_pixel_png():
             + chunk(b"IDAT", zlib.compress(b"\0\xff\x7f\0")) + chunk(b"IEND", b""))
 
 
-class Responses(BaseHTTPRequestHandler):
-    def log_message(self, *args):
-        pass
-
-    def body(self):
-        if self.headers.get("Transfer-Encoding", "").lower() != "chunked":
-            return self.rfile.read(int(self.headers["Content-Length"]))
-        chunks = []
-        while True:
-            size = int(self.rfile.readline().split(b";", 1)[0].strip(), 16)
-            if not size:
-                self.rfile.readline()
-                return b"".join(chunks)
-            chunks.append(self.rfile.read(size))
-            if self.rfile.read(2) != b"\r\n":
-                raise ValueError("invalid chunk terminator")
-
+class Responses(JsonRequest):
     def do_POST(self):
         if self.path != "/v1/responses":
             self.send_error(404)
@@ -54,7 +40,7 @@ class Responses(BaseHTTPRequestHandler):
         self.server.requests.append(request)
         turn = len(self.server.requests)
         if turn in (1, 2):
-            cmd = ('aview pixel.png && printf "A\\000B" > "$AGENT_OUT"'
+            cmd = ('cat pixel.png | tee pipe-copy.png | aview - && printf "A\\000B" > "$AGENT_OUT"'
                    if turn == 1 else 'aclr -t 3 "saved image"')
             event = {
                 "type": "response.output_item.done",
@@ -76,7 +62,7 @@ class Responses(BaseHTTPRequestHandler):
 
 
 class Distribution(unittest.TestCase):
-    # RFC §2, §10.3, §7.2, §6.1, §4.4, §9.6
+    # RFC §1.2, §2, §3.1, §10.3, §7.2, §6.1, §4.4, §9.6
     def test_installed_pipeline_and_fold(self):
         with tempfile.TemporaryDirectory(prefix="agent-fhs-") as home:
             root = Path(home)
@@ -108,6 +94,8 @@ class Distribution(unittest.TestCase):
                 self.assertEqual((root / name).read_bytes(), b"# fixture rc\n")
             self.assertEqual({p.name for p in (prefix / "bin").iterdir()}, {"agent"})
             libexec = prefix / "libexec/agent"
+            for native in ("cat", "ls", "grep"):
+                self.assertFalse(os.path.lexists(libexec / "tools" / native), native)
             for path in [libexec / "msh", libexec / "agent-provider-openai-responses",
                          libexec / "tools/aview", libexec / "tools/aclr"]:
                 self.assertTrue(path.is_file() and os.access(path, os.X_OK), path)
@@ -148,6 +136,7 @@ class Distribution(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout, b"A\x00B")
             self.assertEqual(result.stderr, b"")
+            self.assertEqual((root / "pipe-copy.png").read_bytes(), one_pixel_png())
             self.assertEqual(len(http.requests), 3)
             first, second, third = http.requests
             self.assertEqual(first["model"], "test-model")
