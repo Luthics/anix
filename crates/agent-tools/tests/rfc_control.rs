@@ -1,6 +1,6 @@
 //! §§6.1 and 7.2. Read the actual bytes written through an inherited fd 6.
 //! stdout is intentionally discarded so a tool printing JSON to stdout cannot pass.
-use image::{DynamicImage, ImageFormat};
+use image::{DynamicImage, GenericImageView, ImageFormat, Rgba, RgbaImage};
 use serde_json::{Value, json};
 use std::fs;
 use std::io::{Cursor, Write};
@@ -102,7 +102,7 @@ fn png(width: u32, height: u32) -> Vec<u8> {
     bytes.into_inner()
 }
 
-fn take_image(record: &Value) -> (u32, u32) {
+fn take_image(record: &Value) -> DynamicImage {
     assert_eq!(record["op"], "media");
     assert_eq!(record["mime"], "image/png");
     let path = Path::new(record["path"].as_str().unwrap());
@@ -122,8 +122,7 @@ fn take_image(record: &Value) -> (u32, u32) {
     assert_eq!(meta.permissions().mode() & 0o777, 0o600);
     let bytes = fs::read(path).unwrap();
     fs::remove_file(path).unwrap();
-    let im = image::load_from_memory_with_format(&bytes, ImageFormat::Png).unwrap();
-    (im.width(), im.height())
+    image::load_from_memory_with_format(&bytes, ImageFormat::Png).unwrap()
 }
 
 // RFC §7.2
@@ -145,7 +144,7 @@ fn aview_resizes_portrait_landscape_and_square_images_only_when_needed() {
             vec!["--max-dim", &limit_arg, "-"]
         };
         let event = frame(&invoke(env!("CARGO_BIN_EXE_aview"), &args, &image));
-        assert_eq!(take_image(&event), expected);
+        assert_eq!(take_image(&event).dimensions(), expected);
     }
 }
 
@@ -157,11 +156,55 @@ fn aview_file_input_and_stdin_agree_on_image_dimensions() {
     fs::write(&path, &bytes).unwrap();
     let file_result = invoke(env!("CARGO_BIN_EXE_aview"), &[path.to_str().unwrap()], b"");
     fs::remove_file(&path).unwrap();
-    assert_eq!(take_image(&frame(&file_result)), (5, 3));
+    assert_eq!(take_image(&frame(&file_result)).dimensions(), (5, 3));
     assert_eq!(
-        take_image(&frame(&invoke(env!("CARGO_BIN_EXE_aview"), &[], &bytes))),
+        take_image(&frame(&invoke(env!("CARGO_BIN_EXE_aview"), &[], &bytes))).dimensions(),
         (5, 3)
     );
+}
+
+// RFC §7.2
+#[test]
+fn aview_preserves_image_content_and_orientation_in_the_published_png() {
+    let colors = [
+        Rgba([240, 20, 10, 255]),
+        Rgba([0, 130, 220, 255]),
+        Rgba([50, 180, 40, 128]),
+        Rgba([225, 200, 60, 190]),
+    ];
+    let original = RgbaImage::from_fn(120, 80, |x, y| {
+        colors[usize::from(x >= 60) + 2 * usize::from(y >= 40)]
+    });
+    let mut bytes = Cursor::new(Vec::new());
+    original.write_to(&mut bytes, ImageFormat::Png).unwrap();
+    for (limit, size) in [("1568", (120, 80)), ("60", (60, 40))] {
+        let event = frame(&invoke(
+            env!("CARGO_BIN_EXE_aview"),
+            &["--max-dim", limit, "-"],
+            bytes.get_ref(),
+        ));
+        let actual = take_image(&event).to_rgba8();
+        assert_eq!(actual.dimensions(), size);
+        if size == original.dimensions() {
+            assert!(actual == original, "unscaled PNG changed its pixels");
+        } else {
+            // Interior samples do not prescribe how a resampler treats edges.
+            for (i, (x, y)) in [(15, 10), (45, 10), (15, 30), (45, 30)]
+                .into_iter()
+                .enumerate()
+            {
+                let pixel = actual.get_pixel(x, y);
+                assert!(
+                    pixel
+                        .0
+                        .iter()
+                        .zip(colors[i].0)
+                        .all(|(&a, b)| a.abs_diff(b) <= 2),
+                    "wrong quadrant at {x},{y}: {pixel:?}"
+                );
+            }
+        }
+    }
 }
 
 // RFC §7.2

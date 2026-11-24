@@ -1,16 +1,17 @@
 """RFC §7.2. Render a four-page local PDF through aview's public fd 6 interface.
 
-Run cargo build -p agent-tools, then python3 tests/test_pdf_pages.py. Install
-Poppler's pdftoppm, mutool, or Ghostscript. Set AVIEW_BIN for another target.
+Run cargo build -p agent-tools, then python3 tests/test_pdf_pages.py with
+Pillow and Poppler's pdftoppm, mutool, or Ghostscript. Set AVIEW_BIN for another target.
 """
 import json
 import os
 from pathlib import Path
 import shutil
-import struct
 import subprocess
 import tempfile
 import unittest
+
+from PIL import Image
 
 
 def page_shapes_pdf():
@@ -20,10 +21,17 @@ def page_shapes_pdf():
     kids = " ".join(f"{3 + i} 0 R" for i in range(len(sizes)))
     objects = ["<< /Type /Catalog /Pages 2 0 R >>",
                f"<< /Type /Pages /Count 4 /Kids [{kids}] >>"]
-    for width, height in sizes:
+    # The left and right halves identify both the selected page and its orientation.
+    colors = [("1 0 0", "0 0 1"), ("0 1 0", "1 0 0"),
+              ("1 0 1", "0 1 1"), ("0 0 1", "0 1 0")]
+    for i, (width, height) in enumerate(sizes):
         objects.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] "
-                       "/Resources << >> /Contents 7 0 R >>")
-    objects.append("<< /Length 0 >>\nstream\nendstream")
+                       f"/Resources << >> /Contents {7 + i} 0 R >>")
+    for (width, height), (left, right) in zip(sizes, colors):
+        half = width // 2
+        drawing = (f"{left} rg 0 0 {half} {height} re f\n"
+                   f"{right} rg {half} 0 {half} {height} re f\n")
+        objects.append(f"<< /Length {len(drawing)} >>\nstream\n{drawing}endstream")
     buf = bytearray(b"%PDF-1.4\n")
     offsets = []
     for number, obj in enumerate(objects, 1):
@@ -62,14 +70,21 @@ class PdfPages(unittest.TestCase):
                         self.assertEqual(proc.returncode, 0, proc.stderr)
                         self.assertEqual(len(rows), 3)
                         self.assertEqual(len(set(paths)), 3)
-                        for frame, output, size in zip(rows, paths, [(48, 48), (48, 24), (24, 48)]):
+                        expected = [((48, 48), (255, 0, 0), (0, 0, 255)),
+                                    ((48, 24), (0, 255, 0), (255, 0, 0)),
+                                    ((24, 48), (0, 0, 255), (0, 255, 0))]
+                        for frame, output, (size, left, right) in zip(rows, paths, expected):
                             self.assertEqual((frame["op"], frame["mime"]), ("media", "image/png"))
                             self.assertTrue(output.is_absolute())
                             self.assertEqual(output.stat().st_mode & 0o777, 0o600)
-                            image = output.read_bytes()
-                            self.assertTrue(image.startswith(b"\x89PNG\r\n\x1a\n"))
-                            self.assertEqual(image[12:16], b"IHDR")
-                            self.assertEqual(struct.unpack(">II", image[16:24]), size)
+                            with Image.open(output) as image:
+                                self.assertEqual((image.format, image.size), ("PNG", size))
+                                rgb = image.convert("RGB")
+                                for x, expected_color in [(size[0] // 4, left), (3 * size[0] // 4, right)]:
+                                    pixel = rgb.getpixel((x, size[1] // 2))
+                                    # Allow small rounding differences between renderers.
+                                    self.assertLessEqual(max(abs(a - b) for a, b in zip(pixel, expected_color)),
+                                                         12, (size, x, pixel, expected_color))
                     finally:
                         for output in paths:
                             if output.parent == Path("/tmp") and output.name.startswith("aview_"):

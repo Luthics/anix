@@ -11,9 +11,10 @@
 | [`aclr_emits_a_single_compact_or_fold_frame_with_lossless_json_escaping`](../crates/agent-tools/tests/rfc_control.rs#L40) | [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) · [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) |
 | [`invalid_aclr_argv_never_submits_a_frame`](../crates/agent-tools/tests/rfc_control.rs#L57) | [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) |
 | [`fold_control_frames_stay_within_64_kib_even_after_json_escaping`](../crates/agent-tools/tests/rfc_control.rs#L78) | [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) |
-| [`aview_resizes_portrait_landscape_and_square_images_only_when_needed`](../crates/agent-tools/tests/rfc_control.rs#L131) | [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) |
-| [`aview_file_input_and_stdin_agree_on_image_dimensions`](../crates/agent-tools/tests/rfc_control.rs#L154) | [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) |
-| [`undecodable_input_or_invalid_options_do_not_emit_media`](../crates/agent-tools/tests/rfc_control.rs#L169) | [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) |
+| [`aview_resizes_portrait_landscape_and_square_images_only_when_needed`](../crates/agent-tools/tests/rfc_control.rs#L130) | [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) |
+| [`aview_file_input_and_stdin_agree_on_image_dimensions`](../crates/agent-tools/tests/rfc_control.rs#L153) | [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) |
+| [`aview_preserves_image_content_and_orientation_in_the_published_png`](../crates/agent-tools/tests/rfc_control.rs#L168) | [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) |
+| [`undecodable_input_or_invalid_options_do_not_emit_media`](../crates/agent-tools/tests/rfc_control.rs#L212) | [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) |
 
 ## `crates/msh/tests/rfc_shell.rs`
 
@@ -23,9 +24,10 @@
 | [`ansi_csi_final_byte_range_osc_terminators_and_carriage_return_overwrites`](../crates/msh/tests/rfc_shell.rs#L65) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) |
 | [`line_limit_is_inclusive_and_fold_preserves_exact_head_tail_count_and_full_text`](../crates/msh/tests/rfc_shell.rs#L93) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) |
 | [`byte_limit_independent_from_line_limit_preserves_multibyte_file`](../crates/msh/tests/rfc_shell.rs#L134) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) |
-| [`cli_forces_noninteractive_environment_merges_streams_and_propagates_status`](../crates/msh/tests/rfc_shell.rs#L169) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) |
-| [`cli_suppresses_raw_bytes_before_ansi_filtering_or_folding`](../crates/msh/tests/rfc_shell.rs#L191) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) |
-| [`timeout_reports_124_before_a_finite_longer_command_completes`](../crates/msh/tests/rfc_shell.rs#L216) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`cli_applies_environment_limits_to_cleaned_lines_and_bytes_before_saving_output`](../crates/msh/tests/rfc_shell.rs#L169) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) |
+| [`cli_forces_noninteractive_environment_merges_streams_and_propagates_status`](../crates/msh/tests/rfc_shell.rs#L220) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) |
+| [`cli_suppresses_raw_bytes_before_ansi_filtering_or_folding`](../crates/msh/tests/rfc_shell.rs#L242) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) |
+| [`timeout_reports_124_before_a_finite_longer_command_completes`](../crates/msh/tests/rfc_shell.rs#L267) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
 
 ## `crates/os-agent-core/src/cli.rs`
 
@@ -294,7 +296,7 @@
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`test_single_file_and_stdin_render_the_selected_pages`](../tests/test_pdf_pages.py#L43) | [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) |
+| [`test_single_file_and_stdin_render_the_selected_pages`](../tests/test_pdf_pages.py#L51) | [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) |
 
 ## `tests/test_shell_pipeline.py`
 

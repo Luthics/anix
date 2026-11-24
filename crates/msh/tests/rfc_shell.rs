@@ -166,6 +166,57 @@ fn msh(script: &str) -> Command {
 
 // RFC §7.1
 #[test]
+fn cli_applies_environment_limits_to_cleaned_lines_and_bytes_before_saving_output() {
+    let cmd = r#"i=1
+while [ "$i" -le 50 ]; do
+    printf 'old progress %s\r\033[31mrow-%03d\033[0m\n' "$i" "$i"
+    i=$((i+1))
+done
+exit 23"#;
+    let cleaned = (1..=50)
+        .map(|i| format!("row-{i:03}\n"))
+        .collect::<String>();
+    for (line_limit, byte_limit, folded) in [
+        (50, cleaned.len(), false),
+        (49, cleaned.len(), true),
+        (50, cleaned.len() - 1, true),
+    ] {
+        let result = msh(cmd)
+            .env("MSH_MAX_LINES", line_limit.to_string())
+            .env("MSH_MAX_BYTES", byte_limit.to_string())
+            .output()
+            .unwrap();
+        assert_eq!(result.status.code(), Some(23));
+        assert!(result.stderr.is_empty());
+        let stdout = String::from_utf8(result.stdout).unwrap();
+        if folded {
+            let log = folded_file(&stdout);
+            assert_eq!(take_artifact(&log, "log"), cleaned.as_bytes());
+            let visible: Vec<_> = stdout.lines().filter(|s| s.starts_with("row-")).collect();
+            let head_and_tail: Vec<_> = cleaned
+                .lines()
+                .take(20)
+                .chain(cleaned.lines().skip(30))
+                .collect();
+            assert_eq!(visible, head_and_tail);
+            let metadata = stdout.replace(log.to_str().unwrap(), "");
+            let numbers: Vec<_> = metadata
+                .lines()
+                .filter(|s| !s.starts_with("row-"))
+                .flat_map(|s| s.split(|c: char| !c.is_ascii_digit()))
+                .collect();
+            assert!(
+                numbers.contains(&"23") && numbers.contains(&"10"),
+                "{stdout}"
+            );
+        } else {
+            assert_eq!(stdout, cleaned);
+        }
+    }
+}
+
+// RFC §7.1
+#[test]
 fn cli_forces_noninteractive_environment_merges_streams_and_propagates_status() {
     let mut cmd = msh(
         r#"printf '%s|%s|%s|%s|%s|%s' "$NONINTERACTIVE" "$DEBIAN_FRONTEND" "$PAGER" "$GIT_TERMINAL_PROMPT" "$TERM" "$NO_COLOR"; printf '|stderr' >&2; exit 37"#,
