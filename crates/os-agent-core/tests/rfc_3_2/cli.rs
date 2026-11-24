@@ -101,3 +101,77 @@ fn invalid_file_bytes_and_yaml_report_usage_errors_to_stderr() {
         fixture.assert_rejected(case, source);
     }
 }
+
+// RFC §3.2, §3.3, §9.1
+#[test]
+fn yaml_block_scalar_chomping_survives_the_frontmatter_boundary() {
+    let fixture = Fixture::new();
+    let mut differences = Vec::new();
+    for (style, expected) in [
+        ("|-", "one\n---\n# text\nlast"),
+        ("|", "one\n---\n# text\nlast\n"),
+        ("|+", "one\n---\n# text\nlast\n\n"),
+        (">-", "one --- # text last"),
+        (">", "one --- # text last\n"),
+        (">+", "one --- # text last\n\n"),
+    ] {
+        for eol in ["\n", "\r\n"] {
+            // The final content line is terminated. Keep also has an empty
+            // line to retain. Moving an unrelated field must preserve the value.
+            let extra = if style.ends_with('+') { "\n" } else { "" };
+            for tail in ["model: sample\n", ""] {
+                let source = format!("---\nparams:\n  note: {style}\n    one\n    ---\n    # text\n    last\n{extra}{tail}---\nprompt").replace('\n', eol);
+                let out = run_script(&fixture, source.as_bytes());
+                assert_eq!(
+                    out.status.code(),
+                    Some(0),
+                    "{}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                let capture = fs::read_to_string(&fixture.capture).unwrap();
+                let mut rows = capture
+                    .lines()
+                    .map(|line| serde_json::from_str::<Value>(line).unwrap());
+                let note = rows.next().unwrap()["params"]["note"].clone();
+                assert_eq!(rows.next().unwrap()["text"], "prompt");
+                if note != expected {
+                    differences.push(format!(
+                        "style={style}, eol={eol:?}, tail={tail:?}: {note} vs {expected:?}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(differences.is_empty(), "{}", differences.join("\n"));
+}
+
+// RFC §3.2, §3.3, §6.4
+#[test]
+fn duplicate_yaml_keys_are_invalid_even_inside_open_maps() {
+    let fixture = Fixture::new();
+    for fields in [
+        "model: first\n\"model\": second",
+        "params: {nested: {k: 1, 'k': 2}}",
+        "x-fixture: one\n'x-fixture': two",
+    ] {
+        fixture.assert_rejected(fields, format!("---\n{fields}\n---\nprompt").as_bytes());
+    }
+}
+
+// RFC §3.2, §3.3, §9.1
+#[test]
+fn yaml_aliases_can_supply_typed_provider_params_from_an_extension_field() {
+    let fixture = Fixture::new();
+    let input = "---\nx-examples: &sample {enabled: true, notes: [off, 'a:b', null]}\nparams:\n  original: *sample\n  copied: *sample\n---\nprompt";
+    let out = run_script(&fixture, input.as_bytes());
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let ir = fs::read_to_string(&fixture.capture).unwrap();
+    let header: Value = serde_json::from_str(ir.lines().next().unwrap()).unwrap();
+    let item = json!({"enabled":true,"notes":["off","a:b",null]});
+    assert_eq!(header["params"], json!({"original":item,"copied":item}));
+}

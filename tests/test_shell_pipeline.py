@@ -127,13 +127,17 @@ fi
     def test_trace_envelope_identifies_the_live_process_and_effective_agent_name(self):
         (self.root / "first.reply").write_text(
             '{"type":"text_delta","text":"ok"}\n{"type":"done","finish_reason":"stop"}\n')
-        for source, name in [("plain", "filename"), ("---\nname: named.agent-2\n---\nbody", "named.agent-2")]:
-            with self.subTest(name=name):
-                (self.root / "filename.agent").write_text(source)
+        for filename, source, name in [
+            ("filename.agent", "plain", "filename"),
+            ("a_B.v2-1.agent", "plain", "a_B.v2-1"),
+            ("带空格 name.agent", "---\nname: named.agent-2\n---\nbody", "named.agent-2"),
+        ]:
+            with self.subTest(filename=filename, name=name):
+                (self.root / filename).write_text(source)
                 (self.root / "first.ir").unlink(missing_ok=True)
                 before = time.time()
                 with subprocess.Popen(["sh", "-c", 'exec "$@" 3>trace', "fixture",
-                                       self.agent, "-q", "filename.agent", "--", "go"],
+                                       self.agent, "-q", filename, "--", "go"],
                                       cwd=self.root, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                       stderr=subprocess.PIPE, env={**self.env, "AGENT_TRACE_LEVEL": "events"}) as child:
                     try:

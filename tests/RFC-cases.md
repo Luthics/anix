@@ -56,6 +56,9 @@
 | [`crlf_script_reaches_the_provider_as_the_intended_system_message`](../crates/os-agent-core/tests/rfc_3_2/cli.rs#L44) | [§3.2](../docs/v1.0.0-RFC.md?plain=1#L60) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
 | [`unknown_top_level_fields_fail_closed_regardless_of_spelling_or_position`](../crates/os-agent-core/tests/rfc_3_2/cli.rs#L67) | [§3.2](../docs/v1.0.0-RFC.md?plain=1#L60) · [§3.3](../docs/v1.0.0-RFC.md?plain=1#L85) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
 | [`invalid_file_bytes_and_yaml_report_usage_errors_to_stderr`](../crates/os-agent-core/tests/rfc_3_2/cli.rs#L90) | [§3.2](../docs/v1.0.0-RFC.md?plain=1#L60) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`yaml_block_scalar_chomping_survives_the_frontmatter_boundary`](../crates/os-agent-core/tests/rfc_3_2/cli.rs#L107) | [§3.2](../docs/v1.0.0-RFC.md?plain=1#L60) · [§3.3](../docs/v1.0.0-RFC.md?plain=1#L85) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`duplicate_yaml_keys_are_invalid_even_inside_open_maps`](../crates/os-agent-core/tests/rfc_3_2/cli.rs#L150) | [§3.2](../docs/v1.0.0-RFC.md?plain=1#L60) · [§3.3](../docs/v1.0.0-RFC.md?plain=1#L85) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`yaml_aliases_can_supply_typed_provider_params_from_an_extension_field`](../crates/os-agent-core/tests/rfc_3_2/cli.rs#L163) | [§3.2](../docs/v1.0.0-RFC.md?plain=1#L60) · [§3.3](../docs/v1.0.0-RFC.md?plain=1#L85) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
 
 ## `crates/os-agent-core/tests/rfc_3_2/encoding.rs`
 
@@ -335,16 +338,16 @@
 | --- | --- |
 | [`test_aclr_and_agent_agree_on_the_serialized_fold_frame_size_limit`](../tests/test_shell_pipeline.py#L77) | [§7.2](../docs/v1.0.0-RFC.md?plain=1#L305) · [§6.1](../docs/v1.0.0-RFC.md?plain=1#L204) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) |
 | [`test_trace_envelope_identifies_the_live_process_and_effective_agent_name`](../tests/test_shell_pipeline.py#L127) | [§3.3](../docs/v1.0.0-RFC.md?plain=1#L85) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
-| [`test_wal_append_failure_preserves_the_prefix_and_reopens_according_to_tail_state`](../tests/test_shell_pipeline.py#L159) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
-| [`test_skill_index_round_trips_xml_metadata_and_msh_reads_the_indexed_file_on_demand`](../tests/test_shell_pipeline.py#L202) | [§9.4](../docs/v1.0.0-RFC.md?plain=1#L461) · [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) |
-| [`test_open_input_descriptor_defers_inference_until_eof`](../tests/test_shell_pipeline.py#L245) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
-| [`test_inference_can_finish_with_an_open_trace_consumer_that_stops_reading`](../tests/test_shell_pipeline.py#L291) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
-| [`test_msh_timeout_signals_the_whole_group_and_grants_three_seconds_before_kill`](../tests/test_shell_pipeline.py#L327) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
-| [`test_interrupting_a_live_msh_discards_its_partial_result_and_replays_a_closed_history`](../tests/test_shell_pipeline.py#L365) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§6.3](../docs/v1.0.0-RFC.md?plain=1#L268) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
-| [`test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity`](../tests/test_shell_pipeline.py#L418) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§4.3](../docs/v1.0.0-RFC.md?plain=1#L156) |
-| [`test_stdout_and_stderr_terminal_modes_are_independent`](../tests/test_shell_pipeline.py#L458) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§4.3](../docs/v1.0.0-RFC.md?plain=1#L156) |
-| [`test_real_shell_timeout_returns_an_error_tool_result_and_inference_continues`](../tests/test_shell_pipeline.py#L523) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
-| [`test_wire_file_has_raw_ansi_and_model_receives_cleaned_text`](../tests/test_shell_pipeline.py#L530) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
-| [`test_path_precedes_libexec_and_explicit_shell_path_has_priority_over_both`](../tests/test_shell_pipeline.py#L550) | [§2](../docs/v1.0.0-RFC.md?plain=1#L23) |
-| [`test_nested_agent_uses_own_model_wal_and_budget_and_inherits_cli_auto`](../tests/test_shell_pipeline.py#L615) | [§3.4](../docs/v1.0.0-RFC.md?plain=1#L102) · [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) |
-| [`test_nested_agent_inherits_cli_deny_over_its_own_auto_frontmatter`](../tests/test_shell_pipeline.py#L619) | [§3.4](../docs/v1.0.0-RFC.md?plain=1#L102) · [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) |
+| [`test_wal_append_failure_preserves_the_prefix_and_reopens_according_to_tail_state`](../tests/test_shell_pipeline.py#L163) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`test_skill_index_round_trips_xml_metadata_and_msh_reads_the_indexed_file_on_demand`](../tests/test_shell_pipeline.py#L206) | [§9.4](../docs/v1.0.0-RFC.md?plain=1#L461) · [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) |
+| [`test_open_input_descriptor_defers_inference_until_eof`](../tests/test_shell_pipeline.py#L249) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`test_inference_can_finish_with_an_open_trace_consumer_that_stops_reading`](../tests/test_shell_pipeline.py#L295) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`test_msh_timeout_signals_the_whole_group_and_grants_three_seconds_before_kill`](../tests/test_shell_pipeline.py#L331) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`test_interrupting_a_live_msh_discards_its_partial_result_and_replays_a_closed_history`](../tests/test_shell_pipeline.py#L369) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§6.3](../docs/v1.0.0-RFC.md?plain=1#L268) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) |
+| [`test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity`](../tests/test_shell_pipeline.py#L422) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§4.3](../docs/v1.0.0-RFC.md?plain=1#L156) |
+| [`test_stdout_and_stderr_terminal_modes_are_independent`](../tests/test_shell_pipeline.py#L462) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§4.3](../docs/v1.0.0-RFC.md?plain=1#L156) |
+| [`test_real_shell_timeout_returns_an_error_tool_result_and_inference_continues`](../tests/test_shell_pipeline.py#L527) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`test_wire_file_has_raw_ansi_and_model_receives_cleaned_text`](../tests/test_shell_pipeline.py#L534) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`test_path_precedes_libexec_and_explicit_shell_path_has_priority_over_both`](../tests/test_shell_pipeline.py#L554) | [§2](../docs/v1.0.0-RFC.md?plain=1#L23) |
+| [`test_nested_agent_uses_own_model_wal_and_budget_and_inherits_cli_auto`](../tests/test_shell_pipeline.py#L619) | [§3.4](../docs/v1.0.0-RFC.md?plain=1#L102) · [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) |
+| [`test_nested_agent_inherits_cli_deny_over_its_own_auto_frontmatter`](../tests/test_shell_pipeline.py#L623) | [§3.4](../docs/v1.0.0-RFC.md?plain=1#L102) · [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) |
