@@ -102,9 +102,9 @@ fi
         with config.open("a") as f:
             f.write("\n[approval]\nsafe_commands=['start-child']\n"
                     "[providers.inner]\nbin='inner-provider'\n")
-        tools = self.libexec / "tools"
-        tools.mkdir()
-        launch = tools / "start-child"
+        launcher_dir = self.root / "bin"
+        launcher_dir.mkdir()
+        launch = launcher_dir / "start-child"
         launch.write_text('#!/bin/sh\nexec "$TEST_AGENT_BINARY" child.agent -- subtask\n')
         launch.chmod(0o700)
         self.root.joinpath("child.agent").write_text(
@@ -130,7 +130,8 @@ while [ -f "child-$n.ir" ]; do n=$((n+1)); done
             self.root.joinpath(f"child-{n}.reply").write_text(
                 json.dumps(event) + "\n" + json.dumps({"type": "done", "finish_reason": reason}) + "\n")
         result, parent_tool = self.invoke(
-            "start-child", {"TEST_AGENT_BINARY": str(self.agent), "AGENT_MODEL": "outer-model",
+            "start-child", {"PATH": f"{launcher_dir}:/bin:/usr/bin",
+                            "TEST_AGENT_BINARY": str(self.agent), "AGENT_MODEL": "outer-model",
                             "AGENT_PROVIDER": "fixture", "AGENT_CONTEXT": "parent.wal",
                             "AGENT_MAX_TURNS": "2"}, approval_opts=approval_opts)
         self.assertIn("exit=0\n", parent_tool["text"], parent_tool)
