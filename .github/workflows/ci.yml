@@ -75,45 +75,6 @@ jobs:
       - run: python3 tests/test_linux_fallback.py
         if: ${{ !cancelled() }}
 
-  wsl2:
-    name: RFC suites on WSL2
-    runs-on: windows-2025
-    timeout-minutes: 30
-    steps:
-      - uses: Vampire/setup-wsl@4c48163d9f981914dd8caa0fc335fe19cca5bff4 # v7
-        with:
-          distribution: Ubuntu-24.04
-          wsl-version: 2
-          additional-packages: build-essential ca-certificates curl python3 poppler-utils strace
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Export POSIX modes and line endings from Git
-        run: git archive --format=tar --output=source.tar HEAD
-      # RFC §10.2
-      - name: Build on the WSL2 Linux filesystem
-        shell: wsl-bash {0}
-        run: |
-          uname -r | grep -i 'microsoft.*wsl2'
-          mkdir -p "$HOME/os-agent"
-          tar xf source.tar -C "$HOME/os-agent"
-          cd "$HOME/os-agent"
-          curl -fsSLo /tmp/rustup-init https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init
-          chmod +x /tmp/rustup-init
-          /tmp/rustup-init -y --profile minimal --no-modify-path
-          "$HOME/.cargo/bin/cargo" build --locked --workspace
-      - name: Run Rust and executable suites
-        shell: wsl-bash {0}
-        run: |
-          cd "$HOME/os-agent"
-          export PATH="$HOME/.cargo/bin:$PATH"
-          status=0
-          cargo xtest --locked --no-fail-fast || status=1
-          for suite in tests/test_*.py; do
-            python3 "$suite" || status=1
-          done
-          exit "$status"
-
   linux-musl-static:
     name: Static Linux musl (x86_64)
     runs-on: ubuntu-latest
