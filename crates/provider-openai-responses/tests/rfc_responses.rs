@@ -166,6 +166,45 @@ fn maps_request_and_streams_text_reasoning_usage_and_done() {
     assert_eq!(events[4], json!({"type":"done","finish_reason":"stop"}));
 }
 
+// RFC §6.2, §9.1, §9.2
+#[test]
+fn runtime_update_stays_in_chronological_input_and_frozen_instructions_keep_their_bytes() {
+    let frozen = " 开始\r\n\n 界\t  ";
+    let update = "<runtime_update>\nstderr changed\t\n</runtime_update>";
+    let rows = [
+        head(),
+        json!({"role":"system","turn_id":0,"text":frozen}),
+        json!({"role":"user","turn_id":1,"text":"first question"}),
+        json!({"role":"assistant","turn_id":2,"text":"first answer"}),
+        json!({"role":"system","turn_id":3,"text":update}),
+        json!({"role":"user","turn_id":4,"text":"second question"}),
+    ];
+    let response = sse(&[
+        json!({"type":"response.output_text.delta","delta":"done"}),
+        json!({"type":"response.completed","response":{}}),
+    ]);
+    let (requests, out, _) = run(&rows, 200, &response);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["instructions"], frozen);
+    let inputs = requests[0]["input"].as_array().unwrap();
+    assert_eq!(inputs.len(), 4);
+    for (item, expected) in inputs.iter().zip(&rows[2..]) {
+        assert_eq!(item["content"][0]["text"], expected["text"]);
+    }
+    assert_eq!(inputs[0]["role"], "user");
+    assert_eq!(inputs[1]["role"], "assistant");
+    assert!(matches!(
+        inputs[2]["role"].as_str(),
+        Some("system" | "developer" | "user")
+    ));
+    assert_eq!(inputs[3]["role"], "user");
+}
+
 // RFC §9.2
 #[test]
 fn repeated_sse_notifications_emit_one_complete_tool_call() {
