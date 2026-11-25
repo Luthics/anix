@@ -6,7 +6,7 @@
 
 ## 2. Workspace 边界
 - `crates/os-agent-proto`：唯一线协议事实源，**禁止引入网络 / 异步 / OS 运行时依赖**。
-- `crates/os-agent-core`（`agent`）、`crates/msh`（`msh`）、`crates/provider-openai-responses`（`agent-provider-openai-responses`）、`crates/agent-tools`（`aview`、`aclr`）：各二进制职责严格按 RFC 划分。
+- `crates/os-agent-core`（`agent`）、`crates/msh`（`msh`）、`crates/agent-providers`（`agent-provider` 及 BusyBox 软链 `agent-provider-{openai-responses,openai-compat,anthropic}`）、`crates/agent-tools`（`aview`、`aclr`）：各二进制职责严格按 RFC 划分。
 - Linux 专属系统调用（`pidfd`、`PR_SET_PDEATHSIG`、Landlock）严格隔离在 `#[cfg(target_os = "linux")]` 模块（`crates/os-agent-core/src/platform/linux.rs`）。
 
 ## 3. Rust 编码规范

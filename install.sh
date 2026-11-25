@@ -2,33 +2,26 @@
 # One-line installer for OS Agent (https://github.com/Luthics/os-agent)
 # Usage (public repo):
 #   curl -fsSL https://raw.githubusercontent.com/Luthics/os-agent/main/install.sh | sh
-#   curl -fsSL https://raw.githubusercontent.com/Luthics/os-agent/main/install.sh | sh -s -- --with-zsh
 #
 # Usage (private repo, using GitHub CLI or GITHUB_TOKEN/GH_TOKEN):
 #   gh api repos/Luthics/os-agent/contents/install.sh -H "Accept: application/vnd.github.raw" | sh
-#   gh api repos/Luthics/os-agent/contents/install.sh -H "Accept: application/vnd.github.raw" | sh -s -- --with-zsh
 #
 # Environment overrides:
-#   OS_AGENT_VERSION=v0.0.1       Pin a specific release tag (default: latest release)
+#   OS_AGENT_VERSION=v0.0.2       Pin a specific release tag (default: latest release)
 #   OS_AGENT_PREFIX=$HOME/.local  Install prefix (default: ~/.local)
 #   OS_AGENT_REPO=Luthics/os-agent
-#   OS_AGENT_WITH_ZSH=1           Also install Luthics/zsh-os-agent plugin into ~/.config/agent/
 #   GITHUB_TOKEN / GH_TOKEN       Optional GitHub token (needed if repo is private and `gh` is absent)
 set -eu
 
 REPO="${OS_AGENT_REPO:-Luthics/os-agent}"
-ZSH_REPO="${OS_AGENT_ZSH_REPO:-Luthics/zsh-os-agent}"
 PREFIX="${OS_AGENT_PREFIX:-$HOME/.local}"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/agent"
+AGENTS_DIR="${CONFIG_DIR}/agents"
 VERSION="${OS_AGENT_VERSION:-}"
-WITH_ZSH="${OS_AGENT_WITH_ZSH:-0}"
 TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --with-zsh)
-      WITH_ZSH=1
-      ;;
     --version)
       shift
       [ "$#" -gt 0 ] || { echo "install.sh: --version requires an argument" >&2; exit 2; }
@@ -40,7 +33,7 @@ while [ "$#" -gt 0 ]; do
       PREFIX="$1"
       ;;
     -h|--help)
-      sed -n '2,16p' "$0" 2>/dev/null || echo "Usage: install.sh [--with-zsh] [--version vX.Y.Z] [--prefix DIR]"
+      sed -n '2,13p' "$0" 2>/dev/null || echo "Usage: install.sh [--version vX.Y.Z] [--prefix DIR]"
       exit 0
       ;;
     *)
@@ -126,7 +119,7 @@ resolve_latest_version() {
       v*) printf '%s' "$tag"; return 0 ;;
     esac
   fi
-  printf '%s' "v0.0.1"
+  printf '%s' "v0.0.2"
 }
 
 download_release_assets() {
@@ -176,6 +169,27 @@ download_release_assets() {
   die "failed to download ${archive_name} from ${REPO} (${VERSION}). If the repo is private, log in with 'gh auth login' or export GITHUB_TOKEN."
 }
 
+download_repo_file() {
+  repo_path="$1"
+  dest="$2"
+  ref="${3:-main}"
+
+  if fetch "https://raw.githubusercontent.com/${REPO}/${ref}/${repo_path}" "$dest" 2>/dev/null; then
+    return 0
+  fi
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    gh api "repos/${REPO}/contents/${repo_path}?ref=${ref}" \
+      -H "Accept: application/vnd.github.raw" > "$dest" 2>/dev/null && return 0
+  fi
+  if [ -n "$TOKEN" ] && command -v curl >/dev/null 2>&1; then
+    curl -fsSL -H "Authorization: Bearer ${TOKEN}" \
+      -H "Accept: application/vnd.github.raw" \
+      "https://api.github.com/repos/${REPO}/contents/${repo_path}?ref=${ref}" \
+      -o "$dest" 2>/dev/null && return 0
+  fi
+  return 1
+}
+
 verify_sha256() {
   archive_path="$1"
   sums_path="$2"
@@ -220,11 +234,24 @@ STAGE="${TMP_DIR}/os-agent-${VERSION}-${TARGET}"
 mkdir -p "${PREFIX}/bin" "${PREFIX}/libexec/agent/tools"
 install -m 0755 "${STAGE}/bin/agent" "${PREFIX}/bin/agent"
 install -m 0755 "${STAGE}/libexec/agent/msh" "${PREFIX}/libexec/agent/msh"
-install -m 0755 "${STAGE}/libexec/agent/agent-provider-openai-responses" "${PREFIX}/libexec/agent/agent-provider-openai-responses"
+if [ -f "${STAGE}/libexec/agent/agent-provider" ]; then
+  install -m 0755 "${STAGE}/libexec/agent/agent-provider" "${PREFIX}/libexec/agent/agent-provider"
+  for alias_name in agent-provider-openai-responses agent-provider-openai-compat agent-provider-anthropic; do
+    if [ -e "${STAGE}/libexec/agent/${alias_name}" ] || [ -L "${STAGE}/libexec/agent/${alias_name}" ]; then
+      ln -sf agent-provider "${PREFIX}/libexec/agent/${alias_name}"
+    fi
+  done
+else
+  for prov_bin in "${STAGE}"/libexec/agent/agent-provider-*; do
+    if [ -f "$prov_bin" ]; then
+      install -m 0755 "$prov_bin" "${PREFIX}/libexec/agent/$(basename "$prov_bin")"
+    fi
+  done
+fi
 install -m 0755 "${STAGE}/libexec/agent/tools/aview" "${PREFIX}/libexec/agent/tools/aview"
 install -m 0755 "${STAGE}/libexec/agent/tools/aclr" "${PREFIX}/libexec/agent/tools/aclr"
 
-mkdir -p "${CONFIG_DIR}"
+mkdir -p "${CONFIG_DIR}" "${AGENTS_DIR}"
 if [ ! -f "${CONFIG_DIR}/config.toml" ]; then
   umask 077
   cat > "${CONFIG_DIR}/config.toml" <<'EOF'
@@ -250,25 +277,41 @@ else
   say "==> Kept existing config at ${CONFIG_DIR}/config.toml"
 fi
 
-if [ "$WITH_ZSH" = "1" ]; then
-  say "==> Installing zsh-os-agent plugin from ${ZSH_REPO} ..."
-  ZSH_RAW="https://raw.githubusercontent.com/${ZSH_REPO}/main"
-  fetch "${ZSH_RAW}/zsh-os-agent.plugin.zsh" "${CONFIG_DIR}/zsh-os-agent.plugin.zsh"
-  fetch "${ZSH_RAW}/agent-sh.zsh" "${CONFIG_DIR}/agent-sh.zsh"
-  if [ ! -f "${CONFIG_DIR}/bash.agent" ]; then
-    fetch "${ZSH_RAW}/examples/bash.agent" "${CONFIG_DIR}/bash.agent"
-    chmod 0755 "${CONFIG_DIR}/bash.agent"
-    say "    Installed default agent script: ${CONFIG_DIR}/bash.agent"
+if [ ! -f "${AGENTS_DIR}/bash.agent" ]; then
+  if [ -f "${STAGE}/examples/bash.agent" ]; then
+    install -m 0755 "${STAGE}/examples/bash.agent" "${AGENTS_DIR}/bash.agent"
+  elif download_repo_file "examples/bash.agent" "${TMP_DIR}/bash.agent" "${VERSION}" \
+       || download_repo_file "examples/bash.agent" "${TMP_DIR}/bash.agent" "main"; then
+    install -m 0755 "${TMP_DIR}/bash.agent" "${AGENTS_DIR}/bash.agent"
   else
-    say "    Kept existing ${CONFIG_DIR}/bash.agent"
+    cat > "${AGENTS_DIR}/bash.agent" <<'EOF'
+#!/usr/bin/env agent
+---
+name: bash-agent
+provider: openai-responses
+model: deepseek-v4.1-flash
+shell: msh
+max_turns: 100
+max_tokens: 256000
+compact_threshold: 0.8
+approval: auto
+stderr: auto
+---
+你是 Bash 专家，响应用户的指令
+EOF
+    chmod 0755 "${AGENTS_DIR}/bash.agent"
   fi
+  say "==> Installed default agent script at ${AGENTS_DIR}/bash.agent"
+else
+  say "==> Kept existing ${AGENTS_DIR}/bash.agent"
 fi
 
 say ""
 say "Installed OS Agent successfully:"
 say "  $("${PREFIX}/bin/agent" --version)"
-say "  Binaries: ${PREFIX}/bin/agent, ${PREFIX}/libexec/agent/{msh,agent-provider-openai-responses,tools/{aview,aclr}}"
+say "  Binaries: ${PREFIX}/bin/agent, ${PREFIX}/libexec/agent/{msh,agent-provider{,-openai-responses,-openai-compat,-anthropic},tools/{aview,aclr}}"
 say "  Config:   ${CONFIG_DIR}/config.toml"
+say "  Agents:   ${AGENTS_DIR}/bash.agent"
 
 case ":${PATH}:" in
   *":${PREFIX}/bin:"*) ;;
@@ -279,13 +322,8 @@ case ":${PATH}:" in
     ;;
 esac
 
-if [ "$WITH_ZSH" = "1" ]; then
-  say ""
-  say "Enable zsh-os-agent by adding this line near the end of ~/.zshrc:"
-  say "  [ -r \"${CONFIG_DIR}/zsh-os-agent.plugin.zsh\" ] && source \"${CONFIG_DIR}/zsh-os-agent.plugin.zsh\""
-fi
-
 say ""
 say "Next steps:"
 say "  1. Set your provider base_url and API key in ${CONFIG_DIR}/config.toml (or export OPENAI_API_KEY=...)"
 say "  2. Run: ${PREFIX}/bin/agent --doctor"
+say "  3. Try: ${AGENTS_DIR}/bash.agent \"show disk usage\""

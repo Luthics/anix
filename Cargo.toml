@@ -4,12 +4,12 @@ members = [
     "crates/os-agent-proto",
     "crates/os-agent-core",
     "crates/msh",
-    "crates/provider-openai-responses",
+    "crates/agent-providers",
     "crates/agent-tools",
 ]
 
 [workspace.package]
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0"

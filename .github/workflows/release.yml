@@ -57,7 +57,7 @@ jobs:
         if: matrix.musl
         run: |
           BIN_DIR="target/${{ matrix.target }}/release"
-          for bin in agent msh agent-provider-openai-responses aview aclr; do
+          for bin in agent msh agent-provider aview aclr; do
             file "${BIN_DIR}/${bin}"
             if ldd "${BIN_DIR}/${bin}" 2>&1 | grep -q '=>'; then
               echo "ERROR: ${bin} is dynamically linked" >&2
@@ -75,12 +75,16 @@ jobs:
           STAGE="dist/os-agent-${TAG}-${{ matrix.target }}"
           BIN_DIR="target/${{ matrix.target }}/release"
 
-          install -d -m 0755 "${STAGE}/bin" "${STAGE}/libexec/agent/tools"
+          install -d -m 0755 "${STAGE}/bin" "${STAGE}/libexec/agent/tools" "${STAGE}/examples"
           install -m 0755 "${BIN_DIR}/agent" "${STAGE}/bin/agent"
           install -m 0755 "${BIN_DIR}/msh" "${STAGE}/libexec/agent/msh"
-          install -m 0755 "${BIN_DIR}/agent-provider-openai-responses" "${STAGE}/libexec/agent/agent-provider-openai-responses"
+          install -m 0755 "${BIN_DIR}/agent-provider" "${STAGE}/libexec/agent/agent-provider"
+          ln -sf agent-provider "${STAGE}/libexec/agent/agent-provider-openai-responses"
+          ln -sf agent-provider "${STAGE}/libexec/agent/agent-provider-openai-compat"
+          ln -sf agent-provider "${STAGE}/libexec/agent/agent-provider-anthropic"
           install -m 0755 "${BIN_DIR}/aview" "${STAGE}/libexec/agent/tools/aview"
           install -m 0755 "${BIN_DIR}/aclr" "${STAGE}/libexec/agent/tools/aclr"
+          install -m 0755 examples/bash.agent "${STAGE}/examples/bash.agent"
           install -m 0644 LICENSE README.md "${STAGE}/"
 
           mkdir -p artifacts

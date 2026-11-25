@@ -1,0 +1,431 @@
+//! End-to-end integration tests for `agent-provider` across all built-in dialects
+//! (`openai-responses`, `openai-compat`, `anthropic`), verifying BusyBox `argv[0]`
+//! symlink dispatch against a local loopback mock HTTP server (zero external network calls).
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpListener;
+use std::os::unix::fs::symlink;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
+
+use os_agent_proto::IR_VERSION;
+use os_agent_proto::ir::{HeaderTag, IrHeader, IrMessage, IrMeta, IrStream, StderrMode};
+use os_agent_proto::provider::ProviderEvent;
+use serde_json::{Value, json};
+
+const BIN: &str = env!("CARGO_BIN_EXE_agent-provider");
+static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Clone)]
+struct CapturedRequest {
+    request_line: String,
+    headers: BTreeMap<String, String>,
+    body: Value,
+}
+
+struct TempSymlinkDir {
+    dir: PathBuf,
+}
+
+impl TempSymlinkDir {
+    fn new() -> Self {
+        let id = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "os-agent-providers-e2e-{}-{id}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("create temp symlink dir");
+        Self { dir }
+    }
+
+    fn symlink_as(&self, name: &str) -> PathBuf {
+        let link_path = self.dir.join(name);
+        symlink(BIN, &link_path).expect("create busybox symlink");
+        link_path
+    }
+}
+
+impl Drop for TempSymlinkDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.dir);
+    }
+}
+
+fn spawn_mock_server(
+    status_line: &'static str,
+    content_type: &'static str,
+    response_body: String,
+) -> (
+    String,
+    Arc<Mutex<Option<CapturedRequest>>>,
+    thread::JoinHandle<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let addr = listener.local_addr().expect("local addr");
+    let captured = Arc::new(Mutex::new(None));
+    let cap_clone = Arc::clone(&captured);
+
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+
+        let mut request_line = String::new();
+        reader.read_line(&mut request_line).expect("read req line");
+
+        let mut headers = BTreeMap::new();
+        let mut content_length: usize = 0;
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).expect("read header");
+            let trimmed = line.trim_end_matches(&['\r', '\n'][..]);
+            if trimmed.is_empty() {
+                break;
+            }
+            if let Some((k, v)) = trimmed.split_once(':') {
+                let key = k.trim().to_ascii_lowercase();
+                let val = v.trim().to_owned();
+                if key == "content-length" {
+                    content_length = val.parse().unwrap_or(0);
+                }
+                headers.insert(key, val);
+            }
+        }
+
+        let mut body_bytes = vec![0u8; content_length];
+        reader.read_exact(&mut body_bytes).expect("read body");
+        let body: Value = serde_json::from_slice(&body_bytes).expect("valid json body");
+
+        *cap_clone.lock().expect("lock") = Some(CapturedRequest {
+            request_line: request_line.trim().to_owned(),
+            headers,
+            body,
+        });
+
+        let resp = format!(
+            "HTTP/1.1 {status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            response_body.len(),
+            response_body
+        );
+        stream.write_all(resp.as_bytes()).expect("write response");
+        let _ = stream.flush();
+    });
+
+    (format!("http://{addr}"), captured, handle)
+}
+
+fn sample_ir_jsonl() -> String {
+    let stream = IrStream {
+        header: IrHeader {
+            ir_version: IR_VERSION,
+            record_type: HeaderTag::Header,
+            tools: vec![IrStream::msh_tool_def()],
+            max_output_tokens: Some(512),
+            params: BTreeMap::from([("temperature".into(), json!(0.1))]),
+            meta: IrMeta {
+                stderr_mode: StderrMode::Auto,
+                cwd: "/tmp".into(),
+                turn_budget: Some(5),
+                extra: BTreeMap::new(),
+            },
+            extra: BTreeMap::new(),
+        },
+        messages: vec![
+            IrMessage::system(0, "You are helpful."),
+            IrMessage::user(1, "Say hi"),
+        ],
+    };
+    stream.to_jsonl().expect("serialize ir")
+}
+
+fn run_bin(
+    exe: &Path,
+    extra_args: &[&str],
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    stdin_payload: &str,
+) -> (i32, Vec<ProviderEvent>, String) {
+    let mut child = Command::new(exe)
+        .args(extra_args)
+        .env("AGENT_PROVIDER_BASE_URL", base_url)
+        .env("AGENT_PROVIDER_API_KEY", api_key)
+        .env("AGENT_PROVIDER_TIMEOUT_SEC", "10")
+        .env("AGENT_MODEL", model)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn provider");
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(stdin_payload.as_bytes())
+            .expect("write stdin");
+    }
+
+    let output = child.wait_with_output().expect("wait provider");
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    let events: Vec<ProviderEvent> = stdout
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).expect("valid ProviderEvent JSONL"))
+        .collect();
+
+    (output.status.code().unwrap_or(-1), events, stderr)
+}
+
+#[test]
+fn version_flag_works_for_base_binary_and_busybox_symlinks() {
+    let out = Command::new(BIN)
+        .arg("--version")
+        .output()
+        .expect("run base --version");
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).expect("utf8");
+    assert!(stdout.contains("agent-provider"));
+    assert!(stdout.contains("openai-responses,openai-compat,anthropic"));
+
+    let tmp = TempSymlinkDir::new();
+    for name in [
+        "agent-provider-openai-responses",
+        "agent-provider-openai-compat",
+        "agent-provider-anthropic",
+    ] {
+        let link = tmp.symlink_as(name);
+        let o = Command::new(&link)
+            .arg("--version")
+            .output()
+            .expect("run symlink --version");
+        assert!(o.status.success());
+        let s = String::from_utf8(o.stdout).expect("utf8");
+        assert!(s.starts_with(name), "got: {s}");
+        assert!(s.contains("ir_version=1"));
+    }
+}
+
+#[test]
+fn unsupported_ir_version_exits_2() {
+    let bad_ir = r#"{"ir_version":99,"type":"header","tools":[],"meta":{"stderr_mode":"auto","cwd":"/tmp"}}"#;
+    let (code, events, _) = run_bin(
+        Path::new(BIN),
+        &["openai-compat"],
+        "http://127.0.0.1:1/v1",
+        "",
+        "m",
+        bad_ir,
+    );
+    assert_eq!(code, 2);
+    assert!(matches!(
+        events.as_slice(),
+        [ProviderEvent::Error { code, retryable: false, .. }] if code == "unsupported_ir_version"
+    ));
+}
+
+#[test]
+fn busybox_symlink_openai_responses_end_to_end() {
+    let sse = concat!(
+        "event: response.output_text.delta\n",
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Responses OK\"}\n\n",
+        "event: response.completed\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"output\":[],\"usage\":{\"input_tokens\":10,\"output_tokens\":2}}}\n\n"
+    )
+    .to_owned();
+
+    let (origin, captured, handle) = spawn_mock_server("200 OK", "text/event-stream", sse);
+    let tmp = TempSymlinkDir::new();
+    let link = tmp.symlink_as("agent-provider-openai-responses");
+
+    let (code, events, _) = run_bin(
+        &link,
+        &[],
+        &format!("{origin}/v1"),
+        "sk-resp",
+        "gpt-5",
+        &sample_ir_jsonl(),
+    );
+    handle.join().expect("server");
+
+    assert_eq!(code, 0);
+    let req = captured.lock().expect("lock").clone().expect("captured");
+    assert_eq!(req.request_line, "POST /v1/responses HTTP/1.1");
+    assert_eq!(
+        req.headers.get("authorization").map(String::as_str),
+        Some("Bearer sk-resp")
+    );
+    assert_eq!(req.body["instructions"], "You are helpful.");
+    assert!(events.contains(&ProviderEvent::TextDelta {
+        text: "Responses OK".into()
+    }));
+}
+
+#[test]
+fn busybox_symlink_openai_compat_end_to_end_and_unauthenticated_local() {
+    let sse = concat!(
+        "data: {\"id\":\"1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Compat OK\"},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: {\"id\":\"1\",\"choices\":[],\"usage\":{\"prompt_tokens\":42,\"completion_tokens\":9,\"prompt_tokens_details\":{\"cached_tokens\":30}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_owned();
+
+    let (origin, captured, handle) = spawn_mock_server("200 OK", "text/event-stream", sse);
+    let tmp = TempSymlinkDir::new();
+    let link = tmp.symlink_as("agent-provider-openai-compat");
+
+    let (code, events, _) = run_bin(
+        &link,
+        &[],
+        &format!("{origin}/v1"),
+        "",
+        "local-vllm",
+        &sample_ir_jsonl(),
+    );
+    handle.join().expect("server");
+
+    assert_eq!(code, 0);
+    let req = captured.lock().expect("lock").clone().expect("captured");
+    assert_eq!(req.request_line, "POST /v1/chat/completions HTTP/1.1");
+    assert!(!req.headers.contains_key("authorization"));
+    assert_eq!(req.body["model"], "local-vllm");
+    assert_eq!(req.body["max_tokens"], 512);
+    assert!(events.contains(&ProviderEvent::Usage {
+        input_tokens: 42,
+        output_tokens: 9,
+        cached_tokens: Some(30),
+        cache_write_tokens: None,
+        reasoning_tokens: None,
+    }));
+}
+
+#[test]
+fn busybox_symlink_anthropic_end_to_end_with_inclusive_usage_and_headers() {
+    let sse = concat!(
+        "event: message_start\n",
+        "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":100,\"cache_read_input_tokens\":900,\"cache_creation_input_tokens\":50,\"output_tokens\":1}}}\n\n",
+        "event: content_block_start\n",
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Claude OK\"}}\n\n",
+        "event: content_block_stop\n",
+        "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+        "event: message_delta\n",
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":12}}\n\n",
+        "event: message_stop\n",
+        "data: {\"type\":\"message_stop\"}\n\n"
+    )
+    .to_owned();
+
+    let (origin, captured, handle) = spawn_mock_server("200 OK", "text/event-stream", sse);
+    let tmp = TempSymlinkDir::new();
+    let link = tmp.symlink_as("agent-provider-anthropic");
+
+    let (code, events, _) = run_bin(
+        &link,
+        &[],
+        &origin,
+        "sk-ant-test",
+        "claude-sonnet-4-5",
+        &sample_ir_jsonl(),
+    );
+    handle.join().expect("server");
+
+    assert_eq!(code, 0);
+    let req = captured.lock().expect("lock").clone().expect("captured");
+    assert_eq!(req.request_line, "POST /v1/messages HTTP/1.1");
+    assert_eq!(
+        req.headers.get("x-api-key").map(String::as_str),
+        Some("sk-ant-test")
+    );
+    assert_eq!(
+        req.headers.get("anthropic-version").map(String::as_str),
+        Some("2023-06-01")
+    );
+    assert_eq!(req.body["model"], "claude-sonnet-4-5");
+    assert_eq!(req.body["max_tokens"], 512);
+    assert_eq!(
+        events,
+        vec![
+            ProviderEvent::TextDelta {
+                text: "Claude OK".into()
+            },
+            ProviderEvent::Usage {
+                input_tokens: 1050,
+                output_tokens: 12,
+                cached_tokens: Some(900),
+                cache_write_tokens: Some(50),
+                reasoning_tokens: None,
+            },
+            ProviderEvent::Done {
+                finish_reason: "stop".into()
+            },
+        ]
+    );
+}
+
+#[test]
+fn http_429_and_529_map_to_retryable_errors_and_400_is_non_retryable() {
+    let (o1, _, h1) = spawn_mock_server(
+        "429 Too Many Requests",
+        "application/json",
+        r#"{"error":{"message":"slow down"}}"#.into(),
+    );
+    let (c1, ev1, _) = run_bin(
+        Path::new(BIN),
+        &["openai-compat"],
+        &format!("{o1}/v1"),
+        "sk",
+        "m",
+        &sample_ir_jsonl(),
+    );
+    h1.join().expect("h1");
+    assert_eq!(c1, 1);
+    assert!(matches!(
+        ev1.as_slice(),
+        [ProviderEvent::Error { code, retryable: true, .. }] if code == "rate_limit"
+    ));
+
+    let (o2, _, h2) = spawn_mock_server(
+        "529 Overloaded",
+        "application/json",
+        r#"{"type":"error","error":{"type":"overloaded_error","message":"busy"}}"#.into(),
+    );
+    let (c2, ev2, _) = run_bin(
+        Path::new(BIN),
+        &["anthropic"],
+        &o2,
+        "sk-ant",
+        "claude",
+        &sample_ir_jsonl(),
+    );
+    h2.join().expect("h2");
+    assert_eq!(c2, 1);
+    assert!(matches!(
+        ev2.as_slice(),
+        [ProviderEvent::Error { code, retryable: true, .. }] if code == "server_error"
+    ));
+
+    let (o3, _, h3) = spawn_mock_server(
+        "400 Bad Request",
+        "application/json",
+        r#"{"error":{"message":"invalid"}}"#.into(),
+    );
+    let (c3, ev3, _) = run_bin(
+        Path::new(BIN),
+        &["openai-responses"],
+        &format!("{o3}/v1"),
+        "sk",
+        "m",
+        &sample_ir_jsonl(),
+    );
+    h3.join().expect("h3");
+    assert_eq!(c3, 1);
+    assert!(matches!(
+        ev3.as_slice(),
+        [ProviderEvent::Error { code, retryable: false, .. }] if code == "client_error"
+    ));
+}

@@ -1,6 +1,6 @@
 [package]
-name = "provider-openai-responses"
-description = "Default OpenAI Responses API Provider adapter (`agent-provider-openai-responses`)"
+name = "agent-providers"
+description = "Unified multi-call Provider adapter (`agent-provider` + BusyBox symlinks for OpenAI Responses, OpenAI Compat, and Anthropic Messages)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,7 +9,7 @@ repository.workspace = true
 authors.workspace = true
 
 [[bin]]
-name = "agent-provider-openai-responses"
+name = "agent-provider"
 path = "src/main.rs"
 
 [lints]

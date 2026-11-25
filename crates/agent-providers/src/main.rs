@@ -1,25 +1,62 @@
 use std::io::{self, Read};
 use std::process::ExitCode as StdExitCode;
 
+use agent_providers::common::{ProviderEnv, TranslateError, emit_event};
+use agent_providers::{Dialect, Invocation, parse_invocation};
 use os_agent_proto::IR_VERSION;
 use os_agent_proto::exit_code::ExitCode;
 use os_agent_proto::ir::{IrError, IrStream};
 use os_agent_proto::provider::ProviderEvent;
-use provider_openai_responses::client::{ProviderEnv, emit_event, execute_streaming_request};
-use provider_openai_responses::translate::{TranslateError, build_responses_request};
 
 fn main() -> StdExitCode {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() == 2 && (args[1] == "--version" || args[1] == "-V") {
-        println!(
-            "agent-provider-openai-responses {} (ir_version={})",
-            env!("CARGO_PKG_VERSION"),
-            IR_VERSION
-        );
-        return ExitCode::Success.into();
-    }
+    let env_dialect = std::env::var("AGENT_PROVIDER_DIALECT").ok();
 
-    let env = match ProviderEnv::from_env() {
+    let dialect = match parse_invocation(&args, env_dialect.as_deref()) {
+        Ok(Invocation::Version(Some(d))) => {
+            println!(
+                "{} {} (ir_version={})",
+                d.bin_name(),
+                env!("CARGO_PKG_VERSION"),
+                IR_VERSION
+            );
+            return ExitCode::Success.into();
+        }
+        Ok(Invocation::Version(None)) => {
+            let names: Vec<&str> = Dialect::ALL.iter().map(|d| d.name()).collect();
+            println!(
+                "agent-provider {} (ir_version={}; dialects={})",
+                env!("CARGO_PKG_VERSION"),
+                IR_VERSION,
+                names.join(",")
+            );
+            return ExitCode::Success.into();
+        }
+        Ok(Invocation::Help) => {
+            println!("Usage: agent-provider [<dialect> | --dialect <dialect>] [--version]");
+            println!("       agent-provider-<dialect> [--version]");
+            println!();
+            println!("Built-in dialects:");
+            for d in Dialect::ALL {
+                println!("  {:18} (symlink: {})", d.name(), d.bin_name());
+            }
+            return ExitCode::Success.into();
+        }
+        Ok(Invocation::Run(d)) => d,
+        Err(message) => {
+            emit_event(&ProviderEvent::Error {
+                code: "dialect_error".into(),
+                message: message.clone(),
+                retryable: false,
+            });
+            eprintln!("agent-provider: {message}");
+            return ExitCode::UsageError.into();
+        }
+    };
+
+    let tag = dialect.bin_name();
+
+    let env = match ProviderEnv::from_env(dialect) {
         Ok(env) => env,
         Err((exit, code, message)) => {
             emit_event(&ProviderEvent::Error {
@@ -27,7 +64,7 @@ fn main() -> StdExitCode {
                 message: message.clone(),
                 retryable: false,
             });
-            eprintln!("agent-provider-openai-responses: {message}");
+            eprintln!("{tag}: {message}");
             return exit.into();
         }
     };
@@ -40,7 +77,7 @@ fn main() -> StdExitCode {
             message: message.clone(),
             retryable: false,
         });
-        eprintln!("agent-provider-openai-responses: {message}");
+        eprintln!("{tag}: {message}");
         return ExitCode::RuntimeError.into();
     }
 
@@ -53,7 +90,7 @@ fn main() -> StdExitCode {
                 message: message.clone(),
                 retryable: false,
             });
-            eprintln!("agent-provider-openai-responses: {message}");
+            eprintln!("{tag}: {message}");
             return ExitCode::UsageError.into();
         }
         Err(err) => {
@@ -63,7 +100,7 @@ fn main() -> StdExitCode {
                 message: message.clone(),
                 retryable: false,
             });
-            eprintln!("agent-provider-openai-responses: {message}");
+            eprintln!("{tag}: {message}");
             return ExitCode::UsageError.into();
         }
     };
@@ -75,11 +112,11 @@ fn main() -> StdExitCode {
             message: message.clone(),
             retryable: false,
         });
-        eprintln!("agent-provider-openai-responses: {message}");
+        eprintln!("{tag}: {message}");
         return ExitCode::UsageError.into();
     }
 
-    let body = match build_responses_request(&stream, &env.model) {
+    let body = match dialect.build_request(&stream, &env.model) {
         Ok(body) => body,
         Err(err) => {
             let code = match &err {
@@ -92,10 +129,10 @@ fn main() -> StdExitCode {
                 message: message.clone(),
                 retryable: false,
             });
-            eprintln!("agent-provider-openai-responses: {message}");
+            eprintln!("{tag}: {message}");
             return ExitCode::RuntimeError.into();
         }
     };
 
-    execute_streaming_request(&env, &body).into()
+    dialect.execute_streaming(&env, &stream, &body).into()
 }
