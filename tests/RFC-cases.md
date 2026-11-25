@@ -117,6 +117,22 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 | [`each_read_write_trace_fd_is_excluded_from_the_ordered_initial_user_input`](../crates/anix-core/tests/rfc_runtime/fd.rs#L94) | [§3.1](../docs/v1.1.0-RFC.md?plain=1#L62) · [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
 | [`invalid_trace_fd_reports_usage_to_stderr_before_invoking_the_provider`](../crates/anix-core/tests/rfc_runtime/fd.rs#L136) | [§3.1](../docs/v1.1.0-RFC.md?plain=1#L62) · [§3.4](../docs/v1.1.0-RFC.md?plain=1#L129) · [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) |
 
+## `crates/anix-core/tests/rfc_runtime/hooks.rs`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`pre_context_filters_can_rewrite_and_append_conversation_records_before_freezing`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L10) | [§9.3](../docs/v1.1.0-RFC.md?plain=1#L615) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) |
+| [`pre_context_failure_forwards_stderr_and_stops_before_inference`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L81) | [§9.3](../docs/v1.1.0-RFC.md?plain=1#L615) |
+| [`post_tool_failure_stops_before_later_hooks_tools_and_provider_turns`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L107) | [§9.3](../docs/v1.1.0-RFC.md?plain=1#L615) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
+| [`on_exit_timeout_is_local_to_one_hook_and_preserves_the_primary_exit_code`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L155) | [§9.3](../docs/v1.1.0-RFC.md?plain=1#L615) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
+| [`each_skill_search_layer_wins_once_and_the_body_stays_out_of_the_index`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L195) | [§9.4](../docs/v1.1.0-RFC.md?plain=1#L621) |
+| [`tips_are_restored_after_version_drift_and_fall_back_to_runtime_when_state_is_unwritable`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L258) | [§1.4](../docs/v1.1.0-RFC.md?plain=1#L33) · [§8.1](../docs/v1.1.0-RFC.md?plain=1#L450) · [§9.6](../docs/v1.1.0-RFC.md?plain=1#L657) |
+| [`masking_the_whole_tips_hook_suppresses_both_its_index_and_first_run_files`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L297) | [§9.6](../docs/v1.1.0-RFC.md?plain=1#L657) |
+| [`an_empty_merged_tips_index_costs_no_prompt_bytes`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L345) | [§9.6](../docs/v1.1.0-RFC.md?plain=1#L657) |
+| [`mcp_guide_follows_anix_xdg_and_project_precedence_without_disclosing_tool_schemas`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L376) | [§1.4](../docs/v1.1.0-RFC.md?plain=1#L33) · [§8.1](../docs/v1.1.0-RFC.md?plain=1#L450) · [§9.6](../docs/v1.1.0-RFC.md?plain=1#L657) |
+| [`runtime_contract_depends_on_stderr_and_only_changes_at_the_tail_on_resume`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L467) | [§4.4](../docs/v1.1.0-RFC.md?plain=1#L208) · [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`each_builtin_can_be_replaced_globally_then_overridden_or_masked_by_the_project`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L524) | [§4.4](../docs/v1.1.0-RFC.md?plain=1#L208) · [§8.3](../docs/v1.1.0-RFC.md?plain=1#L508) · [§9.3](../docs/v1.1.0-RFC.md?plain=1#L615) · [§9.4](../docs/v1.1.0-RFC.md?plain=1#L621) · [§9.6](../docs/v1.1.0-RFC.md?plain=1#L657) |
+
 ## `crates/anix-core/tests/rfc_runtime/inbox.rs`
 
 | 测试 | RFC 条款 |

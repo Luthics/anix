@@ -7,6 +7,7 @@ mod control;
 mod fd;
 #[path = "../common/fixture.rs"]
 mod fixture;
+mod hooks;
 mod inbox;
 mod io;
 mod provider;
