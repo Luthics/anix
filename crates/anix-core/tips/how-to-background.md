@@ -18,7 +18,7 @@
 ## 2. Persistent Async Child Agent (`--inbox`)
 Start an independent `--inbox` daemon with `msh` `timeout_sec: 0`:
 ```sh
-./worker.anix -q -c /tmp/w.ctx.jsonl --inbox /tmp/w-inbox --idle-timeout 300 >/tmp/w.out 2>/tmp/w.err
+./worker.agent -q -c /tmp/w.ctx.jsonl --inbox /tmp/w-inbox --idle-timeout 300 >/tmp/w.out 2>/tmp/w.err
 ```
 
 ## 3. Manual POSIX Detach (Only When Spawning Background Subcommands Inside a Multi-Step Foreground Script)

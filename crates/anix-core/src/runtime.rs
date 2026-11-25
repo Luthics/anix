@@ -64,7 +64,7 @@ struct CycleOutcome {
     turns: u32,
 }
 
-/// Entry point for executing a resolved `*.anix` session (one-shot or `--inbox`).
+/// Entry point for executing a resolved `*.agent` session (one-shot or `--inbox`).
 pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String]) -> ExitCode {
     // CRITICAL POSIX FD HYGIENE (v1.1 §4.1):
     // 1. NEVER probe `fd 3` implicitly. Only claim an explicitly configured `--trace-fd=<N>` /

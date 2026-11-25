@@ -4,7 +4,7 @@ POSIX-native Agent runtime (`ir_version = 1`, v1.1.2 spec in [docs/v1.1.2-RFC.md
 
 ## Quick Install
 
-Install the latest prebuilt release (`macOS` Apple Silicon / Intel, `Linux` x86_64 / arm64 static musl) into `~/.local`, along with a starter `~/.config/anix/config.toml` and `~/.config/anix/agents/bash.anix`:
+Install the latest prebuilt release (`macOS` Apple Silicon / Intel, `Linux` x86_64 / arm64 static musl) into `~/.local`, along with a starter `~/.config/anix/config.toml` and `~/.config/anix/agents/bash.agent`:
 
 ```sh
 # Public repo (direct curl)
@@ -18,7 +18,7 @@ Then configure your provider endpoint and API key in `~/.config/anix/config.toml
 
 ```sh
 anix --doctor
-~/.config/anix/agents/bash.anix "show disk usage"
+~/.config/anix/agents/bash.agent "show disk usage"
 ```
 
 ## Workspace Architecture

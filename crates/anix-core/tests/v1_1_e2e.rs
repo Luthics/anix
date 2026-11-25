@@ -189,7 +189,7 @@ done
     )
     .unwrap();
 
-    let script = work.join("hello.anix");
+    let script = work.join("hello.agent");
     fs::write(
         &script,
         "---\nname: trace-demo\napproval: auto\n---\nSay hi.\n",
@@ -361,7 +361,7 @@ esac
     )
     .unwrap();
 
-    let script = work.join("a.anix");
+    let script = work.join("a.agent");
     fs::write(
         &script,
         "---\nname: app-demo\napproval: ask\n---\nRun commands.\n",
@@ -510,7 +510,7 @@ done
     )
     .unwrap();
 
-    let script = work.join("v.anix");
+    let script = work.join("v.agent");
     fs::write(
         &script,
         "---\nname: vision-demo\napproval: auto\n---\nInspect.\n",
@@ -670,7 +670,7 @@ done
     )
     .unwrap();
 
-    let script = work.join("worker.anix");
+    let script = work.join("worker.agent");
     fs::write(
         &script,
         "---\nname: inbox-worker\napproval: auto\n---\nWork.\n",
@@ -887,7 +887,7 @@ timeout_sec = 30
     )
     .unwrap();
 
-    let script = workdir.join("sess.anix");
+    let script = workdir.join("sess.agent");
     write_exec(
         &script,
         "#!/usr/bin/env anix\n---\nname: sess-test\n---\nSession test prompt\n",
@@ -1080,7 +1080,7 @@ done
     )
     .unwrap();
 
-    let script = work.join("bg.anix");
+    let script = work.join("bg.agent");
     fs::write(&script, "---\nname: bg-v112\n---\nTest msh v1.1.2\n").unwrap();
 
     let trace_file = File::create(&trace_path).unwrap();
