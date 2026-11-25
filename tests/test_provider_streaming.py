@@ -204,7 +204,7 @@ class ProviderStreaming(unittest.TestCase):
         self.assertEqual([e["type"] for e in events if e["type"] in ("error", "done")], ["done", "error", "done"])
         self.assertEqual([e["text"] for e in events if e["type"] == "text_delta"], ["reply-1", "reply-3"])
 
-    def run_anix(self, level, replies, options=(), provider_timeout=20):
+    def run_anix(self, level, replies, options=(), provider_timeout=20, msh_timeout=None):
         config = self.root / ".config/anix"
         config.mkdir(parents=True)
         with HTTPServer(("127.0.0.1", 0), StreamingResponse) as http:
@@ -216,9 +216,12 @@ class ProviderStreaming(unittest.TestCase):
                 f"api_key_env=''\napi_key='fixture'\ntimeout_sec={provider_timeout}\n")
             args = ["/bin/sh", "-c", 'exec "$@" 7>trace', "fixture", self.bin_dir / "anix",
                     "--trace-fd=7", "-q", "-c", "history", *options, "case.anix", "--", "input"]
+            env = {"HOME": str(self.root), "PATH": f"{self.bin_dir}:/bin:/usr/bin",
+                   "XDG_RUNTIME_DIR": str(self.root / "run"), "ANIX_TRACE_LEVEL": level}
+            if msh_timeout is not None:
+                env["MSH_TIMEOUT_SEC"] = str(msh_timeout)
             with subprocess.Popen(args, cwd=self.root, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE, env={"HOME": str(self.root), "PATH": f"{self.bin_dir}:/bin:/usr/bin",
-                                  "XDG_RUNTIME_DIR": str(self.root / "run"), "ANIX_TRACE_LEVEL": level}) as child:
+                                  stderr=subprocess.PIPE, env=env) as child:
                 try:
                     for reply in replies:
                         http.reply = reply
@@ -267,6 +270,35 @@ class ProviderStreaming(unittest.TestCase):
         observed = {"llm_request_start", "tool_start", "tool_end", "provider_error"}
         self.assertEqual([e["type"] for e in self.rows("trace") if e["type"] in observed],
                          ["llm_request_start", "tool_start", "tool_end", "llm_request_start"])
+
+    # RFC v1.1 §6.1, §6.5, §7.1, §9.1, §9.2, §9.5
+    def test_msh_timeout_is_delivered_to_the_next_provider_turn_as_a_tool_error(self):
+        def request_tool(peer):
+            peer.begin_stream()
+            peer.msh_call("printf started > marker; exec /bin/sleep 20")
+            peer.finish_stream()
+
+        def finish(peer):
+            self.assertEqual((self.root / "marker").read_text(), "started")
+            tools = [row for row in self.rows("history") if row.get("role") == "tool"]
+            self.assertEqual(len(tools), 1)
+            tool = tools[0]
+            self.assertIs(tool["is_error"], True)
+            self.assertEqual(tool["tool_call_id"], "call1")
+            header, diagnostic = tool["text"].split("\n", 1)
+            self.assertEqual(header, f"[t{tool['turn_id']}] exit=124")
+            self.assertTrue(diagnostic.strip())
+            outputs = [i for i in peer.server.requests[-1]["input"] if i["type"] == "function_call_output"]
+            self.assertEqual([(i["call_id"], i["output"]) for i in outputs], [("call1", tool["text"])])
+            peer.begin_stream()
+            peer.event({"type": "response.output_text.delta", "delta": "recovered"})
+            peer.finish_stream()
+
+        self.run_anix("events", [request_tool, finish], options=("-y",), msh_timeout=1)
+        events = self.rows("trace")
+        self.assertFalse(any(e["type"] == "provider_error" for e in events))
+        self.assertEqual([(e["reason"], e["exit_code"]) for e in events if e["type"] == "cycle_end"],
+                         [("completed", 0)])
 
     # RFC v1.1 §7.1, §9.2, §9.5
     def test_paced_msh_arguments_finish_before_the_shell_runs(self):
