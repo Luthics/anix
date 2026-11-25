@@ -403,9 +403,11 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`test_reinstall_keeps_shell_startup_files_and_private_tools_out_of_the_user_bin`](../tests/test_distribution.py#L119) | [§2](../docs/v1.1.1-RFC.md?plain=1#L45) · [§10.3](../docs/v1.1.1-RFC.md?plain=1#L717) |
-| [`test_installed_bash_script_accepts_args_on_path_and_by_relative_name_without_tty_eof`](../tests/test_distribution.py#L161) | [§2](../docs/v1.1.1-RFC.md?plain=1#L45) · [§3.1](../docs/v1.1.1-RFC.md?plain=1#L63) · [§4.1](../docs/v1.1.1-RFC.md?plain=1#L154) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) · [§10.3](../docs/v1.1.1-RFC.md?plain=1#L717) |
-| [`test_installed_pipeline_and_fold`](../tests/test_distribution.py#L202) | [§2](../docs/v1.1.1-RFC.md?plain=1#L45) · [§3.1](../docs/v1.1.1-RFC.md?plain=1#L63) · [§4.1](../docs/v1.1.1-RFC.md?plain=1#L154) · [§4.4](../docs/v1.1.1-RFC.md?plain=1#L209) · [§6.1](../docs/v1.1.1-RFC.md?plain=1#L316) · [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) · [§7.2](../docs/v1.1.1-RFC.md?plain=1#L430) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) · [§9.6](../docs/v1.1.1-RFC.md?plain=1#L669) · [§10.3](../docs/v1.1.1-RFC.md?plain=1#L717) |
+| [`test_reinstall_keeps_shell_startup_files_and_private_tools_out_of_the_user_bin`](../tests/test_distribution.py#L121) | [§2](../docs/v1.1.1-RFC.md?plain=1#L45) · [§10.3](../docs/v1.1.1-RFC.md?plain=1#L717) |
+| [`test_doctor_detects_unavailable_pipes_and_unusable_file_locking`](../tests/test_distribution.py#L164) | [§4.1](../docs/v1.1.1-RFC.md?plain=1#L154) · [§10.3](../docs/v1.1.1-RFC.md?plain=1#L717) |
+| [`test_usage_line_resets_dim_before_the_final_newline_on_a_terminal`](../tests/test_distribution.py#L218) | [§4.1](../docs/v1.1.1-RFC.md?plain=1#L154) |
+| [`test_installed_bash_script_accepts_args_on_path_and_by_relative_name_without_tty_eof`](../tests/test_distribution.py#L248) | [§2](../docs/v1.1.1-RFC.md?plain=1#L45) · [§3.1](../docs/v1.1.1-RFC.md?plain=1#L63) · [§4.1](../docs/v1.1.1-RFC.md?plain=1#L154) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) · [§10.3](../docs/v1.1.1-RFC.md?plain=1#L717) |
+| [`test_installed_pipeline_and_fold`](../tests/test_distribution.py#L272) | [§2](../docs/v1.1.1-RFC.md?plain=1#L45) · [§3.1](../docs/v1.1.1-RFC.md?plain=1#L63) · [§4.1](../docs/v1.1.1-RFC.md?plain=1#L154) · [§4.4](../docs/v1.1.1-RFC.md?plain=1#L209) · [§6.1](../docs/v1.1.1-RFC.md?plain=1#L316) · [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) · [§7.2](../docs/v1.1.1-RFC.md?plain=1#L430) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) · [§9.6](../docs/v1.1.1-RFC.md?plain=1#L669) · [§10.3](../docs/v1.1.1-RFC.md?plain=1#L717) |
 
 ## `tests/test_provider_dialects.py`
 

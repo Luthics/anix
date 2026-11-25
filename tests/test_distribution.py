@@ -5,9 +5,11 @@ import os
 from pathlib import Path
 import platform
 import pty
+import shutil
 import tarfile
 import subprocess
 import tempfile
+import termios
 import threading
 import unittest
 from http.server import HTTPServer
@@ -157,28 +159,96 @@ esac
                         path = root / ".local" / rel
                         self.assertTrue(path.is_file() and os.access(path, os.X_OK), path)
 
-    # RFC v1.1.1 §2, §3.1, §4.1, §9.2, §10.3
-    def test_installed_bash_script_accepts_args_on_path_and_by_relative_name_without_tty_eof(self):
-        with tempfile.TemporaryDirectory(prefix="anix-install-tty-") as home:
+    # RFC v1.1.1 §4.1, §10.3
+    @unittest.skipUnless(platform.system() == "Linux" and shutil.which("strace"), "requires Linux strace")
+    def test_doctor_detects_unavailable_pipes_and_unusable_file_locking(self):
+        with tempfile.TemporaryDirectory(prefix="anix-doctor-") as home:
             root = Path(home)
             self.install(root)
-            agents = root / ".config/anix/agents"
-            mock = root / "local-fixture-provider"
-            mock.write_text("""#!/bin/sh
+            (root / ".config/anix/config.toml").write_text(
+                "[providers.openai-responses]\napi_key_env=''\napi_key=''\n")
+            env = {"HOME": home, "PATH": "/usr/bin:/bin", "XDG_RUNTIME_DIR": str(root / "run")}
+            doctor = [str(root / ".local/bin/anix"), "--doctor"]
+
+            def run(argv):
+                return subprocess.run(argv, cwd=root, env=env, stdin=subprocess.DEVNULL,
+                                      capture_output=True, timeout=12)
+
+            healthy = run(doctor)
+            self.assertEqual(healthy.returncode, 0, healthy.stderr)
+            trace = root / "syscalls.log"
+            for syscalls, fault, subject, repair in [
+                ("?pipe,pipe2", "error=EMFILE", rb"pipe|/dev/fd", rb"/dev/fd|mount"),
+                ("flock", "error=ENOSYS", rb"flock|lock", rb"XDG_RUNTIME_DIR|filesystem"),
+                # Each open file description appears to receive an exclusive lock.
+                ("flock", "retval=0", rb"flock|lock", rb"XDG_RUNTIME_DIR|filesystem"),
+            ]:
+                with self.subTest(syscalls=syscalls, fault=fault):
+                    result = run([shutil.which("strace"), "-f", "-qq", "-o", str(trace),
+                                  "-e", f"trace={syscalls}", "-e", f"inject={syscalls}:{fault}", *doctor])
+                    self.assertIn("INJECTED", trace.read_text(), result.stderr)
+                    self.assertEqual(result.returncode, 1, (result.stdout, result.stderr))
+                    self.assertRegex(result.stderr, subject)
+                    self.assertRegex(result.stderr, repair)
+            restored = run(doctor)
+            self.assertEqual(restored.returncode, 0, restored.stderr)
+
+    def install_with_text_provider(self, root):
+        self.install(root)
+        agents = root / ".config/anix/agents"
+        mock = root / "local-fixture-provider"
+        mock.write_text("""#!/bin/sh
 set -eu
 /bin/cat > "$HOME/request"
 printf '%s\\n' '{"type":"text_delta","text":"fixture reply"}' '{"type":"done","finish_reason":"stop"}'
 """)
-            mock.chmod(0o700)
-            (agents.parent / "config.toml").write_text(
-                f"""[providers.openai-responses]
+        mock.chmod(0o700)
+        (agents.parent / "config.toml").write_text(
+            f"""[providers.openai-responses]
 bin={json.dumps(str(mock))}
 mode="oneshot"
 api_key_env=""
 timeout_sec=3
 """)
-            env = {"HOME": home, "PATH": f"{agents}:{root}/.local/bin:/usr/bin:/bin",
-                   "XDG_RUNTIME_DIR": str(root / "run")}
+        env = {"HOME": str(root), "PATH": f"{agents}:{root}/.local/bin:/usr/bin:/bin",
+               "XDG_RUNTIME_DIR": str(root / "run")}
+        return agents, env
+
+    # RFC v1.1.1 §4.1
+    def test_usage_line_resets_dim_before_the_final_newline_on_a_terminal(self):
+        with tempfile.TemporaryDirectory(prefix="anix-usage-tty-") as home:
+            root = Path(home)
+            agents, env = self.install_with_text_provider(root)
+            master, slave = pty.openpty()
+            try:
+                # Capture the bytes written by Anix, before the terminal adds CRs.
+                attrs = termios.tcgetattr(slave)
+                attrs[1] &= ~termios.OPOST
+                termios.tcsetattr(slave, termios.TCSANOW, attrs)
+                result = subprocess.run([agents / "bash.anix", "xxx"], cwd=root,
+                                        env={**env, "TERM": "xterm-256color"}, stdin=subprocess.DEVNULL,
+                                        stdout=subprocess.PIPE, stderr=slave, timeout=8)
+                os.set_blocking(master, False)
+                output = bytearray()
+                try:
+                    while chunk := os.read(master, 8192):
+                        output.extend(chunk)
+                except BlockingIOError:
+                    pass
+            finally:
+                os.close(slave)
+                os.close(master)
+            self.assertEqual(result.returncode, 0, bytes(output))
+            self.assertEqual(result.stdout, b"")
+            self.assertIn(b"fixture reply", output)
+            self.assertEqual(output.count(b"[usage]"), 1)
+            self.assertRegex(bytes(output), rb"\n\x1b\[2m\[usage\] [^\r\n]+\x1b\[0m\n\Z")
+
+    # RFC v1.1.1 §2, §3.1, §4.1, §9.2, §10.3
+    def test_installed_bash_script_accepts_args_on_path_and_by_relative_name_without_tty_eof(self):
+        with tempfile.TemporaryDirectory(prefix="anix-install-tty-") as home:
+            root = Path(home)
+            agents, env = self.install_with_text_provider(root)
             for program, cwd in [("bash.anix", root), ("./bash.anix", agents)]:
                 with self.subTest(program=program):
                     (root / "request").unlink(missing_ok=True)
