@@ -58,6 +58,14 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y --no-install-recommends strace
           fi
+      - name: Test PDF page selection with Poppler
+        if: ${{ runner.os == 'Linux' && !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          if ! command -v pdftoppm >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends poppler-utils
+          fi
+          cargo test --locked -p anix-tools --test rfc_control -- --ignored --exact aview_selects_pdf_pages_with_their_actual_geometry_and_colors
       - name: RFC provider and terminal conformance
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: python3 -B -m unittest discover -s tests -p 'test_*.py' -v

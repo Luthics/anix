@@ -159,8 +159,11 @@
 
 | 可验收行为 | 测试与问题 |
 | --- | --- |
-| [省略字段时工具发出无 summary 的 fold 帧，运行时生成摘要](../docs/v1.1.1-RFC.md?plain=1#L446) | [`aclr_without_a_summary_omits_the_field_at_each_valid_turn_id_boundary`](../crates/anix-tools/tests/rfc_control.rs#L57) · [`external_auto_fold_receives_the_aligned_tail_and_replays_only_its_summary`](../crates/anix-core/tests/rfc_runtime/compaction.rs#L870) · [#41](https://github.com/Luthics/anix/issues/41) |
+| [省略字段时工具发出无 summary 的 fold 帧，运行时生成摘要](../docs/v1.1.1-RFC.md?plain=1#L446) | [`aclr_without_a_summary_omits_the_field_at_each_valid_turn_id_boundary`](../crates/anix-tools/tests/rfc_control.rs#L58) · [`external_auto_fold_receives_the_aligned_tail_and_replays_only_its_summary`](../crates/anix-core/tests/rfc_runtime/compaction.rs#L870) · [#41](https://github.com/Luthics/anix/issues/41) |
 | [按含 LF 的实际序列化长度逐个比较 aclr 发送端和内核接收端的判定](../docs/v1.1.1-RFC.md?plain=1#L433) | [`test_aclr_and_anix_agree_on_the_serialized_fold_frame_size_limit`](../tests/test_shell_pipeline.py#L72) · [#14](https://github.com/Luthics/anix/issues/14) |
+| [四页文档的 15 种非空页集合，从文件、显式和隐式 stdin 输入，逐页核对 PNG 尺寸及色块](../docs/v1.1.1-RFC.md?plain=1#L439) | [`aview_selects_pdf_pages_with_their_actual_geometry_and_colors`](../crates/anix-tools/tests/rfc_control.rs#L236) |
+| [页码语法错误时以非零状态退出且不发布附件](../docs/v1.1.1-RFC.md?plain=1#L439) | [`aview_rejects_invalid_pdf_page_expressions_without_publishing_attachments`](../crates/anix-tools/tests/rfc_control.rs#L305) |
+| [重复或乱序页码的输出次序，以及合法页与越界页混用时能否先发布部分附件](../docs/v1.1.1-RFC.md?plain=1#L439) | [#54](https://github.com/Luthics/anix/issues/54) |
 
 ## §9.2
 

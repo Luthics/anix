@@ -11,6 +11,7 @@ use std::process::{Command, Output, Stdio};
 fn invoke(tool: &str, args: &[&str], input: &[u8]) -> Output {
     let mut child = Command::new("/bin/sh")
         .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("ANIX_CTL", "/dev/fd/6")
         .args(["-c", r#"exec 6>&1; exec "$@" >/dev/null"#, "fixture", tool])
         .args(args)
@@ -226,5 +227,86 @@ fn undecodable_input_or_invalid_options_do_not_emit_media() {
         let out = invoke(env!("CARGO_BIN_EXE_aview"), args, input);
         assert!(!out.status.success() && out.stdout.is_empty());
         assert!(!out.stderr.is_empty());
+    }
+}
+
+// RFC v1.1.1 §7.2
+#[test]
+#[ignore = "requires a native PDF renderer; run in the PDF conformance CI step"]
+fn aview_selects_pdf_pages_with_their_actual_geometry_and_colors() {
+    // Each page has two solid rectangles and a unique aspect ratio. Checking
+    // pixels catches a blank canvas, a rotated page or a misleading source label.
+    let pages = [
+        ((48, 48), [255, 0, 0], [0, 0, 255]),
+        ((48, 24), [0, 255, 0], [255, 0, 0]),
+        ((48, 16), [255, 0, 255], [0, 255, 255]),
+        ((24, 48), [0, 0, 255], [0, 255, 0]),
+    ];
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/fixtures/media/four-pages.pdf"
+    );
+    let pdf = fs::read(path).unwrap();
+    for mask in 1..16 {
+        let selected: Vec<_> = (0..4).filter(|index| mask & (1 << index) != 0).collect();
+        let spec = match mask {
+            7 => "1-3".to_owned(),
+            11 => "1-2,4".to_owned(),
+            14 => "2-4".to_owned(),
+            15 => "1-4".to_owned(),
+            _ => selected
+                .iter()
+                .map(|i| (i + 1).to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+        };
+        for source in [Some(path), Some("-"), None] {
+            let mut args = vec!["--max-dim", "48", "--pages", spec.as_str()];
+            args.extend(source);
+            let input = if source == Some(path) { &[][..] } else { &pdf };
+            let out = invoke(env!("CARGO_BIN_EXE_aview"), &args, input);
+            assert!(
+                out.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert!(out.stdout.ends_with(b"\n"));
+            let rows = std::str::from_utf8(&out.stdout).unwrap();
+            let mut seen = Vec::new();
+            for line in rows.lines() {
+                let frame: Value = serde_json::from_str(line).unwrap();
+                let image = take_image(&frame).into_rgb8();
+                let (w, h) = image.dimensions();
+                let index = pages
+                    .iter()
+                    .position(|p| p.0 == (w, h))
+                    .expect("unexpected page dimensions");
+                for (x, expected) in [(w / 4, pages[index].1), (3 * w / 4, pages[index].2)] {
+                    let actual = image.get_pixel(x, h / 2).0;
+                    assert!(
+                        actual
+                            .iter()
+                            .zip(expected)
+                            .all(|(a, b)| a.abs_diff(b) <= 12),
+                        "{args:?}: page {}, pixel {actual:?}, expected {expected:?}",
+                        index + 1
+                    );
+                }
+                seen.push(index);
+            }
+            seen.sort_unstable();
+            assert_eq!(seen, selected, "selected pages for {args:?}");
+        }
+    }
+}
+
+// RFC v1.1.1 §7.2
+#[test]
+fn aview_rejects_invalid_pdf_page_expressions_without_publishing_attachments() {
+    let pdf = include_bytes!("../../../tests/fixtures/media/four-pages.pdf");
+    for spec in ["0", "2-1", "-1", "x", "1,x", "1-", "1,,2"] {
+        let out = invoke(env!("CARGO_BIN_EXE_aview"), &["--pages", spec, "-"], pdf);
+        assert!(!out.status.success() && !out.stderr.is_empty(), "{spec:?}");
+        assert!(out.stdout.is_empty(), "unexpected fd 6 frame for {spec:?}");
     }
 }
