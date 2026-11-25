@@ -1,6 +1,4 @@
 """Black-box conformance to docs/v1.1.1-RFC.md using the real runtime and loopback HTTP."""
-from contextlib import contextmanager
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -9,55 +7,12 @@ import select
 import signal
 import subprocess
 import tempfile
-import termios
 import time
 import unittest
 from http.server import HTTPServer
 
 from http_fixture import JsonRequest
-
-
-@contextmanager
-def interactive_shell(argv, cwd, env):
-    """Give job control and keyboard signals to a disposable shell."""
-    master, slave = pty.openpty()
-
-    def acquire_terminal():
-        os.setsid()
-        fcntl.ioctl(0, termios.TIOCSCTTY, 0)
-
-    try:
-        shell = subprocess.Popen(argv, cwd=cwd, env=env, stdin=slave, stdout=slave,
-                                 stderr=slave, preexec_fn=acquire_terminal)
-        try:
-            yield master
-        finally:
-            # Closing the master also releases a shell exiting on Darwin.
-            os.close(master)
-            master = -1
-            try:
-                shell.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                shell.kill()
-                shell.wait(timeout=2)
-    finally:
-        os.close(slave)
-        if master >= 0:
-            os.close(master)
-
-
-def read_until(master, marker):
-    seen = bytearray()
-    deadline = time.monotonic() + 8
-    while marker not in seen:
-        timeout = deadline - time.monotonic()
-        if timeout <= 0 or not select.select([master], [], [], timeout)[0]:
-            raise AssertionError(f"timed out waiting for {marker!r}: {bytes(seen)!r}")
-        chunk = os.read(master, 8192)
-        if not chunk:
-            raise AssertionError(f"terminal closed before {marker!r}: {bytes(seen)!r}")
-        seen.extend(chunk)
-    return bytes(seen)
+from terminal_fixture import interactive_shell, read_until
 
 
 def accept_request(http, master):
