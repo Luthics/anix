@@ -629,3 +629,97 @@ fn resume_uses_the_last_surviving_assistant_usage_for_the_hard_limit() {
         }
     }
 }
+
+// RFC v1.1.1 §4.4, §6.2, §9.1
+#[test]
+fn each_combination_of_stderr_approval_and_vision_drift_creates_one_tail_update() {
+    for (kind, anchor) in [("session_init", 0), ("checkpoint", 20)] {
+        for changed in 0..8 {
+            let fx = Fixture::new();
+            let root = &fx.dir.0;
+            fs::write(root.join("case.anix"), "different script on disk").unwrap();
+            let wal = root.join("history");
+            let frozen = "  不变\r\nsystem 🦀  ";
+            let previous = json!({"stderr":"explicit", "approval":"deny", "vision":false});
+            let user = if kind == "checkpoint" {
+                "<checkpoint>\nprior\n</checkpoint>"
+            } else {
+                "prior"
+            };
+            let stored = lines(&[
+                section(kind, anchor, 1),
+                msg("system", anchor, frozen),
+                msg("user", anchor + 1, user),
+                json!({"type":"runtime_update","ts":TS,"turn_id":anchor+2,
+                       "content":"previous configuration","config":previous}),
+                msg("assistant", anchor + 3, "prior answer"),
+            ]);
+            fs::write(&wal, &stored).unwrap();
+            let stderr = if changed & 1 != 0 { "auto" } else { "explicit" };
+            let approval = if changed & 2 != 0 { "ask" } else { "deny" };
+            let vision = if changed & 4 != 0 {
+                "--vision"
+            } else {
+                "--no-vision"
+            };
+            for label in ["first resume", "identical resume"] {
+                let prefix = fs::read(&wal).unwrap();
+                let output = fx.run(fx.anix().args([
+                    "-c",
+                    "history",
+                    "--stderr",
+                    stderr,
+                    "--approval",
+                    approval,
+                    vision,
+                    "case.anix",
+                    "--",
+                    label,
+                ]));
+                expect_code(&output, 0);
+                assert!(
+                    fs::read(&wal).unwrap().starts_with(&prefix),
+                    "changed committed WAL bytes"
+                );
+                let records = jsonl(&wal);
+                let updates: Vec<_> = records
+                    .iter()
+                    .filter(|r| r["type"] == "runtime_update")
+                    .collect();
+                assert_eq!(
+                    updates.len(),
+                    1 + usize::from(changed != 0),
+                    "{kind}, {changed}, {label}"
+                );
+                let ir = jsonl(&fx.capture);
+                assert_eq!(ir[1]["text"], frozen);
+                assert_eq!(ir.last().unwrap()["text"], format!("<args>{label}</args>"));
+                let notices: Vec<_> = ir
+                    .iter()
+                    .skip(2)
+                    .filter(|r| r["role"] == "system")
+                    .collect();
+                assert_eq!(notices.len(), updates.len());
+                for (notice, update) in notices.iter().zip(updates) {
+                    assert_eq!(notice["turn_id"], update["turn_id"]);
+                    assert_eq!(
+                        notice["text"],
+                        format!(
+                            "<runtime_update>{}</runtime_update>",
+                            update["content"].as_str().unwrap()
+                        )
+                    );
+                }
+                if changed != 0 {
+                    let position = ir.iter().position(|r| r["text"] == "prior answer").unwrap();
+                    assert_eq!(
+                        ir[position + 1],
+                        *notices[1],
+                        "drift belongs after the frozen history"
+                    );
+                    assert_eq!(ir[position + 2]["text"], "<args>first resume</args>");
+                }
+            }
+        }
+    }
+}

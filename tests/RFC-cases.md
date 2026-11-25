@@ -248,6 +248,7 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 | [`checkpoint_recovery_only_dispatches_a_complete_context_at_each_record_boundary`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L438) | [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) · [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) |
 | [`initial_section_interruption_never_dispatches_without_a_frozen_system_message`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L515) | [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) · [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) |
 | [`resume_uses_the_last_surviving_assistant_usage_for_the_hard_limit`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L569) | [§6.1](../docs/v1.1.1-RFC.md?plain=1#L316) · [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) · [§6.5](../docs/v1.1.1-RFC.md?plain=1#L400) · [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) |
+| [`each_combination_of_stderr_approval_and_vision_drift_creates_one_tail_update`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L635) | [§4.4](../docs/v1.1.1-RFC.md?plain=1#L209) · [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) · [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) |
 
 ## `crates/anix-core/tests/v1_1_e2e.rs`
 
@@ -447,3 +448,20 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 | [`test_keyboard_interrupt_returns_to_the_same_shell_while_waiting_for_provider`](../tests/test_provider_streaming.py#L493) | [§3.1](../docs/v1.1.1-RFC.md?plain=1#L63) · [§4.1](../docs/v1.1.1-RFC.md?plain=1#L154) · [§6.4](../docs/v1.1.1-RFC.md?plain=1#L390) · [§6.5](../docs/v1.1.1-RFC.md?plain=1#L400) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) · [§9.5](../docs/v1.1.1-RFC.md?plain=1#L645) |
 | [`test_keyboard_interrupt_reaches_a_provider_that_closed_stdout_before_exit`](../tests/test_provider_streaming.py#L550) | [§4.1](../docs/v1.1.1-RFC.md?plain=1#L154) · [§6.3](../docs/v1.1.1-RFC.md?plain=1#L382) · [§6.4](../docs/v1.1.1-RFC.md?plain=1#L390) · [§6.5](../docs/v1.1.1-RFC.md?plain=1#L400) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) · [§9.5](../docs/v1.1.1-RFC.md?plain=1#L645) |
 | [`test_inbox_commits_one_message_then_interrupts_the_next_in_the_same_coprocess`](../tests/test_provider_streaming.py#L591) | [§4.1](../docs/v1.1.1-RFC.md?plain=1#L154) · [§4.2](../docs/v1.1.1-RFC.md?plain=1#L180) · [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) · [§6.4](../docs/v1.1.1-RFC.md?plain=1#L390) · [§6.5](../docs/v1.1.1-RFC.md?plain=1#L400) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) · [§9.5](../docs/v1.1.1-RFC.md?plain=1#L645) |
+
+## `tests/test_shell_pipeline.py`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`test_aclr_and_anix_agree_on_the_serialized_fold_frame_size_limit`](../tests/test_shell_pipeline.py#L72) | [§7.2](../docs/v1.1.1-RFC.md?plain=1#L430) · [§6.1](../docs/v1.1.1-RFC.md?plain=1#L316) · [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) |
+| [`test_wal_append_failure_preserves_the_prefix_and_reopens_according_to_tail_state`](../tests/test_shell_pipeline.py#L122) | [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) · [§6.5](../docs/v1.1.1-RFC.md?plain=1#L400) |
+| [`test_skill_index_round_trips_xml_metadata_and_msh_reads_the_indexed_file_on_demand`](../tests/test_shell_pipeline.py#L165) | [§9.4](../docs/v1.1.1-RFC.md?plain=1#L632) · [§7.1](../docs/v1.1.1-RFC.md?plain=1#L417) |
+| [`test_open_input_descriptor_defers_inference_until_eof`](../tests/test_shell_pipeline.py#L238) | [§3.1](../docs/v1.1.1-RFC.md?plain=1#L63) · [§4.1](../docs/v1.1.1-RFC.md?plain=1#L154) · [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) |
+| [`test_cancelling_input_does_not_need_eof_or_dispatch_the_partial_message`](../tests/test_shell_pipeline.py#L264) | [§4.1](../docs/v1.1.1-RFC.md?plain=1#L154) · [§6.4](../docs/v1.1.1-RFC.md?plain=1#L390) · [§6.5](../docs/v1.1.1-RFC.md?plain=1#L400) |
+| [`test_msh_timeout_signals_the_whole_group_and_grants_three_seconds_before_kill`](../tests/test_shell_pipeline.py#L277) | [§7.1](../docs/v1.1.1-RFC.md?plain=1#L417) · [§6.4](../docs/v1.1.1-RFC.md?plain=1#L390) |
+| [`test_interrupting_a_live_msh_discards_its_partial_result_and_replays_a_closed_history`](../tests/test_shell_pipeline.py#L315) | [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) · [§6.4](../docs/v1.1.1-RFC.md?plain=1#L390) · [§6.5](../docs/v1.1.1-RFC.md?plain=1#L400) · [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) |
+| [`test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity`](../tests/test_shell_pipeline.py#L368) | [§4.1](../docs/v1.1.1-RFC.md?plain=1#L154) · [§4.3](../docs/v1.1.1-RFC.md?plain=1#L195) |
+| [`test_stdout_and_stderr_terminal_modes_are_independent`](../tests/test_shell_pipeline.py#L408) | [§4.1](../docs/v1.1.1-RFC.md?plain=1#L154) · [§4.3](../docs/v1.1.1-RFC.md?plain=1#L195) |
+| [`test_path_precedes_libexec_and_explicit_shell_path_has_priority_over_both`](../tests/test_shell_pipeline.py#L473) | [§2](../docs/v1.1.1-RFC.md?plain=1#L45) |
+| [`test_nested_anix_uses_own_model_wal_and_budget_and_inherits_cli_auto`](../tests/test_shell_pipeline.py#L537) | [§3.4](../docs/v1.1.1-RFC.md?plain=1#L130) · [§5.1](../docs/v1.1.1-RFC.md?plain=1#L226) |
+| [`test_nested_anix_inherits_cli_deny_over_its_own_auto_frontmatter`](../tests/test_shell_pipeline.py#L541) | [§3.4](../docs/v1.1.1-RFC.md?plain=1#L130) · [§5.1](../docs/v1.1.1-RFC.md?plain=1#L226) |
