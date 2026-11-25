@@ -58,6 +58,24 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 | [`yaml_12_scalars_extensions_and_open_params_coexist_with_known_fields`](../crates/anix-core/tests/rfc_3_2/grammar.rs#L115) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) · [§3.3](../docs/v1.1.0-RFC.md?plain=1#L111) |
 | [`incomplete_delimiters_and_malformed_yaml_fail_at_the_header`](../crates/anix-core/tests/rfc_3_2/grammar.rs#L145) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) |
 
+## `crates/anix-core/tests/rfc_runtime/compaction.rs`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`each_subset_of_optional_usage_details_preserves_inclusive_totals_through_exit`](../crates/anix-core/tests/rfc_runtime/compaction.rs#L30) | [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§9.3](../docs/v1.1.0-RFC.md?plain=1#L615) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
+| [`a_reported_zero_watermark_and_an_unreported_usage_use_different_budget_baselines`](../crates/anix-core/tests/rfc_runtime/compaction.rs#L99) | [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§9.3](../docs/v1.1.0-RFC.md?plain=1#L615) |
+| [`retry_usage_counts_every_charged_attempt_without_inflating_the_final_watermark`](../crates/anix-core/tests/rfc_runtime/compaction.rs#L139) | [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) · [§9.3](../docs/v1.1.0-RFC.md?plain=1#L615) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
+| [`full_compaction_and_resume_account_for_every_call_without_inflating_watermark`](../crates/anix-core/tests/rfc_runtime/compaction.rs#L198) | [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§9.3](../docs/v1.1.0-RFC.md?plain=1#L615) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
+| [`tail_fold_aligns_to_assistant_and_removes_the_triggering_tool_call`](../crates/anix-core/tests/rfc_runtime/compaction.rs#L321) | [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`external_compactor_receives_tool_free_ir_and_empty_or_failed_summary_is_fatal`](../crates/anix-core/tests/rfc_runtime/compaction.rs#L374) | [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`fresh_window_counts_utf8_bytes_in_groups_of_three`](../crates/anix-core/tests/rfc_runtime/compaction.rs#L443) | [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) |
+| [`hard_limit_allows_equality_and_blocks_the_first_provider_request_above_it`](../crates/anix-core/tests/rfc_runtime/compaction.rs#L459) | [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) |
+| [`auto_compaction_runs_before_inference_and_rechecks_the_new_window_against_the_cap`](../crates/anix-core/tests/rfc_runtime/compaction.rs#L489) | [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) |
+| [`builtin_compactor_uses_configured_provider_model_and_literal_or_file_prompt`](../crates/anix-core/tests/rfc_runtime/compaction.rs#L548) | [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) · [§8.2](../docs/v1.1.0-RFC.md?plain=1#L457) |
+| [`two_checkpoints_carry_folded_usage_once_and_refresh_the_prefix_across_processes`](../crates/anix-core/tests/rfc_runtime/compaction.rs#L610) | [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§9.3](../docs/v1.1.0-RFC.md?plain=1#L615) |
+| [`external_auto_fold_receives_the_aligned_tail_and_replays_only_its_summary`](../crates/anix-core/tests/rfc_runtime/compaction.rs#L870) | [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§7.2](../docs/v1.1.0-RFC.md?plain=1#L428) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`empty_or_failed_auto_summary_keeps_the_subwindow_and_reports_a_tool_error`](../crates/anix-core/tests/rfc_runtime/compaction.rs#L900) | [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§7.2](../docs/v1.1.0-RFC.md?plain=1#L428) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+
 ## `crates/anix-core/tests/rfc_runtime/configuration.rs`
 
 | 测试 | RFC 条款 |

@@ -1,5 +1,6 @@
 //! RFC v1.1 runtime conformance through the installed CLI contract and local providers.
 
+mod compaction;
 mod configuration;
 mod control;
 mod fd;
