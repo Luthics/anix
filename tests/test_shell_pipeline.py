@@ -161,6 +161,62 @@ fi
                     self.assertEqual(resumed.returncode, 1, resumed.stderr)
                     self.assertEqual(wal.read_bytes(), after)
 
+    # RFC v1.1.1 §6.2, §9.1
+    @unittest.skipUnless(sys.platform.startswith("linux") and Path("/proc/self/io").is_file(),
+                         "requires Linux process I/O counters")
+    def test_archived_wal_growth_keeps_resume_reads_bounded_at_the_latest_checkpoint(self):
+        # Sample the core at first inference. rchar counts logical reads even
+        # on a warm filesystem, so the assertion is independent of disk speed.
+        self.provider.write_text("""#!/bin/sh
+set -eu
+/bin/cat /proc/"$PPID"/io > core.io
+/bin/cat > received.ir
+printf '%s\\n' '{"type":"text_delta","text":"ok"}' '{"type":"done","finish_reason":"stop"}'
+""")
+        session = "fea02ce0-3fc2-486c-9273-bae1aec6c662"
+        ts = "2026-01-02T03:04:05Z"
+        header = {"ir_version": 1, "session_id": session, "ts": ts,
+                  "config": {"stderr": "explicit", "approval": "ask", "vision": True}}
+
+        def message(role, turn_id, text):
+            return {"type": "message", "role": role, "turn_id": turn_id, "text": text, "ts": ts}
+
+        def line(record):
+            return json.dumps(record, ensure_ascii=False).encode() + b"\n"
+
+        archive_prefix, archive_suffix = line(message("system", 0, "LARGE")).split(b"LARGE")
+        summary = "<checkpoint>\n保留摘要\n</checkpoint>"
+        wal = self.root / "history.wal"
+        counts = []
+        requests = []
+        chunk = b"x" * (64 * 1024)
+        for archive_mib in (1, 32):
+            with wal.open("wb") as writer:
+                writer.write(line({**header, "type": "session_init"}))
+                writer.write(archive_prefix)
+                for _ in range(archive_mib * 1024**2 // len(chunk)):
+                    writer.write(chunk)
+                writer.write(archive_suffix)
+                for record in [message("user", 1, "archived input"), message("assistant", 2, "archived answer"),
+                               {**header, "type": "checkpoint", "turn_id": 3}, message("system", 3, "active prefix"),
+                               message("user", 4, summary)]:
+                    writer.write(line(record))
+            run = subprocess.run([self.anix, "-q", "-c", wal, "case.anix", "--", "resume"],
+                                 cwd=self.root, env=self.env, stdin=subprocess.DEVNULL,
+                                 capture_output=True, timeout=20)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            info = dict(row.split(": ") for row in (self.root / "core.io").read_text().splitlines())
+            counts.append(int(info["rchar"]))
+            request = (self.root / "received.ir").read_bytes()
+            rows = [json.loads(row) for row in request.splitlines()]
+            self.assertEqual(rows[0]["type"], "header")
+            self.assertEqual([(r["turn_id"], r["role"], r["text"]) for r in rows[1:]],
+                             [(3, "system", "active prefix"), (4, "user", summary), (5, "user", "<args>resume</args>")])
+            requests.append(request)
+        self.assertEqual(requests[0], requests[1])
+        self.assertLess(counts[1] - counts[0], 1024**2,
+                        f"adding 31 MiB before the checkpoint increased logical reads: {counts}")
+
     # RFC v1.1.1 §9.4, §7.1
     def test_skill_index_round_trips_xml_metadata_and_msh_reads_the_indexed_file_on_demand(self):
         guide = self.root / '.skills/R&D "examples"/SKILL.md'

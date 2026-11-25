@@ -8,7 +8,7 @@
 
 | 可验收行为 | 测试与问题 |
 | --- | --- |
-| [PATH 中的同名 msh 可覆盖私有安装位置，显式路径仍优先](../docs/v1.1.1-RFC.md?plain=1#L56) | [`test_path_precedes_libexec_and_explicit_shell_path_has_priority_over_both`](../tests/test_shell_pipeline.py#L473) |
+| [PATH 中的同名 msh 可覆盖私有安装位置，显式路径仍优先](../docs/v1.1.1-RFC.md?plain=1#L56) | [`test_path_precedes_libexec_and_explicit_shell_path_has_priority_over_both`](../tests/test_shell_pipeline.py#L529) |
 
 ## §3.1
 
@@ -26,7 +26,7 @@
 
 | 可验收行为 | 测试与问题 |
 | --- | --- |
-| [嵌套子进程继承实际生效的 auto 或 deny，模型、WAL 和轮数预算独立](../docs/v1.1.1-RFC.md?plain=1#L143) | [`test_nested_anix_uses_own_model_wal_and_budget_and_inherits_cli_auto`](../tests/test_shell_pipeline.py#L537) · [`test_nested_anix_inherits_cli_deny_over_its_own_auto_frontmatter`](../tests/test_shell_pipeline.py#L541) |
+| [嵌套子进程继承实际生效的 auto 或 deny，模型、WAL 和轮数预算独立](../docs/v1.1.1-RFC.md?plain=1#L143) | [`test_nested_anix_uses_own_model_wal_and_budget_and_inherits_cli_auto`](../tests/test_shell_pipeline.py#L593) · [`test_nested_anix_inherits_cli_deny_over_its_own_auto_frontmatter`](../tests/test_shell_pipeline.py#L597) |
 
 ## §4.1
 
@@ -41,9 +41,9 @@
 | [在真实 TTY 上精确检查 Dim 使用量行在最后一个换行前重置 ANSI 样式](../docs/v1.1.1-RFC.md?plain=1#L169) | [`test_usage_line_resets_dim_before_the_final_newline_on_a_terminal`](../tests/test_distribution.py#L218) |
 | [可读写的显式 Trace FD 不进入静态输入](../docs/v1.1.1-RFC.md?plain=1#L162) | [`each_read_write_trace_fd_is_excluded_from_the_ordered_initial_user_input`](../crates/anix-core/tests/rfc_runtime/fd.rs#L94) |
 | [显式 FD 校验失败时先返回 2；有效时 CLI 优先于环境配置](../docs/v1.1.1-RFC.md?plain=1#L161) | [`invalid_trace_fd_reports_usage_to_stderr_before_invoking_the_provider`](../crates/anix-core/tests/rfc_runtime/fd.rs#L136) · [`only_the_explicit_trace_sink_receives_jsonl_and_cli_precedes_environment`](../crates/anix-core/tests/rfc_runtime/fd.rs#L61) |
-| [真实管道有无脚本参数均等到 EOF，保留跨写入的 UTF-8 及内嵌 NUL](../docs/v1.1.1-RFC.md?plain=1#L158) | [`test_open_input_descriptor_defers_inference_until_eof`](../tests/test_shell_pipeline.py#L238) |
-| [逐个通过真实管道连接 fd 4 至 9，读完后保留输入来源和完整正文](../docs/v1.1.1-RFC.md?plain=1#L162) | [`test_open_input_descriptor_defers_inference_until_eof`](../tests/test_shell_pipeline.py#L238) |
-| [stdout 与 stderr 各自为终端或普通文件的四种组合，测试 auto 和 explicit](../docs/v1.1.1-RFC.md?plain=1#L159) | [`test_stdout_and_stderr_terminal_modes_are_independent`](../tests/test_shell_pipeline.py#L408) |
+| [真实管道有无脚本参数均等到 EOF，保留跨写入的 UTF-8 及内嵌 NUL](../docs/v1.1.1-RFC.md?plain=1#L158) | [`test_open_input_descriptor_defers_inference_until_eof`](../tests/test_shell_pipeline.py#L294) |
+| [逐个通过真实管道连接 fd 4 至 9，读完后保留输入来源和完整正文](../docs/v1.1.1-RFC.md?plain=1#L162) | [`test_open_input_descriptor_defers_inference_until_eof`](../tests/test_shell_pipeline.py#L294) |
+| [stdout 与 stderr 各自为终端或普通文件的四种组合，测试 auto 和 explicit](../docs/v1.1.1-RFC.md?plain=1#L159) | [`test_stdout_and_stderr_terminal_modes_are_independent`](../tests/test_shell_pipeline.py#L464) |
 
 ## §4.2
 
@@ -57,9 +57,9 @@
 
 | 可验收行为 | 测试与问题 |
 | --- | --- |
-| [真实 msh 子进程的标准输入指向空设备，fd 4、5、6 都是只写匿名管道](../docs/v1.1.1-RFC.md?plain=1#L201) | [`test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity`](../tests/test_shell_pipeline.py#L368) |
-| [多次打开输出管道，超过 1 MiB 的二进制 Payload 逐字节完整转发](../docs/v1.1.1-RFC.md?plain=1#L203) | [`test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity`](../tests/test_shell_pipeline.py#L368) |
-| [诊断管道可独立传输超过 1 MiB 的二进制数据](../docs/v1.1.1-RFC.md?plain=1#L204) | [`test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity`](../tests/test_shell_pipeline.py#L368) |
+| [真实 msh 子进程的标准输入指向空设备，fd 4、5、6 都是只写匿名管道](../docs/v1.1.1-RFC.md?plain=1#L201) | [`test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity`](../tests/test_shell_pipeline.py#L424) |
+| [多次打开输出管道，超过 1 MiB 的二进制 Payload 逐字节完整转发](../docs/v1.1.1-RFC.md?plain=1#L203) | [`test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity`](../tests/test_shell_pipeline.py#L424) |
+| [诊断管道可独立传输超过 1 MiB 的二进制数据](../docs/v1.1.1-RFC.md?plain=1#L204) | [`test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity`](../tests/test_shell_pipeline.py#L424) |
 
 ## §5.1
 
@@ -125,6 +125,7 @@
 | [从 session_init 和 checkpoint 恢复，stderr、approval、vision 的八种变更组合只在首次变化时产生一条尾部通知](../docs/v1.1.1-RFC.md?plain=1#L351) | [`each_combination_of_stderr_approval_and_vision_drift_creates_one_tail_update`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L635) |
 | [旧 runtime_update 只提供部分字段时，缺失的契约配置要从哪里恢复](../docs/v1.1.1-RFC.md?plain=1#L351) | [#17](https://github.com/Luthics/anix/issues/17) |
 | [文件增长受限时保留原有字节，只在尾行完整可回放时继续](../docs/v1.1.1-RFC.md?plain=1#L374) | [`test_wal_append_failure_preserves_the_prefix_and_reopens_according_to_tail_state`](../tests/test_shell_pipeline.py#L122) |
+| [活跃窗口固定，归档从 1 MiB 增至 32 MiB，读取量维持在误差范围内且 Provider 收到相同字节](../docs/v1.1.1-RFC.md?plain=1#L373) | [`checkpoint_short_circuits_archived_history_and_handles_reverse_read_boundaries`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L109) · [`test_archived_wal_growth_keeps_resume_reads_bounded_at_the_latest_checkpoint`](../tests/test_shell_pipeline.py#L167) |
 
 ## §6.3
 
@@ -140,20 +141,20 @@
 | [Ctrl+C 在等待 Provider 或其关闭 stdout 后回到可继续执行管道的同一 shell](../docs/v1.1.1-RFC.md?plain=1#L394) | [`test_keyboard_interrupt_returns_to_the_same_shell_while_waiting_for_provider`](../tests/test_provider_streaming.py#L493) · [`test_keyboard_interrupt_reaches_a_provider_that_closed_stdout_before_exit`](../tests/test_provider_streaming.py#L550) |
 | [在内置审批处只按一次 Ctrl+C，命令不执行，原 shell 恢复并读到退出码 130](../docs/v1.1.1-RFC.md?plain=1#L394) | [`test_ctrl_c_at_the_approval_prompt_returns_to_the_same_shell`](../tests/test_approval.py#L345) · [#49](https://github.com/Luthics/anix/issues/49) |
 | [外部审批中收到 SIGTERM，退出 143 并记录中断](../docs/v1.1.1-RFC.md?plain=1#L395) | [`test_interrupt_during_external_decision_identifies_the_decider_in_trace`](../tests/test_approval.py#L379) · [#50](https://github.com/Luthics/anix/issues/50) |
-| [工具输出一部分后中断，shell 后代收到 TERM、释放 WAL 锁，恢复时没有半截工具结果](../docs/v1.1.1-RFC.md?plain=1#L394) | [`test_interrupting_a_live_msh_discards_its_partial_result_and_replays_a_closed_history`](../tests/test_shell_pipeline.py#L315) |
+| [工具输出一部分后中断，shell 后代收到 TERM、释放 WAL 锁，恢复时没有半截工具结果](../docs/v1.1.1-RFC.md?plain=1#L394) | [`test_interrupting_a_live_msh_discards_its_partial_result_and_replays_a_closed_history`](../tests/test_shell_pipeline.py#L371) |
 
 ## §6.5
 
 | 可验收行为 | 测试与问题 |
 | --- | --- |
 | [工具超时返回模型错误，长时间运行的命令本身不耗掉下一次 Provider 请求的时限](../docs/v1.1.1-RFC.md?plain=1#L410) | [`test_msh_timeout_is_delivered_to_the_next_provider_turn_as_a_tool_error`](../tests/test_provider_streaming.py#L262) · [`test_long_msh_can_outlive_the_provider_timeout_between_two_requests`](../tests/test_provider_streaming.py#L230) |
-| [读 stdin 或额外输入管道期间取消，写端仍打开也能返回 shell 可见的 130 或 143](../docs/v1.1.1-RFC.md?plain=1#L411) | [`test_cancelling_input_does_not_need_eof_or_dispatch_the_partial_message`](../tests/test_shell_pipeline.py#L264) |
+| [读 stdin 或额外输入管道期间取消，写端仍打开也能返回 shell 可见的 130 或 143](../docs/v1.1.1-RFC.md?plain=1#L411) | [`test_cancelling_input_does_not_need_eof_or_dispatch_the_partial_message`](../tests/test_shell_pipeline.py#L320) |
 
 ## §7.1
 
 | 可验收行为 | 测试与问题 |
 | --- | --- |
-| [独立 msh 超时后向整组发 TERM，3 秒后仍存活才强制回收并返回 124](../docs/v1.1.1-RFC.md?plain=1#L428) | [`test_msh_timeout_signals_the_whole_group_and_grants_three_seconds_before_kill`](../tests/test_shell_pipeline.py#L277) · [#53](https://github.com/Luthics/anix/issues/53) |
+| [独立 msh 超时后向整组发 TERM，3 秒后仍存活才强制回收并返回 124](../docs/v1.1.1-RFC.md?plain=1#L428) | [`test_msh_timeout_signals_the_whole_group_and_grants_three_seconds_before_kill`](../tests/test_shell_pipeline.py#L333) · [#53](https://github.com/Luthics/anix/issues/53) |
 
 ## §7.2
 
@@ -182,7 +183,7 @@
 
 | 可验收行为 | 测试与问题 |
 | --- | --- |
-| [模型从真实 XML 索引读取含特殊字符的技能路径，经 msh 按需获取完整正文](../docs/v1.1.1-RFC.md?plain=1#L643) | [`test_skill_index_round_trips_xml_metadata_and_msh_reads_the_indexed_file_on_demand`](../tests/test_shell_pipeline.py#L165) |
+| [模型从真实 XML 索引读取含特殊字符的技能路径，经 msh 按需获取完整正文](../docs/v1.1.1-RFC.md?plain=1#L643) | [`test_skill_index_round_trips_xml_metadata_and_msh_reads_the_indexed_file_on_demand`](../tests/test_shell_pipeline.py#L221) |
 
 ## §9.5
 
