@@ -2,6 +2,8 @@
 
 每行对应一个测试函数，链接分别指向测试声明和规范原文。参数化用例共用所在函数的条款。
 
+按规范原句查找断言或相关 issue，见[条款验收表](RFC-requirements.md)。
+
 v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthics/anix/blob/45e55a9f16f6bead6a933c67051b94b0acb753a0/tests/RFC-cases.md)。
 
 运行 `python3 scripts/rfc-test-index.py` 更新此文件。CI 使用 `--check` 校验。

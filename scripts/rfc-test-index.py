@@ -1,4 +1,4 @@
-"""Build the per-test index for the v1.1.1 RFC."""
+"""Link v1.1.1 RFC requirements to their conformance tests in both directions."""
 import argparse
 import ast
 from pathlib import Path
@@ -9,6 +9,8 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 RFC = Path("docs/v1.1.1-RFC.md")
 INDEX = ROOT / "tests/RFC-cases.md"
+REQUIREMENTS = ROOT / "tests/rfc-requirements.tsv"
+REVERSE_INDEX = ROOT / "tests/RFC-requirements.md"
 
 
 def rust_tests(lines):
@@ -48,9 +50,11 @@ def build_index():
             sections[match[1]] = line
     doc = ["# v1.1.1 RFC 逐测试索引", "",
            "每行对应一个测试函数，链接分别指向测试声明和规范原文。参数化用例共用所在函数的条款。", "",
+           "按规范原句查找断言或相关 issue，见[条款验收表](RFC-requirements.md)。", "",
            "v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthics/anix/blob/45e55a9f16f6bead6a933c67051b94b0acb753a0/tests/RFC-cases.md)。", "",
            "运行 `python3 scripts/rfc-test-index.py` 更新此文件。CI 使用 `--check` 校验。", ""]
     files = sorted([*(ROOT / "crates").rglob("*.rs"), *(ROOT / "tests").rglob("*.py")])
+    cases = {}
     count = 0
     for path in files:
         source = path.read_bytes().decode("utf-8")
@@ -71,12 +75,59 @@ def build_index():
                 if section not in sections:
                     raise ValueError(f"{rel}:{line} {name} cites missing RFC section {token}")
                 links.append(f"[{token}](../{RFC}?plain=1#L{sections[section]})")
-            doc.append(f"| [`{name}`](../{rel}#L{line}) | {' · '.join(links)} |")
+            test_link = f"[`{name}`](../{rel}#L{line})"
+            doc.append(f"| {test_link} | {' · '.join(links)} |")
+            cases.setdefault(name, []).append(test_link)
+            cases.setdefault(f"{rel}::{name}", []).append(test_link)
             count += 1
         doc.append("")
     if not count:
         raise ValueError("no tests discovered")
-    return "\n".join(doc), count
+    return "\n".join(doc), build_requirements(sections, rfc_lines, cases), count
+
+
+def build_requirements(sections, rfc_lines, cases):
+    doc = ["# v1.1.1 RFC 条款验收表", "",
+           "每行给出一项可观察行为。第一列链接到 RFC 原文，第二列链接到执行断言或待裁决的 issue。通过与失败见对应提交的 CI。", "",
+           "本表按条款逐步补录。[逐测试索引](RFC-cases.md)列出当前套件的全部测试函数。编辑 `tests/rfc-requirements.tsv` 后运行 `python3 scripts/rfc-test-index.py` 更新两份索引。"]
+    tables = {}
+    seen = set()
+    for n, row in enumerate(REQUIREMENTS.read_text().splitlines(), 1):
+        if not row or row.startswith("#"):
+            continue
+        where = f"{REQUIREMENTS.name}:{n}"
+        section, excerpt, behavior, evidence = row.split("\t")
+        if section not in sections or not excerpt or not behavior:
+            raise ValueError(f"{where}: expected a section, unique excerpt and observable behavior")
+        key = (section, behavior)
+        if key in seen:
+            raise ValueError(f"{where}: duplicate behavior {key}")
+        seen.add(key)
+        start = sections[section]
+        stop = next((line for line in sections.values() if line > start), len(rfc_lines) + 1)
+        matches = [line for line in range(start, stop) if excerpt in rfc_lines[line - 1]]
+        if len(matches) != 1:
+            raise ValueError(f"{where}: expected exactly one RFC line matching §{section} {excerpt!r}, got {matches}")
+        links = []
+        for ref in evidence.split():
+            if re.fullmatch(r"#[1-9]\d*", ref):
+                links.append(f"[{ref}](https://github.com/Luthics/anix/issues/{ref[1:]})")
+            elif ref == "TODO":
+                links.append("待补专项断言")
+            elif ref in cases and len(cases[ref]) == 1:
+                links.append(cases[ref][0])
+            else:
+                raise ValueError(f"{where}: unknown or ambiguous test {ref!r}")
+        if not links:
+            raise ValueError(f"{where}: expected tests, issue references or TODO")
+        tables.setdefault(section, []).append(
+            f"| [{behavior}](../{RFC}?plain=1#L{matches[0]}) | {' · '.join(links)} |")
+    if not tables:
+        raise ValueError("empty requirement index")
+    for section in sections:
+        if section in tables:
+            doc.extend(["", f"## §{section}", "", "| 可验收行为 | 测试与问题 |", "| --- | --- |", *tables[section]])
+    return "\n".join(doc) + "\n"
 
 
 if __name__ == "__main__":
@@ -84,12 +135,13 @@ if __name__ == "__main__":
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     try:
-        content, count = build_index()
+        content, reverse, count = build_index()
     except ValueError as err:
         sys.exit(str(err))
-    if args.check:
-        if not INDEX.is_file() or INDEX.read_text() != content:
-            sys.exit(f"{INDEX.name} is stale. Run python3 scripts/rfc-test-index.py")
-    else:
-        INDEX.write_text(content)
+    for path, rendered in ((INDEX, content), (REVERSE_INDEX, reverse)):
+        if args.check:
+            if not path.is_file() or path.read_text() != rendered:
+                sys.exit(f"{path.name} is stale. Run python3 scripts/rfc-test-index.py")
+        else:
+            path.write_text(rendered)
     print(f"{count} tests linked to v1.1.1 RFC clauses")
