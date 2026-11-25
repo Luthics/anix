@@ -25,7 +25,7 @@
 | [带参数启动，Provider 首帧前是否必须显示等待提示](../docs/v1.1.1-RFC.md?plain=1#L158) | [#36](https://github.com/Luthics/anix/issues/36) |
 | [重定向与真实管道只转发显式 Payload，保留原始字节](../docs/v1.1.1-RFC.md?plain=1#L159) | [`repeated_payload_redirection_appends_raw_bytes_in_both_stderr_modes`](../crates/anix-core/tests/rfc_runtime/io.rs#L87) · [`test_installed_pipeline_and_fold`](../tests/test_distribution.py#L272) |
 | [末尾无换行的模型文本与使用量行分行显示](../docs/v1.1.1-RFC.md?plain=1#L168) | [`trace_fd_explicit_only_no_implicit_fd3_and_cycle_events`](../crates/anix-core/tests/v1_1_e2e.rs#L161) |
-| [无尾换行的思考帧紧接工具状态或 $ANIX_ERR 时的字节边界](../docs/v1.1.1-RFC.md?plain=1#L168) | 待补专项断言 |
+| [流式正文和思考帧在工具状态、诊断侧信道及使用量汇总处的换行；显式模式只输出诊断](../docs/v1.1.1-RFC.md?plain=1#L168) | [`unterminated_deltas_are_separated_from_tool_status_diagnostics_and_usage`](../crates/anix-core/tests/rfc_runtime/io.rs#L393) |
 | [在真实 TTY 上精确检查 Dim 使用量行在最后一个换行前重置 ANSI 样式](../docs/v1.1.1-RFC.md?plain=1#L169) | [`test_usage_line_resets_dim_before_the_final_newline_on_a_terminal`](../tests/test_distribution.py#L218) |
 | [可读写的显式 Trace FD 不进入静态输入](../docs/v1.1.1-RFC.md?plain=1#L162) | [`each_read_write_trace_fd_is_excluded_from_the_ordered_initial_user_input`](../crates/anix-core/tests/rfc_runtime/fd.rs#L94) |
 | [显式 FD 校验失败时先返回 2；有效时 CLI 优先于环境配置](../docs/v1.1.1-RFC.md?plain=1#L161) | [`invalid_trace_fd_reports_usage_to_stderr_before_invoking_the_provider`](../crates/anix-core/tests/rfc_runtime/fd.rs#L136) · [`only_the_explicit_trace_sink_receives_jsonl_and_cli_precedes_environment`](../crates/anix-core/tests/rfc_runtime/fd.rs#L61) |

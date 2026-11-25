@@ -167,6 +167,7 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 | [`script_arguments_accept_an_optional_separator_and_preserve_option_like_literals`](../crates/anix-core/tests/rfc_runtime/io.rs#L186) | [§3.1](../docs/v1.1.1-RFC.md?plain=1#L63) · [§4.1](../docs/v1.1.1-RFC.md?plain=1#L154) |
 | [`every_static_fd_access_mode_is_probed_and_consumed_input_files_are_closed_before_spawn`](../crates/anix-core/tests/rfc_runtime/io.rs#L207) | [§4.1](../docs/v1.1.1-RFC.md?plain=1#L154) · [§4.3](../docs/v1.1.1-RFC.md?plain=1#L195) |
 | [`shell_environment_contains_only_observability_effective_approval_and_routed_fds`](../crates/anix-core/tests/rfc_runtime/io.rs#L280) | [§3.4](../docs/v1.1.1-RFC.md?plain=1#L130) · [§4.3](../docs/v1.1.1-RFC.md?plain=1#L195) |
+| [`unterminated_deltas_are_separated_from_tool_status_diagnostics_and_usage`](../crates/anix-core/tests/rfc_runtime/io.rs#L393) | [§4.1](../docs/v1.1.1-RFC.md?plain=1#L154) · [§4.3](../docs/v1.1.1-RFC.md?plain=1#L195) |
 
 ## `crates/anix-core/tests/rfc_runtime/provider.rs`
 

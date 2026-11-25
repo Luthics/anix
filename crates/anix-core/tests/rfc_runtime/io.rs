@@ -387,3 +387,54 @@ fn shell_environment_contains_only_observability_effective_approval_and_routed_f
         assert!(root.join("parent.wal").is_file());
     }
 }
+
+// RFC v1.1.1 §4.1, §4.3
+#[test]
+fn unterminated_deltas_are_separated_from_tool_status_diagnostics_and_usage() {
+    for kind in ["reasoning_delta", "text_delta"] {
+        for mode in ["auto", "explicit"] {
+            let fx = Fixture::new();
+            let root = &fx.dir.0;
+            fs::write(root.join("case.anix"), "fixture").unwrap();
+            // Keep the diagnostic out of the command text so a status line
+            // echoing the command cannot satisfy the fd 5 assertion.
+            fs::write(root.join("note"), "from-diagnostic-channel\n").unwrap();
+            let mut first = vec![json!({"type":kind,"text":"before-tool"})];
+            first.extend(with_tools([tool(
+                "call",
+                r#"/bin/cat note > "$ANIX_ERR"; printf 'P\000Q' > "$ANIX_OUT""#,
+            )]));
+            scripted_provider(&fx, &[first, success_text("final-fragment")]);
+            let output = fx.run(fx.anix().args([
+                "--stderr",
+                mode,
+                "--shell",
+                "/bin/sh",
+                "-y",
+                "case.anix",
+                "--",
+                "go",
+            ]));
+            expect_code(&output, 0);
+            assert_eq!(output.stdout, b"P\0Q");
+            let stderr = String::from_utf8(output.stderr).unwrap();
+            if mode == "explicit" {
+                assert_eq!(stderr, "from-diagnostic-channel\n");
+                continue;
+            }
+            let (_, next) = stderr
+                .split_once("before-tool")
+                .unwrap_or_else(|| panic!("missing {kind}: {stderr:?}"));
+            let (status, after) = next
+                .split_once("from-diagnostic-channel\n")
+                .unwrap_or_else(|| panic!("missing diagnostic: {stderr:?}"));
+            assert!(
+                status.starts_with('\n') && status.ends_with('\n'),
+                "{stderr:?}"
+            );
+            assert!(!status.trim().is_empty(), "missing tool status: {stderr:?}");
+            assert!(after.contains("final-fragment\n[usage] "), "{stderr:?}");
+            assert!(after.ends_with('\n'));
+        }
+    }
+}

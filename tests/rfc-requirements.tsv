@@ -6,7 +6,7 @@
 4.1	直接以 `<SCRIPT_ARGS>`	带参数启动，Provider 首帧前是否必须显示等待提示	#36
 4.1	仅转发子进程显式写入	重定向与真实管道只转发显式 Payload，保留原始字节	repeated_payload_redirection_appends_raw_bytes_in_both_stderr_modes test_installed_pipeline_and_fold
 4.1	阶段边界补齐	末尾无换行的模型文本与使用量行分行显示	trace_fd_explicit_only_no_implicit_fd3_and_cycle_events
-4.1	阶段边界补齐	无尾换行的思考帧紧接工具状态或 $ANIX_ERR 时的字节边界	TODO
+4.1	阶段边界补齐	流式正文和思考帧在工具状态、诊断侧信道及使用量汇总处的换行；显式模式只输出诊断	unterminated_deltas_are_separated_from_tool_status_diagnostics_and_usage
 4.1	退出收尾保证	在真实 TTY 上精确检查 Dim 使用量行在最后一个换行前重置 ANSI 样式	test_usage_line_resets_dim_before_the_final_newline_on_a_terminal
 4.1	跳过已被	可读写的显式 Trace FD 不进入静态输入	each_read_write_trace_fd_is_excluded_from_the_ordered_initial_user_input
 4.1	已打开且可写	显式 FD 校验失败时先返回 2；有效时 CLI 优先于环境配置	invalid_trace_fd_reports_usage_to_stderr_before_invoking_the_provider only_the_explicit_trace_sink_receives_jsonl_and_cli_precedes_environment
