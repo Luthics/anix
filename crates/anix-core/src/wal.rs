@@ -733,6 +733,7 @@ mod tests {
             max_output_tokens: None,
             params: BTreeMap::new(),
             meta: IrMeta {
+                output_mode: None,
                 stderr_mode: StderrMode::Auto,
                 cwd: "/tmp".into(),
                 turn_budget: None,
@@ -753,11 +754,7 @@ mod tests {
                     ir_version: IR_VERSION,
                     ts: "2026-11-25T00:00:00Z".into(),
                     session_id: None,
-                    config: WalConfigSnapshot {
-                        stderr: None,
-                        approval: None,
-                        vision: None,
-                    },
+                    config: WalConfigSnapshot::default(),
                 })
                 .unwrap();
             store.append_message(&IrMessage::system(0, "sys")).unwrap();
@@ -866,11 +863,7 @@ mod tests {
                     ir_version: IR_VERSION,
                     ts: "2026-11-26T00:00:00Z".into(),
                     session_id: Some("sid-persisted-001".into()),
-                    config: WalConfigSnapshot {
-                        stderr: None,
-                        approval: None,
-                        vision: None,
-                    },
+                    config: WalConfigSnapshot::default(),
                 })
                 .unwrap();
             store.append_message(&IrMessage::system(0, "sys")).unwrap();
@@ -880,11 +873,7 @@ mod tests {
                     turn_id: 5,
                     ts: "2026-11-26T00:05:00Z".into(),
                     session_id: Some("sid-persisted-001".into()),
-                    config: WalConfigSnapshot {
-                        stderr: None,
-                        approval: None,
-                        vision: None,
-                    },
+                    config: WalConfigSnapshot::default(),
                     compact_usage: None,
                     cumulative_usage: None,
                 })

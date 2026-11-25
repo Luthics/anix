@@ -184,23 +184,29 @@ pub fn run_msh_command(
     msh_timeout_sec: u64,
     msh_kill_on_timeout: bool,
     jobs_dir: &Path,
+    mount_anix_out: bool,
     approval: ApprovalMode,
     sandbox: Option<&PreparedSandbox>,
     signals: &SignalState,
     stderr_tracker: &StderrTracker,
 ) -> io::Result<MshOutput> {
-    let (out_r, out_w) = posix::create_pipe_cloexec()?;
+    let out_pipe = if mount_anix_out {
+        Some(posix::create_pipe_cloexec()?)
+    } else {
+        None
+    };
     let (err_r, err_w) = posix::create_pipe_cloexec()?;
     let (ctl_r, ctl_w) = posix::create_pipe_cloexec()?;
 
     #[cfg(target_os = "linux")]
     unsafe {
-        let _ = libc::fchmod(out_w, 0o200);
+        if let Some((_, out_w)) = out_pipe {
+            let _ = libc::fchmod(out_w, 0o200);
+        }
         let _ = libc::fchmod(err_w, 0o200);
     }
 
     // SAFETY: Pipe read ends are exclusively owned by their respective relay threads.
-    let mut out_reader = unsafe { File::from_raw_fd(out_r) };
     let mut err_reader = unsafe { File::from_raw_fd(err_r) };
     let mut ctl_reader = unsafe { File::from_raw_fd(ctl_r) };
 
@@ -208,27 +214,34 @@ pub fn run_msh_command(
     // that yielded to background can never asynchronously corrupt a later turn's fd 1 / fd 2.
     let relay_active = Arc::new(AtomicBool::new(true));
 
-    // Relay `$ANIX_OUT` raw bytes -> external `fd 1` (stdout) untouched, zero newline injection.
-    let (out_done_tx, out_done_rx) = mpsc::channel::<()>();
-    let out_active = Arc::clone(&relay_active);
-    thread::spawn(move || {
-        let mut buf = [0u8; 8192];
-        loop {
-            match out_reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    if out_active.load(Ordering::Acquire) {
-                        let mut stdout = io::stdout().lock();
-                        let _ = stdout.write_all(&buf[..n]);
-                        let _ = stdout.flush();
+    // Relay `$ANIX_OUT` raw bytes -> external `fd 1` (stdout) ONLY when `output == explicit`.
+    let (out_w_opt, out_done_rx) = if let Some((out_r, out_w)) = out_pipe {
+        // SAFETY: `out_r` is exclusively owned by this relay thread.
+        let mut out_reader = unsafe { File::from_raw_fd(out_r) };
+        let (out_done_tx, rx) = mpsc::channel::<()>();
+        let out_active = Arc::clone(&relay_active);
+        thread::spawn(move || {
+            let mut buf = [0u8; 8192];
+            loop {
+                match out_reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if out_active.load(Ordering::Acquire) {
+                            let mut stdout = io::stdout().lock();
+                            let _ = stdout.write_all(&buf[..n]);
+                            let _ = stdout.flush();
+                        }
                     }
+                    Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(_) => break,
                 }
-                Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-                Err(_) => break,
             }
-        }
-        let _ = out_done_tx.send(());
-    });
+            let _ = out_done_tx.send(());
+        });
+        (Some(out_w), Some(rx))
+    } else {
+        (None, None)
+    };
 
     // Relay `$ANIX_ERR` raw bytes -> external `fd 2` (stderr) while tracking trailing newline.
     let (err_done_tx, err_done_rx) = mpsc::channel::<()>();
@@ -302,7 +315,6 @@ pub fn run_msh_command(
     command
         .env("PATH", new_path)
         .env("ANIX_APPROVAL", approval_str)
-        .env("ANIX_OUT", "/dev/fd/4")
         .env("ANIX_ERR", "/dev/fd/5")
         .env("ANIX_CTL", "/dev/fd/6")
         .env("MSH_TIMEOUT_SEC", msh_timeout_sec.to_string())
@@ -311,9 +323,14 @@ pub fn run_msh_command(
             if msh_kill_on_timeout { "1" } else { "0" },
         )
         .env("MSH_JOBS_DIR", jobs_dir);
+    if mount_anix_out {
+        command.env("ANIX_OUT", "/dev/fd/4");
+    } else {
+        command.env_remove("ANIX_OUT");
+    }
 
-    // SAFETY: `pre_exec` uses only async-signal-safe syscalls to isolate PGID, bind FDs 4/5/6,
-    // set Linux `PR_SET_PDEATHSIG`, and apply pre-built Landlock rules.
+    // SAFETY: `pre_exec` uses only async-signal-safe syscalls to isolate PGID, bind FDs (closing
+    // `fd 4` when `output != explicit`), set Linux `PR_SET_PDEATHSIG`, and apply Landlock rules.
     unsafe {
         command.pre_exec(move || {
             if libc::setpgid(0, 0) == -1 {
@@ -327,11 +344,20 @@ pub fn run_msh_command(
             #[cfg(not(target_os = "linux"))]
             let _ = parent_pid;
 
-            let tmp_out = dup_above_6(out_w)?;
+            let tmp_out = match out_w_opt {
+                Some(ow) => Some(dup_above_6(ow)?),
+                None => None,
+            };
             let tmp_err = dup_above_6(err_w)?;
             let tmp_ctl = dup_above_6(ctl_w)?;
 
-            dup2_inheritable(tmp_out, 4)?;
+            if let Some(to) = tmp_out {
+                dup2_inheritable(to, 4)?;
+            } else {
+                // v1.2.0 §4.3: Explicitly close `fd 4` when `$ANIX_OUT` is not mounted so no
+                // inherited descriptor can ever leak into child commands.
+                let _ = libc::close(4);
+            }
             dup2_inheritable(tmp_err, 5)?;
             dup2_inheritable(tmp_ctl, 6)?;
 
@@ -348,7 +374,9 @@ pub fn run_msh_command(
     // Parent MUST close its copies of pipe write ends immediately so relay threads see EOF on exit.
     // SAFETY: Parent exclusively owns these write descriptors.
     unsafe {
-        libc::close(out_w);
+        if let Some(ow) = out_w_opt {
+            libc::close(ow);
+        }
         libc::close(err_w);
         libc::close(ctl_w);
     }
@@ -356,7 +384,9 @@ pub fn run_msh_command(
     let mut child = match spawn_res {
         Ok(c) => c,
         Err(err) => {
-            let _ = out_done_rx.recv_timeout(PIPE_DRAIN_AFTER_EXIT);
+            if let Some(ref rx) = out_done_rx {
+                let _ = rx.recv_timeout(PIPE_DRAIN_AFTER_EXIT);
+            }
             let _ = err_done_rx.recv_timeout(PIPE_DRAIN_AFTER_EXIT);
             return Err(err);
         }
@@ -418,7 +448,9 @@ pub fn run_msh_command(
     drain_channel_until(&stdout_rx, &mut stdout_bytes, drain_deadline);
     drain_channel_until(&stderr_rx, &mut stderr_bytes, drain_deadline);
     drain_channel_until(&ctl_rx, &mut ctl_bytes, drain_deadline);
-    let _ = out_done_rx.recv_timeout(drain_deadline.saturating_duration_since(Instant::now()));
+    if let Some(ref rx) = out_done_rx {
+        let _ = rx.recv_timeout(drain_deadline.saturating_duration_since(Instant::now()));
+    }
     let _ = err_done_rx.recv_timeout(drain_deadline.saturating_duration_since(Instant::now()));
     relay_active.store(false, Ordering::SeqCst);
 

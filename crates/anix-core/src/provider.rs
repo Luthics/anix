@@ -363,6 +363,22 @@ struct SingleAttemptFailure {
     elapsed_ms: u64,
 }
 
+/// How assistant `text_delta` frames are rendered during a Provider turn (v1.2.0 §4.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextStreamMode {
+    /// Stream `text_delta` to `fd 2` (`stderr`) when `stderr_mode == Auto`; silent otherwise.
+    /// Used for `output=explicit`, `output=none`, and internal compactor calls.
+    StderrIfAuto,
+    /// Stream `text_delta` directly to `fd 1` (`stdout`) in real time (no `fd 2` echo).
+    /// Used for `output=reply` + `shell=none` (`tools: []`).
+    StdoutDirect,
+    /// Buffer `text_delta` in memory until `done` (`reasoning_delta` still streams live to `fd 2`).
+    /// Caller writes buffered text to `fd 1` on final reply (`tool_calls.is_empty()`), or flushes
+    /// to `fd 2` on intermediate tool turn / abnormal termination.
+    /// Used for `output=reply` + `shell!=none`.
+    BufferForReply,
+}
+
 /// Invoke the configured Provider adapter (in `coprocess` or `oneshot` mode) with
 /// deterministic exponential backoff retries (`1s / 2s / 4s`) on retryable errors.
 #[allow(clippy::too_many_arguments)]
@@ -374,6 +390,7 @@ pub fn invoke_provider(
     paths: &AgentPaths,
     stderr_mode: StderrMode,
     stream_to_stderr: bool,
+    text_stream_mode: TextStreamMode,
     signals: &SignalState,
     pool: &mut ProviderPool,
     stderr_tracker: &StderrTracker,
@@ -441,6 +458,7 @@ pub fn invoke_provider(
                 &paths.cwd,
                 stderr_mode,
                 stream_to_stderr,
+                text_stream_mode,
                 signals,
                 stderr_tracker,
                 tracer,
@@ -455,6 +473,7 @@ pub fn invoke_provider(
                 &paths.cwd,
                 stderr_mode,
                 stream_to_stderr,
+                text_stream_mode,
                 signals,
                 stderr_tracker,
                 tracer,
@@ -482,6 +501,16 @@ pub fn invoke_provider(
                 return Ok(result);
             }
             Err(fail) => {
+                // v1.2.0 §4.1: If buffered `output=reply` text was accumulated before an error,
+                // timeout, or interruption, flush it to `fd 2` (if `stderr=auto`) and keep `fd 1` clean.
+                if text_stream_mode == TextStreamMode::BufferForReply
+                    && stream_to_stderr
+                    && stderr_mode == StderrMode::Auto
+                    && !fail.partial_text.is_empty()
+                {
+                    stderr_tracker.writeln_dim_if_tty(&fail.partial_text);
+                }
+
                 if let Some(code) = fail.interrupted {
                     return Err(ProviderError::Interrupted(code));
                 }
@@ -596,10 +625,16 @@ struct TurnAccumulator {
     in_dim_ansi: bool,
     is_tty_stderr: bool,
     render_stderr: bool,
+    text_stream_mode: TextStreamMode,
+    wrote_stdout_direct: bool,
 }
 
 impl TurnAccumulator {
-    fn new(stderr_mode: StderrMode, stream_to_stderr: bool) -> Self {
+    fn new(
+        stderr_mode: StderrMode,
+        stream_to_stderr: bool,
+        text_stream_mode: TextStreamMode,
+    ) -> Self {
         Self {
             text: String::new(),
             reasoning: String::new(),
@@ -613,6 +648,8 @@ impl TurnAccumulator {
             in_dim_ansi: false,
             is_tty_stderr: posix::isatty(2),
             render_stderr: stream_to_stderr && stderr_mode == StderrMode::Auto,
+            text_stream_mode,
+            wrote_stdout_direct: false,
         }
     }
 
@@ -648,7 +685,15 @@ impl TurnAccumulator {
                 self.text.push_str(&delta);
                 self.last_delta_ts = Some(posix::timestamp_rfc3339_utc());
                 tracer.emit_delta("text_delta", &delta);
-                self.write_stderr_delta(&delta, stderr_tracker);
+                match self.text_stream_mode {
+                    TextStreamMode::StderrIfAuto => {
+                        self.write_stderr_delta(&delta, stderr_tracker);
+                    }
+                    TextStreamMode::StdoutDirect => {
+                        self.write_stdout_delta(&delta, stderr_tracker);
+                    }
+                    TextStreamMode::BufferForReply => {}
+                }
                 false
             }
             ProviderEvent::ToolCall {
@@ -698,6 +743,20 @@ impl TurnAccumulator {
                 true
             }
         }
+    }
+
+    fn write_stdout_delta(&mut self, delta: &str, stderr_tracker: &StderrTracker) {
+        if delta.is_empty() {
+            return;
+        }
+        if !self.wrote_stdout_direct {
+            // Cleanly close any preceding dimmed reasoning stream on `fd 2` before streaming `fd 1`.
+            self.finish_stderr_stream(stderr_tracker);
+            self.wrote_stdout_direct = true;
+        }
+        let mut out = io::stdout().lock();
+        let _ = out.write_all(delta.as_bytes());
+        let _ = out.flush();
     }
 
     fn write_stderr_delta(&mut self, delta: &str, stderr_tracker: &StderrTracker) {
@@ -789,6 +848,7 @@ fn run_coprocess_attempt(
     cwd: &Path,
     stderr_mode: StderrMode,
     stream_to_stderr: bool,
+    text_stream_mode: TextStreamMode,
     signals: &SignalState,
     stderr_tracker: &StderrTracker,
     tracer: &mut Tracer,
@@ -908,7 +968,7 @@ fn run_coprocess_attempt(
 
     let timeout = Duration::from_secs(provider_cfg.timeout_sec.max(1));
     let deadline = started + timeout;
-    let mut acc = TurnAccumulator::new(stderr_mode, stream_to_stderr);
+    let mut acc = TurnAccumulator::new(stderr_mode, stream_to_stderr, text_stream_mode);
     let mut timed_out = false;
     let mut interrupted: Option<ExitCode> = None;
     let mut unexpected_eof = false;
@@ -1085,6 +1145,7 @@ fn run_oneshot_attempt(
     cwd: &Path,
     stderr_mode: StderrMode,
     stream_to_stderr: bool,
+    text_stream_mode: TextStreamMode,
     signals: &SignalState,
     stderr_tracker: &StderrTracker,
     tracer: &mut Tracer,
@@ -1183,7 +1244,7 @@ fn run_oneshot_attempt(
     let mut reader = BufferedStdoutReader::new(stdout_pipe);
     let timeout = Duration::from_secs(provider_cfg.timeout_sec.max(1));
     let deadline = started + timeout;
-    let mut acc = TurnAccumulator::new(stderr_mode, stream_to_stderr);
+    let mut acc = TurnAccumulator::new(stderr_mode, stream_to_stderr, text_stream_mode);
     let mut timed_out = false;
     let mut interrupted: Option<ExitCode> = None;
     let mut status_override: Option<io::Result<std::process::ExitStatus>> = None;

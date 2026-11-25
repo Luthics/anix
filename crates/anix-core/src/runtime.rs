@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 use std::fs::{self, File};
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -13,7 +13,7 @@ use anix_proto::ctl::CtlFrame;
 use anix_proto::exit_code::ExitCode;
 use anix_proto::hooks::{ContextWatermark, OnExitPayload, PostToolPayload};
 use anix_proto::ir::{
-    HeaderTag, IrHeader, IrMessage, IrMeta, IrStream, MediaAttachment, StderrMode,
+    HeaderTag, IrHeader, IrMessage, IrMeta, IrStream, MediaAttachment, OutputMode, StderrMode,
 };
 use anix_proto::provider::TokenUsage;
 use anix_proto::wal::{WalConfigSnapshot, WalEvent};
@@ -26,7 +26,7 @@ use crate::fd::{self, InboxQueue, StderrTracker};
 use crate::frontmatter::AgentScript;
 use crate::hooks;
 use crate::platform::{self, PreparedSandbox, posix};
-use crate::provider::{self, ProviderError, ProviderPool};
+use crate::provider::{self, ProviderError, ProviderPool, TextStreamMode};
 use crate::signal::{self, SignalState};
 use crate::trace::Tracer;
 use crate::vision::{self, VisionBridgeOutcome};
@@ -98,14 +98,17 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
     let _ = posix::ensure_dir_mode(&cfg.paths.runtime_dir, 0o700);
 
     // Prepare Linux Landlock sandbox policy BEFORE launching any `msh` tool calls (Section 10.2).
-    let sandbox: Option<PreparedSandbox> =
+    let sandbox: Option<PreparedSandbox> = if cfg.shell_enabled() {
         match platform::prepare_sandbox(cfg.sandbox, &cfg.paths.cwd, &cfg.paths.runtime_dir) {
             Ok(sb) => sb,
             Err(msg) => {
                 stderr_tracker.writeln_line(&format!("anix: {msg}"));
                 return ExitCode::RuntimeError;
             }
-        };
+        }
+    } else {
+        None
+    };
 
     let mut tracer = Tracer::init(&cfg.name, trace_file, &cfg.paths.journal_socket_path());
 
@@ -142,10 +145,19 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
     run_fields.insert("session_id".into(), Value::String(session_id.clone()));
     run_fields.insert("provider".into(), Value::String(cfg.provider.clone()));
     run_fields.insert("model".into(), Value::String(cfg.model.clone()));
+    run_fields.insert("shell".into(), Value::String(cfg.shell.clone()));
+    run_fields.insert("output".into(), Value::String(cfg.output.as_str().into()));
     run_fields.insert("vision".into(), Value::Bool(cfg.vision));
     run_fields.insert("fresh_session".into(), Value::Bool(replayed.is_fresh));
     run_fields.insert("inbox_mode".into(), Value::Bool(cfg.inbox.is_some()));
     tracer.emit_event("run_start", run_fields);
+
+    for warn in cfg.startup_warnings(&script.prompt) {
+        stderr_tracker.writeln_line(&format!("anix: warning: {warn}"));
+        let mut wf = Map::new();
+        wf.insert("message".into(), Value::String(warn));
+        tracer.emit_event("warning", wf);
+    }
 
     let mut state =
         match SessionState::init(cfg, script, session_id, replayed, &mut wal, &stderr_tracker) {
@@ -397,6 +409,8 @@ impl SessionState {
             let processed = match hooks::run_pre_context(
                 seed,
                 &cfg.paths,
+                cfg.output,
+                cfg.shell_enabled(),
                 cfg.stderr,
                 cfg.vision,
                 cfg.vision_bridge.bin.is_some(),
@@ -414,6 +428,8 @@ impl SessionState {
                 ts,
                 session_id: Some(session_id.clone()),
                 config: WalConfigSnapshot {
+                    output: Some(cfg.output),
+                    shell: Some(cfg.shell.clone()),
                     stderr: Some(cfg.stderr),
                     approval: Some(cfg.approval),
                     vision: Some(cfg.vision),
@@ -448,18 +464,52 @@ impl SessionState {
         }
 
         // Resumed WAL session: preserve frozen system prefix verbatim and emit trailing
-        // `runtime_update` ONLY if contract config (`stderr`, `approval`, or `vision`) drifted.
+        // `runtime_update` ONLY if contract config (`output`, `shell`, `stderr`, `approval`, or `vision`) drifted.
         let mut messages = replayed.messages;
         let mut next_turn_id = replayed.next_turn_id;
 
         if let Some(prev_cfg) = replayed.latest_config {
             let mut diffs = Vec::new();
+            // v1.2.0 compatibility: pre-v1.2 WALs without `output` ran under `output=explicit`.
+            let prev_output = prev_cfg.output.unwrap_or(OutputMode::Explicit);
+            if prev_output != cfg.output {
+                diffs.push(format!(
+                    "output contract switched to {}",
+                    match cfg.output {
+                        OutputMode::Reply => {
+                            "reply (your final text reply is delivered to stdout fd 1; $ANIX_OUT is NOT mounted)"
+                        }
+                        OutputMode::Explicit => {
+                            "explicit (write final deliverables via msh to $ANIX_OUT fd 1; normal text goes to stderr)"
+                        }
+                        OutputMode::None => {
+                            "none (stdout fd 1 is strictly silent; $ANIX_OUT is NOT mounted)"
+                        }
+                    }
+                ));
+            }
+            let prev_shell_enabled = prev_cfg
+                .shell
+                .as_deref()
+                .is_none_or(|s| !s.eq_ignore_ascii_case("none"));
+            if prev_shell_enabled != cfg.shell_enabled() {
+                if cfg.shell_enabled() {
+                    diffs.push(format!(
+                        "shell capability enabled (`{}`; `msh` tool is now available)",
+                        cfg.shell
+                    ));
+                } else {
+                    diffs.push("shell capability switched to none (no tools available)".into());
+                }
+            }
             if prev_cfg.stderr.is_some_and(|s| s != cfg.stderr) {
                 diffs.push(format!(
                     "stderr mode switched to {}",
                     match cfg.stderr {
-                        StderrMode::Auto => "auto (normal text shown on stderr; deliverables to $ANIX_OUT)",
-                        StderrMode::Explicit => "explicit (normal text invisible to humans; write human messages to $ANIX_ERR and deliverables to $ANIX_OUT)",
+                        StderrMode::Auto => "auto (intermediate/normal text shown on stderr)",
+                        StderrMode::Explicit => {
+                            "explicit (intermediate/normal text invisible to humans; write human messages to $ANIX_ERR)"
+                        }
                     }
                 ));
             }
@@ -480,6 +530,8 @@ impl SessionState {
                     ts,
                     content: content.clone(),
                     config: WalConfigSnapshot {
+                        output: Some(cfg.output),
+                        shell: Some(cfg.shell.clone()),
                         stderr: Some(cfg.stderr),
                         approval: Some(cfg.approval),
                         vision: Some(cfg.vision),
@@ -605,6 +657,8 @@ impl SessionState {
                 ts,
                 content: content.clone(),
                 config: WalConfigSnapshot {
+                    output: Some(cfg.output),
+                    shell: Some(cfg.shell.clone()),
                     stderr: Some(cfg.stderr),
                     approval: Some(cfg.approval),
                     vision: Some(cfg.vision),
@@ -1084,6 +1138,12 @@ fn run_inference_cycle(
         cycle_turns += 1;
         state.turns_executed += 1;
 
+        let text_stream_mode = match (cfg.output, cfg.shell_enabled()) {
+            (OutputMode::Reply, false) => TextStreamMode::StdoutDirect,
+            (OutputMode::Reply, true) => TextStreamMode::BufferForReply,
+            (OutputMode::Explicit | OutputMode::None, _) => TextStreamMode::StderrIfAuto,
+        };
+
         let response = match provider::invoke_provider(
             &provider_cfg,
             &cfg.model,
@@ -1092,6 +1152,7 @@ fn run_inference_cycle(
             &cfg.paths,
             cfg.stderr,
             true,
+            text_stream_mode,
             signals,
             provider_pool,
             stderr_tracker,
@@ -1156,11 +1217,49 @@ fn run_inference_cycle(
 
         // No tool calls => inference task finished!
         if response.tool_calls.is_empty() {
+            // v1.2.0 §4.1: Deliver final reply to `fd 1` under `output=reply`; append trailing `\n`
+            // ONLY when `isatty(1)` is true and text is non-empty without a trailing newline.
+            match text_stream_mode {
+                TextStreamMode::BufferForReply => {
+                    if cfg.stderr == StderrMode::Auto {
+                        stderr_tracker.ensure_newline();
+                    }
+                    let mut out = io::stdout().lock();
+                    let _ = out.write_all(response.text.as_bytes());
+                    if posix::isatty(1)
+                        && !response.text.is_empty()
+                        && !response.text.ends_with('\n')
+                    {
+                        let _ = out.write_all(b"\n");
+                    }
+                    let _ = out.flush();
+                }
+                TextStreamMode::StdoutDirect => {
+                    if posix::isatty(1)
+                        && !response.text.is_empty()
+                        && !response.text.ends_with('\n')
+                    {
+                        let mut out = io::stdout().lock();
+                        let _ = out.write_all(b"\n");
+                        let _ = out.flush();
+                    }
+                }
+                TextStreamMode::StderrIfAuto => {}
+            }
             return CycleOutcome {
                 exit_code: ExitCode::Success,
                 reason: CycleEndReason::Completed,
                 turns: cycle_turns,
             };
+        }
+
+        // Intermediate commentary on a tool-calling turn in `output=reply` goes to `fd 2`
+        // (never `fd 1`), preserving a strictly clean stdout stream.
+        if text_stream_mode == TextStreamMode::BufferForReply
+            && cfg.stderr == StderrMode::Auto
+            && !response.text.is_empty()
+        {
+            stderr_tracker.writeln_dim_if_tty(&response.text);
         }
 
         // Execute each tool call sequentially; handle `aclr` folds and `vision` policies safely.
@@ -1176,6 +1275,31 @@ fn run_inference_cycle(
 
             if folded_this_turn {
                 break;
+            }
+
+            if !cfg.shell_enabled() {
+                let tid = state.alloc_turn_id();
+                let tool_msg = IrMessage::Tool {
+                    turn_id: tid,
+                    tool_call_id: tc.id.clone(),
+                    is_error: true,
+                    text: format!(
+                        "[t{tid}] exit=2\nError: tool `{}` is unavailable because shell=none",
+                        tc.name
+                    ),
+                    media: Vec::new(),
+                    extra: BTreeMap::new(),
+                };
+                if let Err(err) = wal.append_message(&tool_msg) {
+                    stderr_tracker.writeln_line(&format!("anix: {err}"));
+                    return CycleOutcome {
+                        exit_code: err.exit_code(),
+                        reason: CycleEndReason::Error,
+                        turns: cycle_turns,
+                    };
+                }
+                state.messages.push(tool_msg);
+                continue;
             }
 
             if tc.name != "msh" {
@@ -1321,6 +1445,7 @@ fn run_inference_cycle(
             tracer.emit_event("tool_start", start_fields);
 
             let jobs_dir = cfg.paths.jobs_dir();
+            let mount_anix_out = cfg.output == OutputMode::Explicit;
             let msh_out = match fd::run_msh_command(
                 &shell_bin,
                 &tools_dir,
@@ -1329,6 +1454,7 @@ fn run_inference_cycle(
                 effective_timeout_sec,
                 kill_on_timeout,
                 &jobs_dir,
+                mount_anix_out,
                 cfg.approval,
                 sandbox,
                 signals,
@@ -1682,10 +1808,15 @@ fn make_ir_header(cfg: &ResolvedConfig) -> IrHeader {
     IrHeader {
         ir_version: IR_VERSION,
         record_type: HeaderTag::Header,
-        tools: vec![IrStream::msh_tool_def()],
+        tools: if cfg.shell_enabled() {
+            vec![IrStream::msh_tool_def()]
+        } else {
+            Vec::new()
+        },
         max_output_tokens: cfg.max_output_tokens,
         params: cfg.params.clone(),
         meta: IrMeta {
+            output_mode: Some(cfg.output),
             stderr_mode: cfg.stderr,
             cwd: cfg.paths.cwd.display().to_string(),
             turn_budget: Some(cfg.max_turns),

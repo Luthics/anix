@@ -8,6 +8,7 @@ max_turns: 100
 max_tokens: 256000
 compact_threshold: 0.8
 approval: auto
+output: reply
 stderr: auto
 ---
 你是 Bash 专家，响应用户的指令

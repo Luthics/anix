@@ -7,14 +7,15 @@ use std::fs;
 use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
 
-use anix_proto::ir::{ApprovalMode, StderrMode};
+use anix_proto::ir::{ApprovalMode, OutputMode, StderrMode};
 use anix_proto::provider::ProviderMode;
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::cli::{ApprovalArg, Cli, StderrArg};
+use crate::cli::{ApprovalArg, Cli, OutputArg, StderrArg};
 use crate::frontmatter::{
-    AgentScript, CompactThreshold, parse_approval_mode, parse_stderr_mode, validate_agent_name,
+    AgentScript, CompactThreshold, parse_approval_mode, parse_output_mode, parse_stderr_mode,
+    validate_agent_name,
 };
 use crate::platform::{SandboxPolicy, posix};
 
@@ -245,6 +246,7 @@ pub struct RawDefaults {
     pub max_output_tokens: Option<u32>,
     pub compact_threshold: Option<toml::Value>,
     pub approval: Option<String>,
+    pub output: Option<String>,
     pub stderr: Option<String>,
     pub msh_timeout_sec: Option<u64>,
     pub max_msh_timeout_sec: Option<u64>,
@@ -433,6 +435,7 @@ pub struct ResolvedConfig {
     pub approval_decider: ApprovalDeciderConfig,
     pub vision_bridge: VisionBridgeConfig,
     pub fail_on_deny: bool,
+    pub output: OutputMode,
     pub stderr: StderrMode,
     pub trace_fd: Option<RawFd>,
     pub context: Option<PathBuf>,
@@ -640,6 +643,7 @@ impl ResolvedConfig {
         };
 
         let approval = resolve_approval(cli, fm.approval, &project.defaults, &global.defaults)?;
+        let output = resolve_output(cli, fm.output, &project.defaults, &global.defaults)?;
         let stderr = resolve_stderr(cli, fm.stderr, &project.defaults, &global.defaults)?;
         let active_provider_vision = providers.get(&provider).and_then(|p| p.vision);
         let vision = resolve_vision(
@@ -688,6 +692,33 @@ impl ResolvedConfig {
 
         let sandbox = resolve_sandbox(cli.sandbox.as_deref(), &project.sandbox, &global.sandbox)?;
 
+        // v1.2.0 §3.4: Startup Fail-Fast validation across all merged configuration layers
+        // BEFORE WAL `session_init` is ever written (invalid combinations exit 2).
+        let shell_enabled = !shell.eq_ignore_ascii_case("none");
+        if output == OutputMode::Explicit {
+            if !shell_enabled {
+                return Err(ConfigError::Invalid(
+                    "output=explicit requires an executable shell (cannot combine with shell=none)"
+                        .into(),
+                ));
+            }
+            if approval == ApprovalMode::Deny {
+                return Err(ConfigError::Invalid(
+                    "output=explicit cannot be combined with approval=deny (shell execution is required to write $ANIX_OUT)".into(),
+                ));
+            }
+        }
+        if shell_enabled {
+            let base_dir = paths.project_agent_dir.as_deref().and_then(|d| d.parent());
+            let resolved_shell = paths.resolve_component_bin(&shell, base_dir);
+            if !posix::is_executable_file(&resolved_shell) {
+                return Err(ConfigError::Invalid(format!(
+                    "shell executable `{shell}` not found or not executable (resolved `{}`)",
+                    resolved_shell.display()
+                )));
+            }
+        }
+
         Ok(Self {
             paths,
             name,
@@ -704,6 +735,7 @@ impl ResolvedConfig {
             approval_decider,
             vision_bridge,
             fail_on_deny: cli.fail_on_deny,
+            output,
             stderr,
             trace_fd,
             context,
@@ -721,6 +753,36 @@ impl ResolvedConfig {
 
     pub fn active_provider(&self) -> Option<&ProviderConfig> {
         self.providers.get(&self.provider)
+    }
+
+    pub fn shell_enabled(&self) -> bool {
+        !self.shell.eq_ignore_ascii_case("none")
+    }
+
+    /// Non-blocking startup diagnostics for suspicious/migrating v1.2.0 combinations.
+    pub fn startup_warnings(&self, prompt: &str) -> Vec<String> {
+        let mut warnings = Vec::new();
+        if self.output == OutputMode::Reply
+            && self.shell_enabled()
+            && self.approval == ApprovalMode::Deny
+        {
+            warnings.push(
+                "output=reply with shell enabled and approval=deny blocks shell commands; consider `shell: none` for pure-text agents".into(),
+            );
+        }
+        if self.output == OutputMode::None && !self.shell_enabled() {
+            warnings.push(
+                "output=none with shell=none produces neither stdout output nor shell side effects"
+                    .into(),
+            );
+        }
+        if self.output != OutputMode::Explicit && prompt.contains("ANIX_OUT") {
+            warnings.push(format!(
+                "script prompt references ANIX_OUT while output={}; $ANIX_OUT is only mounted when output=explicit (pass `-o explicit` or remove ANIX_OUT from prompt)",
+                self.output.as_str()
+            ));
+        }
+        warnings
     }
 
     pub fn effective_compact_threshold(&self) -> Option<u64> {
@@ -1026,6 +1088,34 @@ fn resolve_approval(
         return parse_approval_mode(raw).map_err(ConfigError::Invalid);
     }
     Ok(ApprovalMode::Ask)
+}
+
+fn resolve_output(
+    cli: &Cli,
+    fm: Option<OutputMode>,
+    project: &RawDefaults,
+    global: &RawDefaults,
+) -> Result<OutputMode, ConfigError> {
+    if let Some(arg) = cli.output {
+        return Ok(match arg {
+            OutputArg::Reply => OutputMode::Reply,
+            OutputArg::Explicit => OutputMode::Explicit,
+            OutputArg::None => OutputMode::None,
+        });
+    }
+    if let Some(raw) = env_non_empty("ANIX_OUTPUT") {
+        return parse_output_mode(&raw).map_err(ConfigError::Invalid);
+    }
+    if let Some(m) = fm {
+        return Ok(m);
+    }
+    if let Some(ref raw) = project.output {
+        return parse_output_mode(raw).map_err(ConfigError::Invalid);
+    }
+    if let Some(ref raw) = global.output {
+        return parse_output_mode(raw).map_err(ConfigError::Invalid);
+    }
+    Ok(OutputMode::Reply)
 }
 
 fn resolve_stderr(

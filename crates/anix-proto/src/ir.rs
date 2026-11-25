@@ -21,6 +21,29 @@ pub enum StderrMode {
     Explicit,
 }
 
+/// Static single-writer contract for external `fd 1` (`stdout`) (v1.2.0 §§3.3 & 4.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum OutputMode {
+    /// Only the final turn's assistant text (when no `tool_calls` follow) goes to `fd 1`.
+    #[default]
+    Reply,
+    /// Only raw bytes explicitly written via `$ANIX_OUT` (`fd 4`) go to `fd 1`.
+    Explicit,
+    /// `fd 1` is never written (0 bytes); deliverables are side effects (e.g. file edits).
+    None,
+}
+
+impl OutputMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Reply => "reply",
+            Self::Explicit => "explicit",
+            Self::None => "none",
+        }
+    }
+}
+
 /// Interactive approval policy (Section 3.3 / 5.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -43,6 +66,8 @@ pub struct ToolDef {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IrMeta {
     pub stderr_mode: StderrMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_mode: Option<OutputMode>,
     pub cwd: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_budget: Option<u32>,
@@ -331,11 +356,11 @@ impl IrStream {
         Ok(())
     }
 
-    /// Return the default `msh` tool definition (v1.1.2 §§7.1.5 & 9.1).
+    /// Return the default `msh` tool definition (v1.2.0 §§7.1.5 & 9.1).
     pub fn msh_tool_def() -> ToolDef {
         ToolDef {
             name: "msh".into(),
-            description: "Execute a non-interactive shell command. If it exceeds timeout_sec, it automatically yields to background (unless kill_on_timeout=true) and returns pid/pgid/log path; set timeout_sec=0 to start in background immediately. Redirect final deliverables to $ANIX_OUT and human-facing messages to $ANIX_ERR.".into(),
+            description: "Execute a non-interactive shell command. If it exceeds timeout_sec, it automatically yields to background (unless kill_on_timeout=true) and returns pid/pgid/log path; set timeout_sec=0 to start in background immediately. Follow the <posix_runtime> contract for output delivery and $ANIX_ERR.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -377,6 +402,7 @@ mod tests {
                 max_output_tokens: Some(16384),
                 params: BTreeMap::from([("reasoning_effort".into(), Value::String("high".into()))]),
                 meta: IrMeta {
+                    output_mode: Some(OutputMode::Reply),
                     stderr_mode: StderrMode::Auto,
                     cwd: "/tmp".into(),
                     turn_budget: Some(20),

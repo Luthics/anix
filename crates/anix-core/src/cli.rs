@@ -21,6 +21,13 @@ pub enum StderrArg {
     Explicit,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum OutputArg {
+    Reply,
+    Explicit,
+    None,
+}
+
 #[derive(Debug, Parser)]
 #[command(
     name = "anix",
@@ -49,6 +56,10 @@ pub struct Cli {
 
     #[arg(long = "shell")]
     pub shell: Option<String>,
+
+    /// Static `fd 1` (`stdout`) delivery contract: `reply` (default), `explicit` (`$ANIX_OUT`), or `none` (v1.2.0).
+    #[arg(short = 'o', long = "output", value_enum)]
+    pub output: Option<OutputArg>,
 
     /// Explicitly declare that the active model supports native vision (`vision=true`).
     #[arg(long = "vision", overrides_with = "no_vision")]

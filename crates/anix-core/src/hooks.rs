@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use anix_proto::exit_code::ExitCode;
 use anix_proto::hooks::{OnExitPayload, PostToolPayload};
-use anix_proto::ir::{IrMessage, IrStream, StderrMode};
+use anix_proto::ir::{IrMessage, IrStream, OutputMode, StderrMode};
 use serde_json::{Map, Value};
 use serde_yaml_ng::Value as YamlValue;
 use thiserror::Error;
@@ -80,6 +80,8 @@ enum HookEntry {
 pub fn run_pre_context(
     mut stream: IrStream,
     paths: &AgentPaths,
+    output_mode: OutputMode,
+    shell_enabled: bool,
     stderr_mode: StderrMode,
     vision_enabled: bool,
     has_vision_bridge: bool,
@@ -92,16 +94,22 @@ pub fn run_pre_context(
             HookEntry::BuiltinPosixRuntime => {
                 apply_builtin_posix_runtime(
                     &mut stream,
+                    output_mode,
+                    shell_enabled,
                     stderr_mode,
                     vision_enabled,
                     has_vision_bridge,
                 );
             }
             HookEntry::BuiltinSkills => {
-                apply_builtin_skills(&mut stream, paths);
+                if shell_enabled {
+                    apply_builtin_skills(&mut stream, paths);
+                }
             }
             HookEntry::BuiltinTips => {
-                apply_builtin_tips(&mut stream, paths);
+                if shell_enabled {
+                    apply_builtin_tips(&mut stream, paths);
+                }
             }
             HookEntry::External { path, from_project } => {
                 if from_project {
@@ -223,9 +231,11 @@ fn scan_hook_dir(dir: &Path, from_project: bool, map: &mut BTreeMap<String, Hook
     }
 }
 
-/// Built-in `00-posix-runtime`: deterministically inject POSIX I/O and vision contract (v1.1 §4.4).
+/// Built-in `00-posix-runtime`: deterministically inject POSIX I/O, output contract, and vision contract (v1.2.0 §4.4).
 fn apply_builtin_posix_runtime(
     stream: &mut IrStream,
+    output_mode: OutputMode,
+    shell_enabled: bool,
     stderr_mode: StderrMode,
     vision_enabled: bool,
     has_vision_bridge: bool,
@@ -238,27 +248,82 @@ fn apply_builtin_posix_runtime(
         "- Current model does NOT support native vision (`vision=false`). Do NOT use `aview` for native image viewing; use text tools (e.g. OCR, `pdftotext`) or delegate to a vision-capable sub-agent (e.g. `vision.agent`)."
     };
 
-    let contract = match stderr_mode {
-        StderrMode::Auto => format!(
+    let contract = match (output_mode, shell_enabled, stderr_mode) {
+        (OutputMode::Reply, false, _) => "\
+<posix_runtime>
+You are running inside the Anix POSIX runtime (`output=reply`, `shell=none`, pure-text mode).
+- No shell or tools are available.
+- Your response text is streamed directly to `stdout` (`fd 1`) as the final deliverable. Output only the deliverable requested by your instructions without extraneous preamble.
+</posix_runtime>"
+            .to_owned(),
+        (OutputMode::Reply, true, StderrMode::Auto) => format!(
             "\
 <posix_runtime>
-You are running inside the Anix POSIX runtime (`stderr=auto`).
+You are running inside the Anix POSIX runtime (`output=reply`, `stderr=auto`).
+- Your FINAL text reply (after all `msh` tool calls finish) is delivered directly to `stdout` (`fd 1`). Intermediate commentary during tool-calling turns goes to `stderr` (`fd 2`).
+- `$ANIX_OUT` is NOT mounted in `output=reply` mode; do NOT write to `$ANIX_OUT`.
+- You may write progress notes or warnings during shell execution to `$ANIX_ERR` (`fd 2`, write-only pipe: redirect into it, never read it).
+{vision_line}
+- Use `aclr -t <turn_id> [\"<summary>\"]` to fold dead-end tail turns while preserving KV-cache prefix (omitting summary auto-summarizes), or `aclr -s` for full compaction.
+</posix_runtime>"
+        ),
+        (OutputMode::Reply, true, StderrMode::Explicit) => format!(
+            "\
+<posix_runtime>
+You are running inside the Anix POSIX runtime (`output=reply`, `stderr=explicit`).
+- Your FINAL text reply (after all `msh` tool calls finish) is delivered directly to `stdout` (`fd 1`). Intermediate text during tool-calling turns is hidden from humans.
+- `$ANIX_OUT` is NOT mounted in `output=reply` mode; do NOT write to `$ANIX_OUT`.
+- Any progress note or warning intended for humans during shell execution MUST be explicitly written via `msh` to `$ANIX_ERR` (`fd 2`, write-only pipe: redirect into it, never read it).
+{vision_line}
+- Use `aclr -t <turn_id> [\"<summary>\"]` to fold dead-end tail turns while preserving KV-cache prefix (omitting summary auto-summarizes), or `aclr -s` for full compaction.
+</posix_runtime>"
+        ),
+        (OutputMode::Explicit, _, StderrMode::Auto) => format!(
+            "\
+<posix_runtime>
+You are running inside the Anix POSIX runtime (`output=explicit`, `stderr=auto`).
 - Your normal text replies are streamed to `stderr` for human observation.
-- Final deliverable payload MUST be written via the `msh` tool to `$ANIX_OUT` (stdout, `fd 1`). Never rely on normal prose for structured deliverables.
+- Final deliverable payload MUST be written via the `msh` tool to `$ANIX_OUT` (`stdout`, `fd 1`). Never rely on normal prose for structured deliverables.
 - You may write progress notes or warnings during shell execution to `$ANIX_ERR` (`fd 2`).
 - `$ANIX_OUT` and `$ANIX_ERR` are write-only anonymous pipes: redirect into them (e.g. `> \"$ANIX_OUT\"`), NEVER read, `cat`, `wc`, `head`, or inspect them (reading fails with Permission denied or blocks until timeout).
 {vision_line}
 - Use `aclr -t <turn_id> [\"<summary>\"]` to fold dead-end tail turns while preserving KV-cache prefix (omitting summary auto-summarizes), or `aclr -s` for full compaction.
 </posix_runtime>"
         ),
-        StderrMode::Explicit => format!(
+        (OutputMode::Explicit, _, StderrMode::Explicit) => format!(
             "\
 <posix_runtime>
-You are running inside the Anix POSIX runtime (`stderr=explicit`).
+You are running inside the Anix POSIX runtime (`output=explicit`, `stderr=explicit`).
 - Your normal text replies are internal thoughts ONLY and are COMPLETELY INVISIBLE to humans (recorded to structured Trace only when enabled).
 - Any message, status, or warning intended for humans MUST be explicitly written via `msh` to `$ANIX_ERR` (`fd 2`).
-- Final deliverable payload MUST be written via `msh` to `$ANIX_OUT` (stdout, `fd 1`).
+- Final deliverable payload MUST be written via `msh` to `$ANIX_OUT` (`stdout`, `fd 1`).
 - `$ANIX_OUT` and `$ANIX_ERR` are write-only anonymous pipes: redirect into them (e.g. `> \"$ANIX_OUT\"`), NEVER read, `cat`, `wc`, `head`, or inspect them (reading fails with Permission denied or blocks until timeout).
+{vision_line}
+- Use `aclr -t <turn_id> [\"<summary>\"]` to fold dead-end tail turns while preserving KV-cache prefix (omitting summary auto-summarizes), or `aclr -s` for full compaction.
+</posix_runtime>"
+        ),
+        (OutputMode::None, false, _) => "\
+<posix_runtime>
+You are running inside the Anix POSIX runtime (`output=none`, `shell=none`).
+- `stdout` (`fd 1`) is disabled (0 bytes); no tools are available.
+</posix_runtime>"
+            .to_owned(),
+        (OutputMode::None, true, StderrMode::Auto) => format!(
+            "\
+<posix_runtime>
+You are running inside the Anix POSIX runtime (`output=none`, `stderr=auto`).
+- `stdout` (`fd 1`) is strictly silent and `$ANIX_OUT` is NOT mounted. Deliver results via side effects (e.g. editing files) using `msh`.
+- Your normal text replies and `$ANIX_ERR` writes go to `stderr` (`fd 2`) for human observation (`$ANIX_ERR` is a write-only pipe: redirect into it, never read it).
+{vision_line}
+- Use `aclr -t <turn_id> [\"<summary>\"]` to fold dead-end tail turns while preserving KV-cache prefix (omitting summary auto-summarizes), or `aclr -s` for full compaction.
+</posix_runtime>"
+        ),
+        (OutputMode::None, true, StderrMode::Explicit) => format!(
+            "\
+<posix_runtime>
+You are running inside the Anix POSIX runtime (`output=none`, `stderr=explicit`).
+- `stdout` (`fd 1`) is strictly silent and `$ANIX_OUT` is NOT mounted. Deliver results via side effects (e.g. editing files) using `msh`.
+- Your normal text replies are invisible to humans; write any human-facing status or warnings explicitly via `msh` to `$ANIX_ERR` (`fd 2`, write-only pipe: redirect into it, never read it).
 {vision_line}
 - Use `aclr -t <turn_id> [\"<summary>\"]` to fold dead-end tail turns while preserving KV-cache prefix (omitting summary auto-summarizes), or `aclr -s` for full compaction.
 </posix_runtime>"

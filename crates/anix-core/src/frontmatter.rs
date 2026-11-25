@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use anix_proto::ir::{ApprovalMode, StderrMode};
+use anix_proto::ir::{ApprovalMode, OutputMode, StderrMode};
 use serde_json::Value as JsonValue;
 use serde_yaml_ng::Value as YamlValue;
 use thiserror::Error;
@@ -83,6 +83,7 @@ pub struct AgentFrontmatter {
     pub max_output_tokens: Option<u32>,
     pub compact_threshold: Option<CompactThreshold>,
     pub approval: Option<ApprovalMode>,
+    pub output: Option<OutputMode>,
     pub stderr: Option<StderrMode>,
     pub context: Option<String>,
     pub params: BTreeMap<String, JsonValue>,
@@ -269,6 +270,15 @@ fn parse_yaml_frontmatter(yaml_block: &str) -> Result<AgentFrontmatter, Frontmat
                     }
                 })?);
             }
+            "output" => {
+                let s = expect_string("output", v)?;
+                fm.output = Some(parse_output_mode(&s).map_err(|reason| {
+                    FrontmatterError::InvalidValue {
+                        field: "output",
+                        reason,
+                    }
+                })?);
+            }
             "stderr" => {
                 let s = expect_string("stderr", v)?;
                 fm.stderr = Some(parse_stderr_mode(&s).map_err(|reason| {
@@ -334,6 +344,17 @@ pub fn parse_stderr_mode(raw: &str) -> Result<StderrMode, String> {
         "auto" => Ok(StderrMode::Auto),
         "explicit" => Ok(StderrMode::Explicit),
         other => Err(format!("expected `auto` or `explicit`, got `{other}`")),
+    }
+}
+
+pub fn parse_output_mode(raw: &str) -> Result<OutputMode, String> {
+    match raw.trim() {
+        "reply" => Ok(OutputMode::Reply),
+        "explicit" => Ok(OutputMode::Explicit),
+        "none" => Ok(OutputMode::None),
+        other => Err(format!(
+            "expected `reply`, `explicit`, or `none`, got `{other}`"
+        )),
     }
 }
 

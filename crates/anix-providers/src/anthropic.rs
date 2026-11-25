@@ -927,6 +927,7 @@ mod tests {
             max_output_tokens: None,
             params: BTreeMap::new(),
             meta: IrMeta {
+                output_mode: None,
                 stderr_mode: StderrMode::Auto,
                 cwd: "/tmp".into(),
                 turn_budget: None,

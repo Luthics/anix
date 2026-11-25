@@ -1,6 +1,6 @@
 # Anix (POSIX-Native Agent Runtime)
 
-POSIX-native Agent runtime (`ir_version = 1`, v1.1.2 spec in [docs/v1.1.2-RFC.md](docs/v1.1.2-RFC.md)) built in Rust as independent static binaries with zero external runtime dependencies.
+POSIX-native Agent runtime (`ir_version = 1`, v1.2.0 spec in [docs/v1.2.0-RFC.md](docs/v1.2.0-RFC.md)) built in Rust as independent static binaries with zero external runtime dependencies.
 
 ## Quick Install
 

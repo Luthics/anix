@@ -143,6 +143,7 @@ fn sample_ir_jsonl() -> String {
             max_output_tokens: Some(512),
             params: BTreeMap::from([("temperature".into(), json!(0.1))]),
             meta: IrMeta {
+                output_mode: None,
                 stderr_mode: StderrMode::Auto,
                 cwd: "/tmp".into(),
                 turn_budget: Some(5),
@@ -616,6 +617,7 @@ fn http_400_image_rejection_maps_to_unsupported_media_non_retryable() {
             max_output_tokens: None,
             params: BTreeMap::new(),
             meta: IrMeta {
+                output_mode: None,
                 stderr_mode: StderrMode::Auto,
                 cwd: "/tmp".into(),
                 turn_budget: None,
@@ -670,6 +672,7 @@ fn session_affinity_headers_and_body_mapping_across_all_dialects() {
                 max_output_tokens: Some(128),
                 params,
                 meta: IrMeta {
+                    output_mode: None,
                     stderr_mode: StderrMode::Auto,
                     cwd: "/tmp".into(),
                     turn_budget: None,
