@@ -114,6 +114,7 @@ pub struct CompactionOutcome {
 pub fn run_full_compaction(
     cfg: &ResolvedConfig,
     script_prompt: &str,
+    session_id: &str,
     current_messages: &[IrMessage],
     next_turn_id: u64,
     session_usage_before_compact: TokenUsage,
@@ -138,6 +139,7 @@ pub fn run_full_compaction(
     } else {
         run_builtin_compactor(
             cfg,
+            session_id,
             compact_ir,
             None,
             signals,
@@ -209,6 +211,7 @@ pub fn run_full_compaction(
         ir_version: IR_VERSION,
         turn_id: checkpoint_turn,
         ts,
+        session_id: Some(session_id.to_owned()),
         config: WalConfigSnapshot {
             stderr: Some(cfg.stderr),
             approval: Some(cfg.approval),
@@ -248,6 +251,7 @@ pub fn run_full_compaction(
 /// (omitted summary) using `[compact]` precedence without touching frozen prefix turns (v1.1 §6.1).
 pub fn summarize_tail_fold(
     cfg: &ResolvedConfig,
+    session_id: &str,
     tail_messages: &[IrMessage],
     signals: &SignalState,
     provider_pool: &mut ProviderPool,
@@ -270,6 +274,7 @@ pub fn summarize_tail_fold(
     } else {
         run_builtin_compactor(
             cfg,
+            session_id,
             sub_ir,
             Some(DEFAULT_FOLD_PROMPT),
             signals,
@@ -409,6 +414,7 @@ fn run_external_compactor(
 #[allow(clippy::too_many_arguments)]
 fn run_builtin_compactor(
     cfg: &ResolvedConfig,
+    session_id: &str,
     mut compact_ir: IrStream,
     override_default_prompt: Option<&str>,
     signals: &SignalState,
@@ -461,6 +467,7 @@ fn run_builtin_compactor(
     let res = provider::invoke_provider(
         provider_cfg,
         model,
+        session_id,
         &compact_ir,
         &cfg.paths,
         cfg.stderr,

@@ -34,6 +34,8 @@ pub enum WalEvent {
     SessionInit {
         ir_version: u32,
         ts: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
         config: WalConfigSnapshot,
     },
     Message {
@@ -75,6 +77,8 @@ pub enum WalEvent {
         ir_version: u32,
         turn_id: u64,
         ts: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
         config: WalConfigSnapshot,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         compact_usage: Option<TokenUsage>,
@@ -98,6 +102,7 @@ mod tests {
         let init = WalEvent::SessionInit {
             ir_version: IR_VERSION,
             ts: "2026-11-24T12:00:00Z".into(),
+            session_id: Some("550e8400-e29b-41d4-a716-446655440000".into()),
             config: WalConfigSnapshot {
                 stderr: Some(StderrMode::Auto),
                 approval: Some(ApprovalMode::Ask),
@@ -106,7 +111,19 @@ mod tests {
         };
         let raw = serde_json::to_string(&init).expect("serialize wal init");
         assert!(raw.contains("\"type\":\"session_init\""));
+        assert!(raw.contains("\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\""));
         let parsed: WalEvent = serde_json::from_str(&raw).expect("deserialize wal init");
         assert_eq!(parsed, init);
+
+        // Legacy v1.0 / v1.1.0 WAL without `session_id` must still deserialize cleanly.
+        let legacy = r#"{"ir_version":1,"type":"session_init","ts":"2026-11-24T12:00:00Z","config":{"stderr":"auto"}}"#;
+        let parsed_legacy: WalEvent = serde_json::from_str(legacy).expect("deserialize legacy");
+        assert!(matches!(
+            parsed_legacy,
+            WalEvent::SessionInit {
+                session_id: None,
+                ..
+            }
+        ));
     }
 }

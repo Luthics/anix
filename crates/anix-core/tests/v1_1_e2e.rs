@@ -799,3 +799,226 @@ done
 
     let _ = fs::remove_dir_all(&root);
 }
+
+#[test]
+fn test_v1_1_1_session_id_persists_across_wal_resume_checkpoint_and_isolates_msh() {
+    let root = make_temp_env("session-id");
+    let home = setup_fhs_home(&root);
+    let workdir = root.join("work");
+    fs::create_dir_all(&workdir).unwrap();
+
+    let sid_log = root.join("provider_sids.jsonl");
+    let state_file = root.join("turn_counter.txt");
+    let wal_path = root.join("session.ctx.jsonl");
+    let trace1_path = root.join("trace1.jsonl");
+    let trace2_path = root.join("trace2.jsonl");
+
+    // Persistent coprocess mock provider:
+    // - Records ANIX_SESSION_ID env and each request's `envelope.session_id`
+    // - Turn 1: calls `msh` to check that `ANIX_SESSION_ID` is unset inside msh AND triggers `aclr -s`
+    // - Turn 2 (built-in compactor, `tools: []`): returns compact summary
+    // - Turn 3: finishes Run 1
+    // - Turn 4 (Run 2 after WAL resume): finishes Run 2
+    let mock_provider = root.join("mock-session-provider");
+    write_exec(
+        &mock_provider,
+        &format!(
+            r#"#!/usr/bin/env python3
+import json, os, sys
+
+sid_log = {sid_log:?}
+state_file = {state_file:?}
+env_sid = os.environ.get("ANIX_SESSION_ID", "")
+
+def next_count():
+    n = int(open(state_file).read().strip()) if os.path.exists(state_file) else 0
+    n += 1
+    open(state_file, "w").write(str(n))
+    return n
+
+for raw in sys.stdin:
+    line = raw.strip()
+    if not line:
+        continue
+    req = json.loads(line)
+    n = next_count()
+    with open(sid_log, "a") as f:
+        f.write(json.dumps({{
+            "n": n,
+            "env_sid": env_sid,
+            "req_sid": req.get("session_id"),
+            "tools_len": len(req["header"]["tools"]),
+        }}) + "\n")
+    if n == 1:
+        # Verify ANIX_SESSION_ID is stripped from msh env and trigger full compaction via `aclr -s`.
+        cmd = 'printf "msh_sid=%s\\n" "${{ANIX_SESSION_ID:-UNSET}}" > "$ANIX_OUT"; printf \'{{"op":"compact"}}\\n\' > "$ANIX_CTL"'
+        print(json.dumps({{"type": "tool_call", "id": "call_s1", "name": "msh", "arguments": {{"cmd": cmd}}}}), flush=True)
+        print(json.dumps({{"type": "usage", "input_tokens": 50, "output_tokens": 10}}), flush=True)
+        print(json.dumps({{"type": "done", "finish_reason": "tool_calls"}}), flush=True)
+    elif n == 2:
+        print(json.dumps({{"type": "text_delta", "text": "Compacted checkpoint summary"}}), flush=True)
+        print(json.dumps({{"type": "usage", "input_tokens": 80, "output_tokens": 15}}), flush=True)
+        print(json.dumps({{"type": "done", "finish_reason": "stop"}}), flush=True)
+    else:
+        print(json.dumps({{"type": "text_delta", "text": f"reply-{{n}}"}}), flush=True)
+        print(json.dumps({{"type": "usage", "input_tokens": 40, "output_tokens": 8}}), flush=True)
+        print(json.dumps({{"type": "done", "finish_reason": "stop"}}), flush=True)
+"#,
+            sid_log = sid_log.display().to_string(),
+            state_file = state_file.display().to_string(),
+        ),
+    );
+
+    let global_cfg_dir = home.join(".config/anix");
+    fs::create_dir_all(&global_cfg_dir).unwrap();
+    fs::write(
+        global_cfg_dir.join("config.toml"),
+        format!(
+            r#"[defaults]
+provider = "mock"
+model = "mock-model"
+approval = "auto"
+
+[providers.mock]
+bin = "{}"
+mode = "coprocess"
+base_url = "http://127.0.0.1:1/v1"
+api_key_env = ""
+timeout_sec = 30
+"#,
+            mock_provider.display()
+        ),
+    )
+    .unwrap();
+
+    let script = workdir.join("sess.anix");
+    write_exec(
+        &script,
+        "#!/usr/bin/env anix\n---\nname: sess-test\n---\nSession test prompt\n",
+    );
+
+    // Run 1: fresh WAL -> tool call (aclr -s) -> built-in compaction (writes checkpoint) -> final turn.
+    let tf1 = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&trace1_path)
+        .unwrap();
+    let mut cmd1 = base_cmd(&home, &workdir);
+    cmd1.args([
+        "-c",
+        &wal_path.display().to_string(),
+        "--trace-fd=7",
+        &script.display().to_string(),
+        "turn 1",
+    ])
+    .env("ANIX_TRACE_LEVEL", "events")
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+    configure_child_fds(&mut cmd1, Some((&tf1, 7)));
+    let out1 = cmd1.output().expect("run 1");
+    drop(tf1);
+    assert_eq!(
+        out1.status.code(),
+        Some(0),
+        "run1 stderr={}",
+        String::from_utf8_lossy(&out1.stderr)
+    );
+    // msh must NOT inherit ANIX_SESSION_ID.
+    assert_eq!(String::from_utf8_lossy(&out1.stdout), "msh_sid=UNSET\n");
+
+    // Run 2: resume the SAME WAL after checkpoint in a brand-new `anix` process.
+    let tf2 = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&trace2_path)
+        .unwrap();
+    let mut cmd2 = base_cmd(&home, &workdir);
+    cmd2.args([
+        "-c",
+        &wal_path.display().to_string(),
+        "--trace-fd=7",
+        &script.display().to_string(),
+        "turn 2",
+    ])
+    .env("ANIX_TRACE_LEVEL", "events")
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+    configure_child_fds(&mut cmd2, Some((&tf2, 7)));
+    let out2 = cmd2.output().expect("run 2");
+    drop(tf2);
+    assert_eq!(
+        out2.status.code(),
+        Some(0),
+        "run2 stderr={}",
+        String::from_utf8_lossy(&out2.stderr)
+    );
+
+    // 1. Verify Trace `run_start` carries the exact same non-empty `session_id` in both runs.
+    let t1: Vec<Value> = fs::read_to_string(&trace1_path)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let t2: Vec<Value> = fs::read_to_string(&trace2_path)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let sid1 = t1
+        .iter()
+        .find(|v| v["type"] == "run_start")
+        .and_then(|v| v["session_id"].as_str())
+        .expect("run1 run_start.session_id")
+        .to_owned();
+    let sid2 = t2
+        .iter()
+        .find(|v| v["type"] == "run_start")
+        .and_then(|v| v["session_id"].as_str())
+        .expect("run2 run_start.session_id")
+        .to_owned();
+    assert!(!sid1.is_empty());
+    assert_eq!(
+        sid1, sid2,
+        "WAL resume must preserve session_id across checkpoint"
+    );
+
+    // 2. Verify WAL `session_init` AND `checkpoint` both persisted `session_id == sid1`.
+    let wal_entries: Vec<Value> = fs::read_to_string(&wal_path)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let init_sid = wal_entries
+        .iter()
+        .find(|v| v["type"] == "session_init")
+        .and_then(|v| v["session_id"].as_str());
+    let ckpt_sid = wal_entries
+        .iter()
+        .find(|v| v["type"] == "checkpoint")
+        .and_then(|v| v["session_id"].as_str());
+    assert_eq!(init_sid, Some(sid1.as_str()));
+    assert_eq!(ckpt_sid, Some(sid1.as_str()));
+
+    // 3. Verify ALL 4 provider calls (turn 1, built-in compactor, post-compact turn 3, resumed run 2)
+    //    received the exact same `session_id` via BOTH `ANIX_SESSION_ID` env and coprocess envelope!
+    let records: Vec<Value> = fs::read_to_string(&sid_log)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(records.len(), 4, "records={records:?}");
+    assert_eq!(
+        records[1]["tools_len"], 0,
+        "req 2 must be built-in compactor"
+    );
+    for rec in &records {
+        assert_eq!(rec["env_sid"].as_str(), Some(sid1.as_str()), "rec={rec:?}");
+        assert_eq!(rec["req_sid"].as_str(), Some(sid1.as_str()), "rec={rec:?}");
+    }
+
+    let _ = fs::remove_dir_all(&root);
+}

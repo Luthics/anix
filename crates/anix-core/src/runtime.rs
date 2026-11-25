@@ -127,7 +127,17 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
         }
     };
 
+    let session_id = if replayed.is_fresh {
+        uuid::Uuid::new_v4().to_string()
+    } else {
+        replayed
+            .session_id
+            .clone()
+            .unwrap_or_else(|| wal::derive_legacy_session_id(wal.path()))
+    };
+
     let mut run_fields = Map::new();
+    run_fields.insert("session_id".into(), Value::String(session_id.clone()));
     run_fields.insert("provider".into(), Value::String(cfg.provider.clone()));
     run_fields.insert("model".into(), Value::String(cfg.model.clone()));
     run_fields.insert("vision".into(), Value::Bool(cfg.vision));
@@ -135,24 +145,25 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
     run_fields.insert("inbox_mode".into(), Value::Bool(cfg.inbox.is_some()));
     tracer.emit_event("run_start", run_fields);
 
-    let mut state = match SessionState::init(cfg, script, replayed, &mut wal, &stderr_tracker) {
-        Ok(s) => s,
-        Err(code) => {
-            provider_pool.shutdown();
-            finish_session(
-                cfg,
-                code,
-                0,
-                TokenUsage::default(),
-                TokenUsage::default(),
-                0,
-                true,
-                &stderr_tracker,
-                &mut tracer,
-            );
-            return code;
-        }
-    };
+    let mut state =
+        match SessionState::init(cfg, script, session_id, replayed, &mut wal, &stderr_tracker) {
+            Ok(s) => s,
+            Err(code) => {
+                provider_pool.shutdown();
+                finish_session(
+                    cfg,
+                    code,
+                    0,
+                    TokenUsage::default(),
+                    TokenUsage::default(),
+                    0,
+                    true,
+                    &stderr_tracker,
+                    &mut tracer,
+                );
+                return code;
+            }
+        };
 
     let mut approval = ApprovalGate::new(
         cfg.approval,
@@ -338,6 +349,7 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
 }
 
 struct SessionState {
+    session_id: String,
     messages: Vec<IrMessage>,
     /// Per-turn `usage` for surviving active-window `assistant` messages (never written to IR).
     assistant_usages: BTreeMap<u64, TokenUsage>,
@@ -356,6 +368,7 @@ impl SessionState {
     fn init(
         cfg: &ResolvedConfig,
         script: &AgentScript,
+        session_id: String,
         replayed: wal::ReplayedSession,
         wal: &mut WalStore,
         stderr_tracker: &StderrTracker,
@@ -383,6 +396,7 @@ impl SessionState {
             if let Err(err) = wal.append(&WalEvent::SessionInit {
                 ir_version: IR_VERSION,
                 ts,
+                session_id: Some(session_id.clone()),
                 config: WalConfigSnapshot {
                     stderr: Some(cfg.stderr),
                     approval: Some(cfg.approval),
@@ -403,6 +417,7 @@ impl SessionState {
             }
 
             return Ok(Self {
+                session_id,
                 messages: processed.messages,
                 assistant_usages: BTreeMap::new(),
                 last_checkpoint_turn: 0,
@@ -464,6 +479,7 @@ impl SessionState {
         }
 
         Ok(Self {
+            session_id,
             messages,
             assistant_usages: replayed.assistant_usages,
             last_checkpoint_turn: replayed.last_checkpoint_turn,
@@ -798,6 +814,7 @@ fn run_inference_cycle(
             match compact::run_full_compaction(
                 cfg,
                 &script.prompt,
+                &state.session_id,
                 &state.messages,
                 state.next_turn_id,
                 state.session_usage,
@@ -876,6 +893,7 @@ fn run_inference_cycle(
         let response = match provider::invoke_provider(
             &provider_cfg,
             &cfg.model,
+            &state.session_id,
             &ir_stream,
             &cfg.paths,
             cfg.stderr,
@@ -1290,6 +1308,7 @@ fn run_inference_cycle(
                             .collect();
                         match compact::summarize_tail_fold(
                             cfg,
+                            &state.session_id,
                             &tail_slice,
                             signals,
                             provider_pool,

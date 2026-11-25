@@ -70,7 +70,7 @@ impl From<&IrHeader> for RequestHeader {
     }
 }
 
-/// Single-line JSON request envelope written to a `coprocess` Provider's `stdin` (v1.1 Section 9.2).
+/// Single-line JSON request envelope written to a `coprocess` Provider's `stdin` (v1.1 / v1.1.1 §9.2).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderRequestEnvelope {
     pub ir_version: u32,
@@ -78,6 +78,8 @@ pub struct ProviderRequestEnvelope {
     pub record_type: RequestTag,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -97,11 +99,20 @@ impl ProviderRequestEnvelope {
             ir_version: IR_VERSION,
             record_type: RequestTag::Request,
             request_id: Some(request_id.into()),
+            session_id: None,
             model: Some(model.into()),
             timeout_sec: Some(timeout_sec),
             header: RequestHeader::from(&stream.header),
             messages: stream.messages.clone(),
         }
+    }
+
+    pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
+        let sid = session_id.into();
+        if !sid.trim().is_empty() {
+            self.session_id = Some(sid);
+        }
+        self
     }
 
     pub fn into_ir_stream(self) -> IrStream {

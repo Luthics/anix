@@ -213,23 +213,24 @@ fn run_oneshot(dialect: Dialect, tag: &str, pre_read: Option<String>) -> ExitCod
         return ExitCode::UsageError;
     }
 
-    let body = match dialect.build_request(&stream, &env.model) {
-        Ok(body) => body,
-        Err(err) => {
-            let code = match &err {
-                TranslateError::MediaNotFound { .. } => "media_not_found",
-                TranslateError::UnsupportedMime(_) => "unsupported_media_mime",
-            };
-            let message = err.to_string();
-            emit_event(&ProviderEvent::Error {
-                code: code.into(),
-                message: message.clone(),
-                retryable: false,
-            });
-            eprintln!("{tag}: {message}");
-            return ExitCode::RuntimeError;
-        }
-    };
+    let body =
+        match dialect.build_request_with_session(&stream, &env.model, env.session_id.as_deref()) {
+            Ok(body) => body,
+            Err(err) => {
+                let code = match &err {
+                    TranslateError::MediaNotFound { .. } => "media_not_found",
+                    TranslateError::UnsupportedMime(_) => "unsupported_media_mime",
+                };
+                let message = err.to_string();
+                emit_event(&ProviderEvent::Error {
+                    code: code.into(),
+                    message: message.clone(),
+                    retryable: false,
+                });
+                eprintln!("{tag}: {message}");
+                return ExitCode::RuntimeError;
+            }
+        };
 
     dialect.execute_streaming(&env, &stream, &body)
 }
@@ -321,7 +322,11 @@ fn run_coprocess_reader<R: BufRead>(
             continue;
         }
 
-        let req_env = base_env.with_overrides(envelope.model.as_deref(), envelope.timeout_sec);
+        let req_env = base_env.with_overrides(
+            envelope.model.as_deref(),
+            envelope.timeout_sec,
+            envelope.session_id.as_deref(),
+        );
         if req_env.model.trim().is_empty() {
             let message = "model is missing in both coprocess request and ANIX_MODEL".to_owned();
             emit_event(&ProviderEvent::Error {
@@ -345,7 +350,11 @@ fn run_coprocess_reader<R: BufRead>(
             continue;
         }
 
-        let body = match dialect.build_request(&stream, &req_env.model) {
+        let body = match dialect.build_request_with_session(
+            &stream,
+            &req_env.model,
+            req_env.session_id.as_deref(),
+        ) {
             Ok(body) => body,
             Err(err) => {
                 let code = match &err {

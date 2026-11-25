@@ -1,6 +1,6 @@
 //! Anix core runtime library (`anix`).
 //!
-//! Each module maps directly to a normative section of `docs/v1.1.0-RFC.md`:
+//! Each module maps directly to a normative section of `docs/v1.1.1-RFC.md`:
 //! - [`cli`] & [`frontmatter`] & [`config`]: Sections 3 & 8
 //! - [`fd`] & [`trace`]: Sections 4 & 9.5
 //! - [`approval`] & [`vision`]: Section 5

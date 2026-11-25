@@ -20,7 +20,7 @@ use serde_json::{Map, Value, json};
 
 use crate::common::{
     ProviderEnv, TranslateError, build_http_agent, drive_sse_reader, emit_event,
-    parse_tool_arguments, read_media_base64, send_post_with_agent,
+    parse_tool_arguments, read_media_base64, resolve_session_header, send_post_with_agent,
 };
 
 const TAG: &str = "anix-provider-anthropic";
@@ -209,7 +209,7 @@ pub fn build_request(stream: &IrStream, model: &str) -> Result<Value, TranslateE
     for (key, val) in &stream.header.params {
         match key.as_str() {
             // Handled via request construction or HTTP headers, not JSON body.
-            "prompt_caching" | "anthropic_version" | "anthropic_beta" => {}
+            "prompt_caching" | "anthropic_version" | "anthropic_beta" | "session_header" => {}
             "reasoning_effort" => {
                 if !has_explicit_thinking && let Some(effort) = val.as_str() {
                     match effort.to_ascii_lowercase().as_str() {
@@ -439,9 +439,12 @@ where
         .unwrap_or(DEFAULT_ANTHROPIC_VERSION)
         .to_owned();
 
-    let mut headers = vec![("anthropic-version", anthropic_version)];
+    let mut headers: Vec<(String, String)> = vec![("anthropic-version".into(), anthropic_version)];
     if !env.api_key.trim().is_empty() {
-        headers.push(("x-api-key", env.api_key.clone()));
+        headers.push(("x-api-key".into(), env.api_key.clone()));
+    }
+    if let Some(h) = resolve_session_header(&stream.header.params, env.session_id.as_deref(), TAG) {
+        headers.push(h);
     }
     if let Some(beta_val) = stream.header.params.get("anthropic_beta") {
         let beta = match beta_val {
@@ -461,7 +464,7 @@ where
             _ => None,
         };
         if let Some(b) = beta {
-            headers.push(("anthropic-beta", b));
+            headers.push(("anthropic-beta".into(), b));
         }
     }
 
