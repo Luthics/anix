@@ -420,6 +420,56 @@ class ProviderStreaming(unittest.TestCase):
         self.assertEqual([r["text"] for r in self.rows("history") if r.get("role") == "assistant"], ["success"])
         self.assertFalse(any(r["type"] in ("text_delta", "reasoning_delta") for r in self.rows("trace")))
 
+    # RFC v1.1 §3.1, §3.2, §4.1, §4.2
+    def test_executable_script_on_path_and_by_relative_name_obeys_tty_eof_rules(self):
+        scripts = self.root / ".config/anix/agents"
+        scripts.mkdir(parents=True)
+        example = Path(__file__).resolve().parents[1] / "examples/bash.anix"
+        installed = scripts / "bash.anix"
+        installed.write_bytes(example.read_bytes())
+        installed.chmod(0o700)
+        config = scripts.parent / "config.toml"
+        config.write_text("[providers.openai-responses]\nbin='record-provider'\nmode='oneshot'\n")
+        provider = self.bin_dir / "record-provider"
+        provider.write_text("""#!/bin/sh
+/bin/cat > request
+printf '%s\\n' '{"type":"text_delta","text":"fixture reply"}' '{"type":"done","finish_reason":"stop"}'
+""")
+        provider.chmod(0o700)
+        (self.root / "bash.anix").symlink_to(installed)
+        env = {"HOME": str(self.root), "PATH": f"{scripts}:{self.bin_dir}:/usr/bin:/bin",
+               "XDG_RUNTIME_DIR": str(self.root / "run")}
+        for program in ("bash.anix", "./bash.anix"):
+            for args in (["xxx"], []):
+                with self.subTest(program=program, args=args):
+                    request = self.root / "request"
+                    request.unlink(missing_ok=True)
+                    master, slave = pty.openpty()
+                    try:
+                        with subprocess.Popen([program, *args], cwd=self.root, env=env, stdin=slave,
+                                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                              start_new_session=True) as child:
+                            try:
+                                if args:
+                                    expected = "<args>xxx</args>"
+                                else:
+                                    os.write(master, b"first line\n")
+                                    read_until(master, b"first line")
+                                    self.assertFalse(request.exists(), "provider ran before TTY EOF")
+                                    os.write(master, b"second line\n\x04")
+                                    expected = "first line\nsecond line\n"
+                                stdout, stderr = child.communicate(timeout=8)
+                            finally:
+                                if child.poll() is None:
+                                    child.kill()
+                    finally:
+                        os.close(slave)
+                        os.close(master)
+                    self.assertEqual(child.returncode, 0, stderr)
+                    self.assertEqual(stdout, b"")
+                    users = [r["text"] for r in self.rows("request") if r.get("role") == "user"]
+                    self.assertEqual(users, [expected])
+
     # RFC v1.1 §3.1, §4.1, §6.4, §6.5, §9.2, §9.5
     def test_keyboard_interrupt_returns_to_the_same_shell_while_waiting_for_provider(self):
         example = Path(__file__).resolve().parents[1] / "examples/bash.anix"
