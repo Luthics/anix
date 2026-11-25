@@ -1,0 +1,291 @@
+#!/usr/bin/env sh
+# One-line installer for OS Agent (https://github.com/Luthics/os-agent)
+# Usage (public repo):
+#   curl -fsSL https://raw.githubusercontent.com/Luthics/os-agent/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/Luthics/os-agent/main/install.sh | sh -s -- --with-zsh
+#
+# Usage (private repo, using GitHub CLI or GITHUB_TOKEN/GH_TOKEN):
+#   gh api repos/Luthics/os-agent/contents/install.sh -H "Accept: application/vnd.github.raw" | sh
+#   gh api repos/Luthics/os-agent/contents/install.sh -H "Accept: application/vnd.github.raw" | sh -s -- --with-zsh
+#
+# Environment overrides:
+#   OS_AGENT_VERSION=v0.0.1       Pin a specific release tag (default: latest release)
+#   OS_AGENT_PREFIX=$HOME/.local  Install prefix (default: ~/.local)
+#   OS_AGENT_REPO=Luthics/os-agent
+#   OS_AGENT_WITH_ZSH=1           Also install Luthics/zsh-os-agent plugin into ~/.config/agent/
+#   GITHUB_TOKEN / GH_TOKEN       Optional GitHub token (needed if repo is private and `gh` is absent)
+set -eu
+
+REPO="${OS_AGENT_REPO:-Luthics/os-agent}"
+ZSH_REPO="${OS_AGENT_ZSH_REPO:-Luthics/zsh-os-agent}"
+PREFIX="${OS_AGENT_PREFIX:-$HOME/.local}"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/agent"
+VERSION="${OS_AGENT_VERSION:-}"
+WITH_ZSH="${OS_AGENT_WITH_ZSH:-0}"
+TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --with-zsh)
+      WITH_ZSH=1
+      ;;
+    --version)
+      shift
+      [ "$#" -gt 0 ] || { echo "install.sh: --version requires an argument" >&2; exit 2; }
+      VERSION="$1"
+      ;;
+    --prefix)
+      shift
+      [ "$#" -gt 0 ] || { echo "install.sh: --prefix requires an argument" >&2; exit 2; }
+      PREFIX="$1"
+      ;;
+    -h|--help)
+      sed -n '2,16p' "$0" 2>/dev/null || echo "Usage: install.sh [--with-zsh] [--version vX.Y.Z] [--prefix DIR]"
+      exit 0
+      ;;
+    *)
+      echo "install.sh: unknown option: $1" >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+say() {
+  printf '%s\n' "$*"
+}
+
+die() {
+  printf 'install.sh: error: %s\n' "$*" >&2
+  exit 1
+}
+
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+fetch() {
+  url="$1"
+  dest="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --retry 3 --retry-delay 1 -o "$dest" "$url"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$dest" "$url"
+  else
+    die "neither curl nor wget is installed"
+  fi
+}
+
+detect_target() {
+  os="$(uname -s)"
+  arch="$(uname -m)"
+
+  case "$os" in
+    Darwin)
+      case "$arch" in
+        arm64|aarch64) echo "aarch64-apple-darwin" ;;
+        x86_64|amd64)  echo "x86_64-apple-darwin" ;;
+        *) die "unsupported macOS architecture: $arch" ;;
+      esac
+      ;;
+    Linux)
+      case "$arch" in
+        x86_64|amd64)  echo "x86_64-unknown-linux-musl" ;;
+        aarch64|arm64) echo "aarch64-unknown-linux-musl" ;;
+        *) die "unsupported Linux architecture: $arch" ;;
+      esac
+      ;;
+    *)
+      die "unsupported operating system: $os (supported: macOS, Linux)"
+      ;;
+  esac
+}
+
+resolve_latest_version() {
+  # 1. Public redirect (avoids GitHub API rate limit)
+  if command -v curl >/dev/null 2>&1; then
+    eff="$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" 2>/dev/null || true)"
+    tag="${eff##*/}"
+    case "$tag" in
+      v*) printf '%s' "$tag"; return 0 ;;
+    esac
+  fi
+  # 2. Private repo via GITHUB_TOKEN / GH_TOKEN
+  if [ -n "$TOKEN" ] && command -v curl >/dev/null 2>&1; then
+    tag="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" \
+      "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null \
+      | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1 || true)"
+    case "$tag" in
+      v*) printf '%s' "$tag"; return 0 ;;
+    esac
+  fi
+  # 3. Private repo via authenticated `gh` CLI
+  if command -v gh >/dev/null 2>&1; then
+    tag="$(gh release view -R "$REPO" --json tagName -q .tagName 2>/dev/null || true)"
+    case "$tag" in
+      v*) printf '%s' "$tag"; return 0 ;;
+    esac
+  fi
+  printf '%s' "v0.0.1"
+}
+
+download_release_assets() {
+  dest_dir="$1"
+  archive_name="$2"
+  base_url="https://github.com/${REPO}/releases/download/${VERSION}"
+
+  # Fast path: public direct download
+  if fetch "${base_url}/${archive_name}" "${dest_dir}/${archive_name}" 2>/dev/null \
+     && fetch "${base_url}/SHA256SUMS.txt" "${dest_dir}/SHA256SUMS.txt" 2>/dev/null; then
+    return 0
+  fi
+
+  # Private repo fallback 1: authenticated `gh` CLI
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    say "    Direct download unavailable (private repo?); downloading via gh CLI ..."
+    gh release download "$VERSION" -R "$REPO" \
+      -p "$archive_name" \
+      -p "SHA256SUMS.txt" \
+      -D "$dest_dir" --clobber
+    return 0
+  fi
+
+  # Private repo fallback 2: GitHub API with GITHUB_TOKEN / GH_TOKEN
+  if [ -n "$TOKEN" ] && command -v curl >/dev/null 2>&1; then
+    say "    Direct download unavailable; downloading via GitHub API token ..."
+    rel_json="${dest_dir}/release.json"
+    curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" \
+      "https://api.github.com/repos/${REPO}/releases/tags/${VERSION}" -o "$rel_json"
+    for asset in "$archive_name" "SHA256SUMS.txt"; do
+      asset_url="$(awk -v name="$asset" '
+        /"url":/ { last_url = $0 }
+        index($0, "\"name\": \"" name "\"") > 0 {
+          sub(/.*"url":[[:space:]]*"/, "", last_url)
+          sub(/".*/, "", last_url)
+          print last_url
+          exit
+        }
+      ' "$rel_json")"
+      [ -n "$asset_url" ] || die "asset ${asset} not found in release ${VERSION}"
+      curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/octet-stream" \
+        -o "${dest_dir}/${asset}" "$asset_url"
+    done
+    return 0
+  fi
+
+  die "failed to download ${archive_name} from ${REPO} (${VERSION}). If the repo is private, log in with 'gh auth login' or export GITHUB_TOKEN."
+}
+
+verify_sha256() {
+  archive_path="$1"
+  sums_path="$2"
+  archive_name="$(basename "$archive_path")"
+  expected="$(awk -v f="$archive_name" '$2 == f || $2 == ("*" f) { print $1; exit }' "$sums_path")"
+  [ -n "$expected" ] || die "checksum entry for ${archive_name} not found in SHA256SUMS.txt"
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "$archive_path" | awk '{ print $1 }')"
+  elif command -v shasum >/dev/null 2>&1; then
+    actual="$(shasum -a 256 "$archive_path" | awk '{ print $1 }')"
+  else
+    say "Warning: neither sha256sum nor shasum found; skipping checksum verification."
+    return 0
+  fi
+
+  [ "$actual" = "$expected" ] || die "SHA-256 mismatch for ${archive_name} (expected ${expected}, got ${actual})"
+}
+
+need_cmd tar
+
+TARGET="$(detect_target)"
+if [ -z "$VERSION" ]; then
+  VERSION="$(resolve_latest_version)"
+fi
+
+ARCHIVE="os-agent-${VERSION}-${TARGET}.tar.gz"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/os-agent-install.XXXXXX")"
+trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
+
+say "==> Installing OS Agent ${VERSION} (${TARGET})"
+download_release_assets "${TMP_DIR}" "${ARCHIVE}"
+
+say "==> Verifying SHA-256 checksum ..."
+verify_sha256 "${TMP_DIR}/${ARCHIVE}" "${TMP_DIR}/SHA256SUMS.txt"
+
+say "==> Extracting and installing into ${PREFIX} ..."
+tar -xzf "${TMP_DIR}/${ARCHIVE}" -C "${TMP_DIR}"
+STAGE="${TMP_DIR}/os-agent-${VERSION}-${TARGET}"
+[ -d "$STAGE" ] || die "unexpected archive layout: missing ${STAGE}"
+
+mkdir -p "${PREFIX}/bin" "${PREFIX}/libexec/agent/tools"
+install -m 0755 "${STAGE}/bin/agent" "${PREFIX}/bin/agent"
+install -m 0755 "${STAGE}/libexec/agent/msh" "${PREFIX}/libexec/agent/msh"
+install -m 0755 "${STAGE}/libexec/agent/agent-provider-openai-responses" "${PREFIX}/libexec/agent/agent-provider-openai-responses"
+install -m 0755 "${STAGE}/libexec/agent/tools/aview" "${PREFIX}/libexec/agent/tools/aview"
+install -m 0755 "${STAGE}/libexec/agent/tools/aclr" "${PREFIX}/libexec/agent/tools/aclr"
+
+mkdir -p "${CONFIG_DIR}"
+if [ ! -f "${CONFIG_DIR}/config.toml" ]; then
+  umask 077
+  cat > "${CONFIG_DIR}/config.toml" <<'EOF'
+[defaults]
+provider = "openai-responses"
+model = "deepseek-v4.1-flash"
+max_turns = 100
+max_tokens = 256000
+compact_threshold = 0.8
+approval = "auto"
+stderr = "auto"
+
+[providers.openai-responses]
+bin = "agent-provider-openai-responses"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+# api_key = "sk-..."   # Optional static key (api_key_env takes precedence when set)
+timeout_sec = 120
+EOF
+  chmod 0600 "${CONFIG_DIR}/config.toml"
+  say "==> Created starter config at ${CONFIG_DIR}/config.toml (0600)"
+else
+  say "==> Kept existing config at ${CONFIG_DIR}/config.toml"
+fi
+
+if [ "$WITH_ZSH" = "1" ]; then
+  say "==> Installing zsh-os-agent plugin from ${ZSH_REPO} ..."
+  ZSH_RAW="https://raw.githubusercontent.com/${ZSH_REPO}/main"
+  fetch "${ZSH_RAW}/zsh-os-agent.plugin.zsh" "${CONFIG_DIR}/zsh-os-agent.plugin.zsh"
+  fetch "${ZSH_RAW}/agent-sh.zsh" "${CONFIG_DIR}/agent-sh.zsh"
+  if [ ! -f "${CONFIG_DIR}/bash.agent" ]; then
+    fetch "${ZSH_RAW}/examples/bash.agent" "${CONFIG_DIR}/bash.agent"
+    chmod 0755 "${CONFIG_DIR}/bash.agent"
+    say "    Installed default agent script: ${CONFIG_DIR}/bash.agent"
+  else
+    say "    Kept existing ${CONFIG_DIR}/bash.agent"
+  fi
+fi
+
+say ""
+say "Installed OS Agent successfully:"
+say "  $("${PREFIX}/bin/agent" --version)"
+say "  Binaries: ${PREFIX}/bin/agent, ${PREFIX}/libexec/agent/{msh,agent-provider-openai-responses,tools/{aview,aclr}}"
+say "  Config:   ${CONFIG_DIR}/config.toml"
+
+case ":${PATH}:" in
+  *":${PREFIX}/bin:"*) ;;
+  *)
+    say ""
+    say "Add ${PREFIX}/bin to your PATH (e.g. in ~/.zshrc or ~/.bashrc):"
+    say "  export PATH=\"${PREFIX}/bin:\$PATH\""
+    ;;
+esac
+
+if [ "$WITH_ZSH" = "1" ]; then
+  say ""
+  say "Enable zsh-os-agent by adding this line near the end of ~/.zshrc:"
+  say "  [ -r \"${CONFIG_DIR}/zsh-os-agent.plugin.zsh\" ] && source \"${CONFIG_DIR}/zsh-os-agent.plugin.zsh\""
+fi
+
+say ""
+say "Next steps:"
+say "  1. Set your provider base_url and API key in ${CONFIG_DIR}/config.toml (or export OPENAI_API_KEY=...)"
+say "  2. Run: ${PREFIX}/bin/agent --doctor"

@@ -2,6 +2,30 @@
 
 POSIX-native Agent runtime (`ir_version = 1`) built in Rust as independent static binaries with zero external runtime dependencies.
 
+## Quick Install
+
+Install the latest prebuilt release (`macOS` Apple Silicon / Intel, `Linux` x86_64 / arm64 static musl) into `~/.local`:
+
+```sh
+# Public repo (direct curl)
+curl -fsSL https://raw.githubusercontent.com/Luthics/os-agent/main/install.sh | sh
+
+# Private repo (via authenticated GitHub CLI)
+gh api repos/Luthics/os-agent/contents/install.sh -H "Accept: application/vnd.github.raw" | sh
+```
+
+To also install the companion Zsh plugin ([`Luthics/zsh-os-agent`](https://github.com/Luthics/zsh-os-agent)), append `-s -- --with-zsh`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Luthics/os-agent/main/install.sh | sh -s -- --with-zsh
+```
+
+Then configure your provider endpoint and API key in `~/.config/agent/config.toml` (or export `OPENAI_API_KEY`), and run:
+
+```sh
+agent --doctor
+```
+
 ## Workspace Architecture
 
 | Crate | Binary | Default FHS Install Path | Role |
