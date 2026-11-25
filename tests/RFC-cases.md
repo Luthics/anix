@@ -110,6 +110,16 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 | [`concatenated_and_split_media_frames_keep_order_and_tool_identity_after_resume`](../crates/anix-core/tests/rfc_runtime/control.rs#L24) | [§7.2](../docs/v1.1.1-RFC.md?plain=1#L430) · [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) · [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) |
 | [`two_valid_fold_frames_from_one_tool_are_appended_in_arrival_order`](../crates/anix-core/tests/rfc_runtime/control.rs#L93) | [§7.2](../docs/v1.1.1-RFC.md?plain=1#L430) · [§6.1](../docs/v1.1.1-RFC.md?plain=1#L316) · [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) |
 
+## `crates/anix-core/tests/rfc_runtime/doctor.rs`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`each_missing_or_non_executable_private_binary_is_identified`](../crates/anix-core/tests/rfc_runtime/doctor.rs#L31) | [§10.3](../docs/v1.1.1-RFC.md?plain=1#L717) · [§2](../docs/v1.1.1-RFC.md?plain=1#L45) · [§8.1](../docs/v1.1.1-RFC.md?plain=1#L452) |
+| [`doctor_distinguishes_required_missing_empty_and_fallback_credentials`](../crates/anix-core/tests/rfc_runtime/doctor.rs#L70) | [§10.3](../docs/v1.1.1-RFC.md?plain=1#L717) |
+| [`invalid_global_or_project_toml_and_unusable_runtime_directory_report_failure`](../crates/anix-core/tests/rfc_runtime/doctor.rs#L99) | [§10.3](../docs/v1.1.1-RFC.md?plain=1#L717) |
+| [`doctor_checks_the_selected_project_provider_and_its_credentials`](../crates/anix-core/tests/rfc_runtime/doctor.rs#L122) | [§8.1](../docs/v1.1.1-RFC.md?plain=1#L452) · [§8.2](../docs/v1.1.1-RFC.md?plain=1#L459) · [§10.3](../docs/v1.1.1-RFC.md?plain=1#L717) |
+| [`doctor_reports_missing_msh_before_a_malformed_global_config`](../crates/anix-core/tests/rfc_runtime/doctor.rs#L154) | [§10.3](../docs/v1.1.1-RFC.md?plain=1#L717) |
+
 ## `crates/anix-core/tests/rfc_runtime/fd.rs`
 
 | 测试 | RFC 条款 |
@@ -387,24 +397,32 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 | [`test_ctrl_c_at_the_approval_prompt_returns_to_shell_and_identifies_the_decider`](../tests/test_approval.py#L341) | [§5.2](../docs/v1.1.1-RFC.md?plain=1#L235) · [§5.3](../docs/v1.1.1-RFC.md?plain=1#L267) · [§6.4](../docs/v1.1.1-RFC.md?plain=1#L390) · [§6.5](../docs/v1.1.1-RFC.md?plain=1#L400) · [§9.5](../docs/v1.1.1-RFC.md?plain=1#L645) |
 | [`test_interrupt_during_external_decision_identifies_the_decider_in_trace`](../tests/test_approval.py#L352) | [§5.2](../docs/v1.1.1-RFC.md?plain=1#L235) · [§6.4](../docs/v1.1.1-RFC.md?plain=1#L390) · [§6.5](../docs/v1.1.1-RFC.md?plain=1#L400) · [§9.5](../docs/v1.1.1-RFC.md?plain=1#L645) |
 
+## `tests/test_distribution.py`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`test_reinstall_keeps_shell_startup_files_and_private_tools_out_of_the_user_bin`](../tests/test_distribution.py#L119) | [§2](../docs/v1.1.1-RFC.md?plain=1#L45) · [§10.3](../docs/v1.1.1-RFC.md?plain=1#L717) |
+| [`test_installed_bash_script_accepts_args_on_path_and_by_relative_name_without_tty_eof`](../tests/test_distribution.py#L161) | [§2](../docs/v1.1.1-RFC.md?plain=1#L45) · [§3.1](../docs/v1.1.1-RFC.md?plain=1#L63) · [§4.1](../docs/v1.1.1-RFC.md?plain=1#L154) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) · [§10.3](../docs/v1.1.1-RFC.md?plain=1#L717) |
+| [`test_installed_pipeline_and_fold`](../tests/test_distribution.py#L202) | [§2](../docs/v1.1.1-RFC.md?plain=1#L45) · [§3.1](../docs/v1.1.1-RFC.md?plain=1#L63) · [§4.1](../docs/v1.1.1-RFC.md?plain=1#L154) · [§4.4](../docs/v1.1.1-RFC.md?plain=1#L209) · [§6.1](../docs/v1.1.1-RFC.md?plain=1#L316) · [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) · [§7.2](../docs/v1.1.1-RFC.md?plain=1#L430) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) · [§9.6](../docs/v1.1.1-RFC.md?plain=1#L669) · [§10.3](../docs/v1.1.1-RFC.md?plain=1#L717) |
+
 ## `tests/test_provider_dialects.py`
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`test_frozen_prefix_and_runtime_update_remain_in_order_on_each_upstream`](../tests/test_provider_dialects.py#L137) | [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) · [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
-| [`test_user_and_tool_images_reach_upstream_with_declared_mime_and_exact_bytes`](../tests/test_provider_dialects.py#L173) | [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
-| [`test_coprocess_reopens_replaced_media_and_recovers_after_unlink`](../tests/test_provider_dialects.py#L200) | [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
-| [`test_oneshot_unreadable_and_missing_paths_fail_before_dispatch`](../tests/test_provider_dialects.py#L223) | [§6.5](../docs/v1.1.1-RFC.md?plain=1#L400) · [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
-| [`test_upstream_media_rejection_is_distinct_from_auth_and_transient_failures`](../tests/test_provider_dialects.py#L241) | [§5.5](../docs/v1.1.1-RFC.md?plain=1#L280) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
-| [`test_partial_text_then_upstream_eof_yields_error_and_coprocess_accepts_next_request`](../tests/test_provider_dialects.py#L268) | [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
-| [`test_unsupported_ir_version_is_diagnosed_before_http_in_both_modes`](../tests/test_provider_dialects.py#L297) | [§6.5](../docs/v1.1.1-RFC.md?plain=1#L400) · [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
-| [`test_fragmented_tool_arguments_produce_one_call_with_the_original_id`](../tests/test_provider_dialects.py#L313) | [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
-| [`test_inclusive_usage_preserves_wide_counts_and_available_cache_details`](../tests/test_provider_dialects.py#L355) | [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
-| [`test_wal_session_reaches_http_across_cli_restarts_and_provider_switches`](../tests/test_provider_dialects.py#L381) | [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) · [§9.5](../docs/v1.1.1-RFC.md?plain=1#L645) |
-| [`test_session_routing_works_in_oneshot_and_per_envelope_in_coprocess`](../tests/test_provider_dialects.py#L433) | [§1.4](../docs/v1.1.1-RFC.md?plain=1#L33) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
-| [`test_header_rename_and_disable_apply_only_to_the_current_request`](../tests/test_provider_dialects.py#L459) | [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
-| [`test_responses_cache_key_has_native_string_boolean_and_null_semantics`](../tests/test_provider_dialects.py#L482) | [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
-| [`test_chat_cache_fields_are_independent_opt_ins_and_anthropic_keeps_them_out_of_the_body`](../tests/test_provider_dialects.py#L500) | [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
+| [`test_frozen_prefix_and_runtime_update_remain_in_order_on_each_upstream`](../tests/test_provider_dialects.py#L111) | [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) · [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
+| [`test_user_and_tool_images_reach_upstream_with_declared_mime_and_exact_bytes`](../tests/test_provider_dialects.py#L147) | [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
+| [`test_coprocess_reopens_replaced_media_and_recovers_after_unlink`](../tests/test_provider_dialects.py#L174) | [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
+| [`test_oneshot_unreadable_and_missing_paths_fail_before_dispatch`](../tests/test_provider_dialects.py#L197) | [§6.5](../docs/v1.1.1-RFC.md?plain=1#L400) · [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
+| [`test_upstream_media_rejection_is_distinct_from_auth_and_transient_failures`](../tests/test_provider_dialects.py#L215) | [§5.5](../docs/v1.1.1-RFC.md?plain=1#L280) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
+| [`test_partial_text_then_upstream_eof_yields_error_and_coprocess_accepts_next_request`](../tests/test_provider_dialects.py#L242) | [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
+| [`test_unsupported_ir_version_is_diagnosed_before_http_in_both_modes`](../tests/test_provider_dialects.py#L271) | [§6.5](../docs/v1.1.1-RFC.md?plain=1#L400) · [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
+| [`test_fragmented_tool_arguments_produce_one_call_with_the_original_id`](../tests/test_provider_dialects.py#L287) | [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
+| [`test_inclusive_usage_preserves_wide_counts_and_available_cache_details`](../tests/test_provider_dialects.py#L329) | [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
+| [`test_wal_session_reaches_http_across_cli_restarts_and_provider_switches`](../tests/test_provider_dialects.py#L355) | [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) · [§9.5](../docs/v1.1.1-RFC.md?plain=1#L645) |
+| [`test_session_routing_works_in_oneshot_and_per_envelope_in_coprocess`](../tests/test_provider_dialects.py#L407) | [§1.4](../docs/v1.1.1-RFC.md?plain=1#L33) · [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
+| [`test_header_rename_and_disable_apply_only_to_the_current_request`](../tests/test_provider_dialects.py#L433) | [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
+| [`test_responses_cache_key_has_native_string_boolean_and_null_semantics`](../tests/test_provider_dialects.py#L456) | [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
+| [`test_chat_cache_fields_are_independent_opt_ins_and_anthropic_keeps_them_out_of_the_body`](../tests/test_provider_dialects.py#L474) | [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) |
 
 ## `tests/test_provider_streaming.py`
 

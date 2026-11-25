@@ -4,6 +4,7 @@ mod background;
 mod compaction;
 mod configuration;
 mod control;
+mod doctor;
 mod fd;
 #[path = "../common/fixture.rs"]
 mod fixture;
