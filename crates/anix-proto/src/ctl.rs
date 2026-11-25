@@ -25,6 +25,16 @@ pub enum CtlFrame {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         summary: Option<String>,
     },
+    /// Emitted by `msh` when a command yields to background (either `timeout_sec == 0`
+    /// or foreground wait expired with `kill_on_timeout == false`, v1.1.2 §§7.1.5 & 7.2).
+    BgJob {
+        job_id: String,
+        pid: u32,
+        pgid: u32,
+        cmd: String,
+        log_path: String,
+        exit_file: String,
+    },
 }
 
 #[cfg(test)]
@@ -47,6 +57,14 @@ mod tests {
             CtlFrame::Fold {
                 from_turn: 4,
                 summary: None,
+            },
+            CtlFrame::BgJob {
+                job_id: "j_1234abcd".into(),
+                pid: 4242,
+                pgid: 4242,
+                cmd: "cargo build".into(),
+                log_path: "/tmp/anix-1000/jobs/j_1234abcd.log".into(),
+                exit_file: "/tmp/anix-1000/jobs/j_1234abcd.exit".into(),
             },
         ];
 

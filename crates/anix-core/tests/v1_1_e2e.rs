@@ -1018,3 +1018,203 @@ timeout_sec = 30
 
     let _ = fs::remove_dir_all(&root);
 }
+
+#[test]
+fn test_v1_1_2_msh_per_call_timeout_yield_bg_notification_and_kill_on_timeout() {
+    let root = make_temp_env("msh-bg-v112");
+    let home = setup_fhs_home(&root);
+    let work = root.join("work");
+    fs::create_dir_all(&work).unwrap();
+
+    let req_log = root.join("reqs.jsonl");
+    let trace_path = root.join("trace.jsonl");
+    let wal_path = root.join("bg.ctx.jsonl");
+    let provider_path = root.join("mock-provider-bg.sh");
+
+    // 3-turn coprocess mock provider exercising:
+    // Turn 1: `timeout_sec: 1` (default kill_on_timeout=false) on a 2s command -> auto-yields to background!
+    // Turn 2: 3 calls in one batch:
+    //   - `timeout_sec: 0` -> immediate background start (`IMM-BG-DONE`)
+    //   - `timeout_sec: 1, kill_on_timeout: true` on `sleep 20` -> hard-killed, exit=124, is_error=true
+    //   - `timeout_sec: 999` (clamped to max_msh_timeout_sec=5) on `sleep 2; echo EXTENDED-OK` -> completes!
+    // Turn 3: receives `<runtime_update>` notifications for BOTH completed bg jobs (exit_code=0 + log tails!)
+    //   and returns final text.
+    write_exec(
+        &provider_path,
+        &format!(
+            r#"#!/usr/bin/env sh
+count=0
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  printf '%s\n' "$line" >> "{req_log}"
+  count=$((count + 1))
+  if [ "$count" -eq 1 ]; then
+    printf '%s\n' '{{"type":"tool_call","id":"call_yield","name":"msh","arguments":{{"cmd":"echo BG-START; sleep 2; echo BG-FINISHED","timeout_sec":1}}}}'
+    printf '%s\n' '{{"type":"usage","input_tokens":10,"output_tokens":5}}'
+    printf '%s\n' '{{"type":"done","finish_reason":"tool_calls"}}'
+  elif [ "$count" -eq 2 ]; then
+    printf '%s\n' '{{"type":"tool_call","id":"call_imm","name":"msh","arguments":{{"cmd":"sleep 1; echo IMM-BG-DONE","timeout_sec":0}}}}'
+    printf '%s\n' '{{"type":"tool_call","id":"call_kill","name":"msh","arguments":{{"cmd":"sleep 20","timeout_sec":1,"kill_on_timeout":true}}}}'
+    printf '%s\n' '{{"type":"tool_call","id":"call_ext","name":"msh","arguments":{{"cmd":"sleep 2; echo EXTENDED-OK","timeout_sec":999}}}}'
+    printf '%s\n' '{{"type":"usage","input_tokens":20,"output_tokens":10}}'
+    printf '%s\n' '{{"type":"done","finish_reason":"tool_calls"}}'
+  else
+    printf '%s\n' '{{"type":"text_delta","text":"bg-v112-ok"}}'
+    printf '%s\n' '{{"type":"usage","input_tokens":30,"output_tokens":5}}'
+    printf '%s\n' '{{"type":"done","finish_reason":"stop"}}'
+  fi
+done
+"#,
+            req_log = req_log.display(),
+        ),
+    );
+
+    let cfg_dir = home.join(".config/anix");
+    fs::create_dir_all(&cfg_dir).unwrap();
+    fs::write(
+        cfg_dir.join("config.toml"),
+        format!(
+            "[defaults]\nprovider = \"mock\"\nmodel = \"mock-m\"\napproval = \"auto\"\nstderr = \"auto\"\nmsh_timeout_sec = 2\nmax_msh_timeout_sec = 5\n\n[providers.mock]\nbin = \"{}\"\nmode = \"coprocess\"\nbase_url = \"http://127.0.0.1:1\"\napi_key_env = \"\"\n",
+            provider_path.display()
+        ),
+    )
+    .unwrap();
+
+    let script = work.join("bg.anix");
+    fs::write(&script, "---\nname: bg-v112\n---\nTest msh v1.1.2\n").unwrap();
+
+    let trace_file = File::create(&trace_path).unwrap();
+    let mut cmd = base_cmd(&home, &work);
+    cmd.env_remove("MSH_TIMEOUT_SEC")
+        .env_remove("MSH_MAX_TIMEOUT_SEC")
+        .env_remove("MSH_KILL_ON_TIMEOUT")
+        .arg("--trace-fd=3")
+        .arg("-c")
+        .arg(&wal_path)
+        .arg(&script)
+        .arg("--")
+        .arg("run bg test");
+    configure_child_fds(&mut cmd, Some((&trace_file, 3)));
+
+    let out = cmd.output().expect("run anix v1.1.2 bg test");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let reqs: Vec<Value> = fs::read_to_string(&req_log)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(
+        reqs.len(),
+        3,
+        "expected 3 provider turns, got {}",
+        reqs.len()
+    );
+
+    // 1. Verify Turn 1 tool definition exposes `timeout_sec` & `kill_on_timeout`.
+    let msh_props = &reqs[0]["header"]["tools"][0]["parameters"]["properties"];
+    assert!(msh_props.get("timeout_sec").is_some());
+    assert!(msh_props.get("kill_on_timeout").is_some());
+
+    // 2. Verify Turn 2 received the yielded job handle (`exit=0`, `BG-START`, moved to background, NOT error).
+    let req2_msgs = reqs[1]["messages"].as_array().unwrap();
+    let yield_tool = req2_msgs
+        .iter()
+        .find(|m| m["tool_call_id"] == "call_yield")
+        .expect("call_yield tool msg");
+    assert_ne!(yield_tool["is_error"], Value::Bool(true));
+    let yield_text = yield_tool["text"].as_str().unwrap();
+    assert!(yield_text.contains("exit=0"), "yield_text={yield_text}");
+    assert!(yield_text.contains("BG-START"), "yield_text={yield_text}");
+    assert!(
+        yield_text.contains("moved to background"),
+        "yield_text={yield_text}"
+    );
+
+    // 3. Verify Turn 3 received:
+    //    - `call_imm` started in background (`exit=0`, `started in background`)
+    //    - `call_kill` killed on timeout (`exit=124`, `is_error=true`)
+    //    - `call_ext` succeeded with `EXTENDED-OK` (clamped timeout 5s > default 2s!)
+    //    - `<runtime_update>` notifications for BOTH background jobs with `exit_code=0` and log tails!
+    let req3_msgs = reqs[2]["messages"].as_array().unwrap();
+    let imm_tool = req3_msgs
+        .iter()
+        .find(|m| m["tool_call_id"] == "call_imm")
+        .expect("call_imm");
+    assert_ne!(imm_tool["is_error"], Value::Bool(true));
+    assert!(
+        imm_tool["text"]
+            .as_str()
+            .unwrap()
+            .contains("started in background")
+    );
+
+    let kill_tool = req3_msgs
+        .iter()
+        .find(|m| m["tool_call_id"] == "call_kill")
+        .expect("call_kill");
+    assert_eq!(kill_tool["is_error"], Value::Bool(true));
+    let kill_text = kill_tool["text"].as_str().unwrap();
+    assert!(kill_text.contains("exit=124"), "kill_text={kill_text}");
+    assert!(
+        kill_text.contains("process group terminated"),
+        "kill_text={kill_text}"
+    );
+
+    let ext_tool = req3_msgs
+        .iter()
+        .find(|m| m["tool_call_id"] == "call_ext")
+        .expect("call_ext");
+    assert_ne!(ext_tool["is_error"], Value::Bool(true));
+    assert!(ext_tool["text"].as_str().unwrap().contains("EXTENDED-OK"));
+
+    let runtime_updates: Vec<&str> = req3_msgs
+        .iter()
+        .filter(|m| m["role"] == "system")
+        .filter_map(|m| m["text"].as_str())
+        .filter(|t| t.contains("<runtime_update>"))
+        .collect();
+    let joined_updates = runtime_updates.join("\n");
+    assert!(
+        joined_updates.contains("BG-FINISHED") && joined_updates.contains("exit_code=0"),
+        "expected BG-FINISHED runtime_update, got: {joined_updates}"
+    );
+    assert!(
+        joined_updates.contains("IMM-BG-DONE"),
+        "expected IMM-BG-DONE runtime_update, got: {joined_updates}"
+    );
+
+    // 4. Verify Trace events: clamping (`999 -> 5`), `bg_job_started` x2, `bg_job_finished` x2.
+    let events: Vec<Value> = fs::read_to_string(&trace_path)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let ext_start = events
+        .iter()
+        .find(|e| e["type"] == "tool_start" && e["tool_call_id"] == "call_ext")
+        .expect("call_ext tool_start");
+    assert_eq!(
+        ext_start["timeout_sec"], 5,
+        "requested 999s must be clamped to max_msh_timeout_sec=5"
+    );
+
+    let bg_started: Vec<&Value> = events
+        .iter()
+        .filter(|e| e["type"] == "bg_job_started")
+        .collect();
+    let bg_finished: Vec<&Value> = events
+        .iter()
+        .filter(|e| e["type"] == "bg_job_finished")
+        .collect();
+    assert_eq!(bg_started.len(), 2, "bg_started={bg_started:?}");
+    assert_eq!(bg_finished.len(), 2, "bg_finished={bg_finished:?}");
+    assert!(bg_finished.iter().all(|e| e["exit_code"] == 0));
+
+    let _ = fs::remove_dir_all(&root);
+}
