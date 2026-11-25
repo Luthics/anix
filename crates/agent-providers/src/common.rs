@@ -9,7 +9,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STD;
 use os_agent_proto::exit_code::ExitCode;
 use os_agent_proto::ir::{ALLOWED_MEDIA_MIMES, MediaAttachment};
-use os_agent_proto::provider::ProviderEvent;
+use os_agent_proto::provider::{ERROR_CODE_UNSUPPORTED_MEDIA, ProviderEvent, ProviderMode};
 use serde_json::{Value, json};
 use thiserror::Error;
 
@@ -39,6 +39,13 @@ pub struct ProviderEnv {
 
 impl ProviderEnv {
     pub fn from_env(dialect: Dialect) -> Result<Self, (ExitCode, &'static str, String)> {
+        Self::from_env_for_mode(dialect, ProviderMode::Oneshot)
+    }
+
+    pub fn from_env_for_mode(
+        dialect: Dialect,
+        mode: ProviderMode,
+    ) -> Result<Self, (ExitCode, &'static str, String)> {
         let base_url = std::env::var("AGENT_PROVIDER_BASE_URL")
             .ok()
             .filter(|s| !s.trim().is_empty())
@@ -46,7 +53,7 @@ impl ProviderEnv {
         // Empty API key is permitted for local/intranet unauthenticated endpoints (Section 10.3).
         let api_key = std::env::var("AGENT_PROVIDER_API_KEY").unwrap_or_default();
         let model = std::env::var("AGENT_MODEL").unwrap_or_default();
-        if model.trim().is_empty() {
+        if mode == ProviderMode::Oneshot && model.trim().is_empty() {
             return Err((
                 ExitCode::UsageError,
                 "model_missing",
@@ -66,6 +73,61 @@ impl ProviderEnv {
             model,
         })
     }
+
+    /// Derive per-request effective env (allowing coprocess requests to override model/timeout).
+    pub fn with_overrides(&self, model: Option<&str>, timeout_sec: Option<u64>) -> Self {
+        Self {
+            base_url: self.base_url.clone(),
+            api_key: self.api_key.clone(),
+            timeout_sec: timeout_sec.filter(|&v| v > 0).unwrap_or(self.timeout_sec),
+            model: model
+                .filter(|s| !s.trim().is_empty())
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| self.model.clone()),
+        }
+    }
+}
+
+/// Construct a reusable `ureq::Agent` for HTTP keep-alive & TLS session pooling across turns.
+pub fn build_http_agent(default_timeout_sec: u64) -> ureq::Agent {
+    let config = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(default_timeout_sec.max(1))))
+        .http_status_as_error(false)
+        .build();
+    config.into()
+}
+
+/// Detect upstream HTTP rejection of image/media inputs so `agent` fails fast without retry (v1.1 §5.5).
+pub fn is_unsupported_media_error(status: u16, err_body: &str, request_has_media: bool) -> bool {
+    if !request_has_media {
+        return false;
+    }
+    if status == 415 {
+        return true;
+    }
+    if !matches!(status, 400 | 422) {
+        return false;
+    }
+    let lower = err_body.to_ascii_lowercase();
+    const PATTERNS: &[&str] = &[
+        "does not support image",
+        "does not support vision",
+        "not support image",
+        "not support vision",
+        "image is not supported",
+        "images are not supported",
+        "unsupported media",
+        "unsupported_media",
+        "image_url",
+        "input_image",
+        "invalid_image",
+        "image input",
+        "multimodal",
+        "vision",
+        "cannot process image",
+        "cannot read image",
+    ];
+    PATTERNS.iter().any(|p| lower.contains(p))
 }
 
 /// Emit a single JSONL [`ProviderEvent`] to `stdout` and flush immediately.
@@ -113,12 +175,35 @@ pub fn send_single_shot_post<F>(
 where
     F: FnMut(&ProviderEvent),
 {
-    let config = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(timeout_sec)))
-        .http_status_as_error(false)
-        .build();
-    let agent: ureq::Agent = config.into();
+    let agent = build_http_agent(timeout_sec);
+    send_post_with_agent(
+        &agent,
+        tag,
+        url,
+        timeout_sec,
+        extra_headers,
+        body,
+        false,
+        sink,
+    )
+}
 
+/// Send ONE HTTP POST request using a shared pooled `ureq::Agent` (supports coprocess keep-alive
+/// and v1.1 `unsupported_media` non-retryable classification).
+#[allow(clippy::too_many_arguments)]
+pub fn send_post_with_agent<F>(
+    agent: &ureq::Agent,
+    tag: &str,
+    url: &str,
+    timeout_sec: u64,
+    extra_headers: &[(&str, String)],
+    body: &Value,
+    request_has_media: bool,
+    sink: &mut F,
+) -> Result<ureq::http::Response<ureq::Body>, ExitCode>
+where
+    F: FnMut(&ProviderEvent),
+{
     let json_body = match serde_json::to_string(body) {
         Ok(s) => s,
         Err(err) => {
@@ -135,6 +220,10 @@ where
 
     let mut req = agent
         .post(url)
+        .config()
+        .timeout_global(Some(Duration::from_secs(timeout_sec.max(1))))
+        .http_status_as_error(false)
+        .build()
         .header("Content-Type", "application/json")
         .header("Accept", "text/event-stream");
     for (k, v) in extra_headers {
@@ -175,6 +264,8 @@ where
             ("rate_limit", true)
         } else if status == 408 || status == 529 || status >= 500 {
             ("server_error", true)
+        } else if is_unsupported_media_error(status, &err_body, request_has_media) {
+            (ERROR_CODE_UNSUPPORTED_MEDIA, false)
         } else {
             ("client_error", false)
         };

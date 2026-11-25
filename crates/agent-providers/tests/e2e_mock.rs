@@ -14,11 +14,34 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use os_agent_proto::IR_VERSION;
-use os_agent_proto::ir::{HeaderTag, IrHeader, IrMessage, IrMeta, IrStream, StderrMode};
-use os_agent_proto::provider::ProviderEvent;
+use os_agent_proto::ir::{
+    HeaderTag, IrHeader, IrMessage, IrMeta, IrStream, MediaAttachment, StderrMode,
+};
+use os_agent_proto::provider::{
+    ERROR_CODE_UNSUPPORTED_MEDIA, ProviderEvent, ProviderRequestEnvelope,
+};
 use serde_json::{Value, json};
 
-const BIN: &str = env!("CARGO_BIN_EXE_agent-provider");
+fn provider_bin() -> PathBuf {
+    let compile_time = PathBuf::from(env!("CARGO_BIN_EXE_agent-provider"));
+    if compile_time.exists() {
+        return compile_time;
+    }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        for candidate in [
+            dir.join("agent-provider"),
+            dir.join("../bin/agent-provider"),
+        ] {
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+    compile_time
+}
+
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone)]
@@ -45,7 +68,7 @@ impl TempSymlinkDir {
 
     fn symlink_as(&self, name: &str) -> PathBuf {
         let link_path = self.dir.join(name);
-        symlink(BIN, &link_path).expect("create busybox symlink");
+        symlink(provider_bin(), &link_path).expect("create busybox symlink");
         link_path
     }
 }
@@ -182,7 +205,7 @@ fn run_bin(
 
 #[test]
 fn version_flag_works_for_base_binary_and_busybox_symlinks() {
-    let out = Command::new(BIN)
+    let out = Command::new(provider_bin())
         .arg("--version")
         .output()
         .expect("run base --version");
@@ -213,7 +236,7 @@ fn version_flag_works_for_base_binary_and_busybox_symlinks() {
 fn unsupported_ir_version_exits_2() {
     let bad_ir = r#"{"ir_version":99,"type":"header","tools":[],"meta":{"stderr_mode":"auto","cwd":"/tmp"}}"#;
     let (code, events, _) = run_bin(
-        Path::new(BIN),
+        &provider_bin(),
         &["openai-compat"],
         "http://127.0.0.1:1/v1",
         "",
@@ -375,7 +398,7 @@ fn http_429_and_529_map_to_retryable_errors_and_400_is_non_retryable() {
         r#"{"error":{"message":"slow down"}}"#.into(),
     );
     let (c1, ev1, _) = run_bin(
-        Path::new(BIN),
+        &provider_bin(),
         &["openai-compat"],
         &format!("{o1}/v1"),
         "sk",
@@ -395,7 +418,7 @@ fn http_429_and_529_map_to_retryable_errors_and_400_is_non_retryable() {
         r#"{"type":"error","error":{"type":"overloaded_error","message":"busy"}}"#.into(),
     );
     let (c2, ev2, _) = run_bin(
-        Path::new(BIN),
+        &provider_bin(),
         &["anthropic"],
         &o2,
         "sk-ant",
@@ -415,7 +438,7 @@ fn http_429_and_529_map_to_retryable_errors_and_400_is_non_retryable() {
         r#"{"error":{"message":"invalid"}}"#.into(),
     );
     let (c3, ev3, _) = run_bin(
-        Path::new(BIN),
+        &provider_bin(),
         &["openai-responses"],
         &format!("{o3}/v1"),
         "sk",
@@ -427,5 +450,218 @@ fn http_429_and_529_map_to_retryable_errors_and_400_is_non_retryable() {
     assert!(matches!(
         ev3.as_slice(),
         [ProviderEvent::Error { code, retryable: false, .. }] if code == "client_error"
+    ));
+}
+
+#[test]
+fn coprocess_mode_serves_multiple_requests_survives_error_and_exits_0_on_eof() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let addr = listener.local_addr().expect("addr");
+    let captured: Arc<Mutex<Vec<CapturedRequest>>> = Arc::new(Mutex::new(Vec::new()));
+    let captured_bg = Arc::clone(&captured);
+
+    let responses = vec![
+        (
+            "200 OK",
+            "text/event-stream",
+            concat!(
+                "event: response.output_text.delta\n",
+                "data: {\"delta\":\"turn-one\"}\n\n",
+                "event: response.completed\n",
+                "data: {\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":2}}}\n\n",
+            )
+            .to_owned(),
+        ),
+        (
+            "429 Too Many Requests",
+            "application/json",
+            r#"{"error":{"message":"slow down"}}"#.to_owned(),
+        ),
+        (
+            "200 OK",
+            "text/event-stream",
+            concat!(
+                "event: response.output_text.delta\n",
+                "data: {\"delta\":\"turn-two\"}\n\n",
+                "event: response.completed\n",
+                "data: {\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":20,\"output_tokens\":4}}}\n\n",
+            )
+            .to_owned(),
+        ),
+    ];
+
+    let server = thread::spawn(move || {
+        for (status, ctype, body) in responses {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+            let mut request_line = String::new();
+            reader.read_line(&mut request_line).expect("req line");
+            let mut headers = BTreeMap::new();
+            let mut content_len = 0usize;
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("hdr");
+                let t = line.trim();
+                if t.is_empty() {
+                    break;
+                }
+                if let Some((k, v)) = t.split_once(':') {
+                    let kl = k.trim().to_ascii_lowercase();
+                    let vv = v.trim().to_owned();
+                    if kl == "content-length" {
+                        content_len = vv.parse().unwrap_or(0);
+                    }
+                    headers.insert(kl, vv);
+                }
+            }
+            let mut buf = vec![0u8; content_len];
+            reader.read_exact(&mut buf).expect("body");
+            let parsed_body: Value = serde_json::from_slice(&buf).expect("json");
+            captured_bg.lock().unwrap().push(CapturedRequest {
+                request_line: request_line.trim().to_owned(),
+                headers,
+                body: parsed_body,
+            });
+
+            let resp = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(resp.as_bytes()).expect("write resp");
+            stream.flush().expect("flush");
+        }
+    });
+
+    let stream1 = IrStream::from_jsonl(&sample_ir_jsonl()).expect("sample ir");
+    let env1 = ProviderRequestEnvelope::from_stream(&stream1, "req_1", "model-a", 30);
+    let env2 = ProviderRequestEnvelope::from_stream(&stream1, "req_2", "model-b", 30);
+    let env3 = ProviderRequestEnvelope::from_stream(&stream1, "req_3", "model-c", 30);
+
+    let mut child = Command::new(provider_bin())
+        .arg("openai-responses")
+        .env("AGENT_PROVIDER_MODE", "coprocess")
+        .env("AGENT_PROVIDER_BASE_URL", format!("http://{addr}/v1"))
+        .env("AGENT_PROVIDER_API_KEY", "sk-coproc")
+        .env("AGENT_PROVIDER_TIMEOUT_SEC", "30")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn coprocess");
+
+    let mut stdin = child.stdin.take().expect("stdin");
+    let mut stdout = BufReader::new(child.stdout.take().expect("stdout"));
+
+    let read_until_terminal = |out: &mut BufReader<_>| -> Vec<ProviderEvent> {
+        let mut evs = Vec::new();
+        loop {
+            let mut line = String::new();
+            let n = out.read_line(&mut line).expect("read stdout line");
+            assert!(n > 0, "unexpected EOF before terminal event");
+            let ev: ProviderEvent = serde_json::from_str(line.trim()).expect("parse event");
+            let is_terminal =
+                matches!(ev, ProviderEvent::Done { .. } | ProviderEvent::Error { .. });
+            evs.push(ev);
+            if is_terminal {
+                break;
+            }
+        }
+        evs
+    };
+
+    writeln!(stdin, "{}", serde_json::to_string(&env1).unwrap()).unwrap();
+    stdin.flush().unwrap();
+    let r1 = read_until_terminal(&mut stdout);
+    assert!(
+        r1.iter()
+            .any(|e| matches!(e, ProviderEvent::TextDelta { text } if text == "turn-one"))
+    );
+    assert!(matches!(r1.last(), Some(ProviderEvent::Done { .. })));
+
+    writeln!(stdin, "{}", serde_json::to_string(&env2).unwrap()).unwrap();
+    stdin.flush().unwrap();
+    let r2 = read_until_terminal(&mut stdout);
+    assert!(matches!(
+        r2.as_slice(),
+        [ProviderEvent::Error { code, retryable: true, .. }] if code == "rate_limit"
+    ));
+
+    // Coprocess MUST remain alive after an error and serve req 3 with overridden model `model-c`.
+    writeln!(stdin, "{}", serde_json::to_string(&env3).unwrap()).unwrap();
+    stdin.flush().unwrap();
+    let r3 = read_until_terminal(&mut stdout);
+    assert!(
+        r3.iter()
+            .any(|e| matches!(e, ProviderEvent::TextDelta { text } if text == "turn-two"))
+    );
+    assert!(matches!(r3.last(), Some(ProviderEvent::Done { .. })));
+
+    // Close stdin EOF => coprocess exits 0 cleanly.
+    drop(stdin);
+    let status = child.wait().expect("wait coprocess");
+    server.join().expect("server");
+    assert_eq!(status.code(), Some(0));
+
+    let reqs = captured.lock().unwrap();
+    assert_eq!(reqs.len(), 3);
+    assert_eq!(reqs[0].body["model"], "model-a");
+    assert_eq!(reqs[1].body["model"], "model-b");
+    assert_eq!(reqs[2].body["model"], "model-c");
+}
+
+#[test]
+fn http_400_image_rejection_maps_to_unsupported_media_non_retryable() {
+    let tmp = TempSymlinkDir::new();
+    let img_path = tmp.dir.join("tiny.png");
+    fs::write(&img_path, b"\x89PNG\r\n\x1a\nfake").expect("write dummy png");
+
+    let stream = IrStream {
+        header: IrHeader {
+            ir_version: IR_VERSION,
+            record_type: HeaderTag::Header,
+            tools: Vec::new(),
+            max_output_tokens: None,
+            params: BTreeMap::new(),
+            meta: IrMeta {
+                stderr_mode: StderrMode::Auto,
+                cwd: "/tmp".into(),
+                turn_budget: None,
+                extra: BTreeMap::new(),
+            },
+            extra: BTreeMap::new(),
+        },
+        messages: vec![
+            IrMessage::system(0, "sys"),
+            IrMessage::User {
+                turn_id: 1,
+                text: "look".into(),
+                media: vec![MediaAttachment {
+                    mime: "image/png".into(),
+                    path: img_path.display().to_string(),
+                }],
+                extra: BTreeMap::new(),
+            },
+        ],
+    };
+
+    let (origin, _, handle) = spawn_mock_server(
+        "400 Bad Request",
+        "application/json",
+        r#"{"error":{"message":"This model does not support image inputs"}}"#.into(),
+    );
+    let (code, events, _) = run_bin(
+        &provider_bin(),
+        &["openai-compat"],
+        &format!("{origin}/v1"),
+        "sk",
+        "text-only",
+        &stream.to_jsonl().unwrap(),
+    );
+    handle.join().expect("server");
+
+    assert_eq!(code, 1);
+    assert!(matches!(
+        events.as_slice(),
+        [ProviderEvent::Error { code, retryable: false, .. }] if code == ERROR_CODE_UNSUPPORTED_MEDIA
     ));
 }

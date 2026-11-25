@@ -9,8 +9,8 @@ use os_agent_proto::provider::{ProviderEvent, TokenUsage};
 use serde_json::{Map, Value, json};
 
 use crate::common::{
-    ProviderEnv, TranslateError, drive_sse_reader, emit_event, parse_tool_arguments,
-    read_media_base64, send_single_shot_post,
+    ProviderEnv, TranslateError, build_http_agent, drive_sse_reader, emit_event,
+    parse_tool_arguments, read_media_base64, send_post_with_agent,
 };
 
 const TAG: &str = "agent-provider-openai-compat";
@@ -310,11 +310,27 @@ struct StreamState {
 
 /// Execute a single-shot streaming POST to `{base_url}/chat/completions`.
 pub fn execute_streaming(env: &ProviderEnv, body: &Value) -> ExitCode {
-    execute_streaming_with_sink(env, body, emit_event)
+    let agent = build_http_agent(env.timeout_sec);
+    execute_streaming_with_agent(&agent, env, false, body, emit_event)
 }
 
 /// Testable streaming executor with custom event sink.
-pub fn execute_streaming_with_sink<F>(env: &ProviderEnv, body: &Value, mut sink: F) -> ExitCode
+pub fn execute_streaming_with_sink<F>(env: &ProviderEnv, body: &Value, sink: F) -> ExitCode
+where
+    F: FnMut(&ProviderEvent),
+{
+    let agent = build_http_agent(env.timeout_sec);
+    execute_streaming_with_agent(&agent, env, false, body, sink)
+}
+
+/// Pooled streaming executor reusing an HTTP `ureq::Agent` across coprocess turns.
+pub fn execute_streaming_with_agent<F>(
+    agent: &ureq::Agent,
+    env: &ProviderEnv,
+    request_has_media: bool,
+    body: &Value,
+    mut sink: F,
+) -> ExitCode
 where
     F: FnMut(&ProviderEvent),
 {
@@ -324,11 +340,19 @@ where
         headers.push(("Authorization", format!("Bearer {}", env.api_key)));
     }
 
-    let response =
-        match send_single_shot_post(TAG, &url, env.timeout_sec, &headers, body, &mut sink) {
-            Ok(resp) => resp,
-            Err(code) => return code,
-        };
+    let response = match send_post_with_agent(
+        agent,
+        TAG,
+        &url,
+        env.timeout_sec,
+        &headers,
+        body,
+        request_has_media,
+        &mut sink,
+    ) {
+        Ok(resp) => resp,
+        Err(code) => return code,
+    };
 
     let content_type = response
         .headers()

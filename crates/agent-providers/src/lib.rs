@@ -96,10 +96,40 @@ impl Dialect {
         stream: &IrStream,
         body: &serde_json::Value,
     ) -> ExitCode {
+        let agent = common::build_http_agent(env.timeout_sec);
+        self.execute_streaming_with_agent(&agent, env, stream, body)
+    }
+
+    /// Execute one streaming HTTP request reusing a pooled `ureq::Agent` (coprocess mode).
+    pub fn execute_streaming_with_agent(
+        self,
+        agent: &ureq::Agent,
+        env: &ProviderEnv,
+        stream: &IrStream,
+        body: &serde_json::Value,
+    ) -> ExitCode {
         match self {
-            Self::OpenAiResponses => openai_responses::execute_streaming(env, body),
-            Self::OpenAiCompat => openai_compat::execute_streaming(env, body),
-            Self::Anthropic => anthropic::execute_streaming(env, stream, body),
+            Self::OpenAiResponses => openai_responses::execute_streaming_with_agent(
+                agent,
+                env,
+                stream.has_media(),
+                body,
+                common::emit_event,
+            ),
+            Self::OpenAiCompat => openai_compat::execute_streaming_with_agent(
+                agent,
+                env,
+                stream.has_media(),
+                body,
+                common::emit_event,
+            ),
+            Self::Anthropic => anthropic::execute_streaming_with_agent(
+                agent,
+                env,
+                stream,
+                body,
+                common::emit_event,
+            ),
         }
     }
 }
