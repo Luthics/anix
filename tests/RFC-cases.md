@@ -145,6 +145,7 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 | [`mcp_guide_follows_anix_xdg_and_project_precedence_without_disclosing_tool_schemas`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L376) | [§1.4](../docs/v1.1.1-RFC.md?plain=1#L33) · [§8.1](../docs/v1.1.1-RFC.md?plain=1#L452) · [§9.6](../docs/v1.1.1-RFC.md?plain=1#L669) |
 | [`runtime_contract_depends_on_stderr_and_only_changes_at_the_tail_on_resume`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L467) | [§4.4](../docs/v1.1.1-RFC.md?plain=1#L209) · [§4.1](../docs/v1.1.1-RFC.md?plain=1#L154) · [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) · [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) |
 | [`each_builtin_can_be_replaced_globally_then_overridden_or_masked_by_the_project`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L524) | [§4.4](../docs/v1.1.1-RFC.md?plain=1#L209) · [§8.3](../docs/v1.1.1-RFC.md?plain=1#L510) · [§9.3](../docs/v1.1.1-RFC.md?plain=1#L626) · [§9.4](../docs/v1.1.1-RFC.md?plain=1#L632) · [§9.6](../docs/v1.1.1-RFC.md?plain=1#L669) |
+| [`post_tool_filters_chain_in_order_and_only_the_final_text_reaches_wal_and_provider`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L585) | [§9.3](../docs/v1.1.1-RFC.md?plain=1#L626) · [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) · [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) · [§4.1](../docs/v1.1.1-RFC.md?plain=1#L154) · [§7.1](../docs/v1.1.1-RFC.md?plain=1#L417) |
 
 ## `crates/anix-core/tests/rfc_runtime/inbox.rs`
 

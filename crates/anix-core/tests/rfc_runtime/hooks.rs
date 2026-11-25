@@ -579,3 +579,89 @@ fn each_builtin_can_be_replaced_globally_then_overridden_or_masked_by_the_projec
         fs::write(&lower, "").unwrap();
     }
 }
+
+// RFC v1.1.1 §9.3, §9.1, §6.2, §4.1, §7.1
+#[test]
+fn post_tool_filters_chain_in_order_and_only_the_final_text_reaches_wal_and_provider() {
+    for status in [0, 7, 124] {
+        let fx = Fixture::new();
+        let root = &fx.dir.0;
+        fs::write(root.join("case.anix"), "fixture").unwrap();
+        fs::write(root.join("sample"), "RAW fixture 文").unwrap();
+        let hooks = root.join("config/anix/hooks/post-tool.d");
+        for (name, capture, substitution) in [
+            ("40-first", "first.json", "s/RAW/INTERMEDIATE/g"),
+            ("50-last", "last.json", "s/INTERMEDIATE/FINAL/g"),
+        ] {
+            executable(
+                &hooks.join(name),
+                &format!(
+                    "#!/bin/sh\nset -eu\n/bin/cat > {capture}\n/usr/bin/sed '{substitution}' {capture}\n"
+                ),
+            );
+        }
+        let cmd = format!("printf public > \"$ANIX_OUT\"; /bin/cat sample; exit {status}");
+        scripted_provider(
+            &fx,
+            &[
+                with_tools([tool("filtered-call", &cmd)]),
+                success_text("done"),
+                success_text("resumed"),
+            ],
+        );
+        let args = [
+            "-q",
+            "-y",
+            "--shell",
+            "/bin/sh",
+            "-c",
+            "history",
+            "case.anix",
+            "--",
+            "go",
+        ];
+        let run = fx.run(fx.anix().args(args));
+        expect_code(&run, 0);
+        assert_eq!(run.stdout, b"public");
+        let read_hook_input = |name: &str| {
+            serde_json::from_slice::<serde_json::Value>(&fs::read(root.join(name)).unwrap())
+                .unwrap()
+        };
+        let first = read_hook_input("first.json");
+        let last = read_hook_input("last.json");
+        assert_eq!(first["cmd"], cmd);
+        assert_eq!(first["exit_code"], status);
+        assert_eq!(first["tool_call_id"], "filtered-call");
+        assert!(first["turn_id"].is_u64());
+        assert_eq!(first["output"], "RAW fixture 文");
+        let mut between = first.clone();
+        between["output"] = "INTERMEDIATE fixture 文".into();
+        assert_eq!(last, between);
+
+        let resume = fx.run(fx.anix().args(args));
+        expect_code(&resume, 0);
+        assert!(resume.stdout.is_empty());
+        for name in ["request-2", "history", "request-3"] {
+            let records = jsonl(&root.join(name));
+            let tools: Vec<_> = records.iter().filter(|r| r["role"] == "tool").collect();
+            assert_eq!(tools.len(), 1, "{name}");
+            let item = tools[0];
+            assert_eq!(item["tool_call_id"], first["tool_call_id"]);
+            assert_eq!(item["turn_id"], first["turn_id"]);
+            // §7.1 specifies the timeout status explicitly. Ordinary nonzero
+            // statuses still pass through the hook, with no mandated error flag.
+            if status == 124 {
+                assert_eq!(item["is_error"], true, "{name}");
+            }
+            if status == 0 {
+                assert!(!item["is_error"].as_bool().unwrap_or(false), "{name}");
+            }
+            let text = item["text"].as_str().unwrap();
+            assert!(text.contains("FINAL fixture 文"), "{name}: {text}");
+            assert!(
+                !text.contains("RAW") && !text.contains("INTERMEDIATE"),
+                "{name}: {text}"
+            );
+        }
+    }
+}
