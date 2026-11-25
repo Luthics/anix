@@ -1,5 +1,5 @@
 //! §§6.5 and 9.2. Each adapter invocation has a distinct input file and exit status.
-use super::{Fixture, done, expect_code, jsonl, scripted_provider, success_text};
+use super::{Fixture, done, expect_code, jsonl, scripted_provider, success_text, tool, with_tools};
 use serde_json::{Value, json};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -226,5 +226,51 @@ fn opaque_round_trips_with_the_same_provider_and_is_removed_before_a_provider_sw
             row["provider_opaque"].is_null() || row["provider_opaque"] == json!({}),
             "private state remained in new provider IR: {row}"
         );
+    }
+}
+
+// RFC v1.1.1 §3.3, §6.5, §9.5
+#[test]
+fn max_turns_allows_completion_on_the_last_request_and_stops_unfinished_work() {
+    for limit in [1, 2] {
+        for completed in [true, false] {
+            let fx = Fixture::new();
+            let root = &fx.dir.0;
+            fs::write(
+                root.join("case.anix"),
+                format!("---\nmax_turns: {limit}\napproval: auto\nshell: /bin/sh\n---\nbody"),
+            )
+            .unwrap();
+            let replies: Vec<_> = (1..=limit)
+                .map(|turn| {
+                    if completed && turn == limit {
+                        success_text("finished")
+                    } else {
+                        with_tools([tool(&format!("call-{turn}"), "printf ok")])
+                    }
+                })
+                .collect();
+            scripted_provider(&fx, &replies);
+            let expected_code = if completed { 0 } else { 124 };
+            let expected_reason = if completed { "completed" } else { "max_turns" };
+            expect_code(&traced(&fx), expected_code);
+            assert_eq!(
+                fs::read_to_string(root.join("count")).unwrap().trim(),
+                limit.to_string()
+            );
+            let trace = jsonl(&root.join("trace"));
+            let ends: Vec<_> = trace
+                .iter()
+                .filter(|row| row["type"] == "cycle_end")
+                .collect();
+            let [end] = ends.as_slice() else {
+                panic!("expected one cycle_end: {ends:?}")
+            };
+            assert_eq!(end["turns"], limit);
+            assert_eq!(end["reason"], expected_reason);
+            assert_eq!(end["exit_code"], expected_code);
+            assert_eq!(trace.last().unwrap()["type"], "run_end");
+            assert_eq!(trace.last().unwrap()["exit_code"], expected_code);
+        }
     }
 }

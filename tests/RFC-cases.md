@@ -175,6 +175,7 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 | [`clean_provider_eof_without_done_preserves_stderr_and_discards_partial_text`](../crates/anix-core/tests/rfc_runtime/provider.rs#L147) | [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) · [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) |
 | [`provider_timeout_maps_to_124_without_a_retry`](../crates/anix-core/tests/rfc_runtime/provider.rs#L158) | [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) · [§6.5](../docs/v1.1.1-RFC.md?plain=1#L400) |
 | [`opaque_round_trips_with_the_same_provider_and_is_removed_before_a_provider_switch`](../crates/anix-core/tests/rfc_runtime/provider.rs#L164) | [§9.2](../docs/v1.1.1-RFC.md?plain=1#L570) · [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) |
+| [`max_turns_allows_completion_on_the_last_request_and_stops_unfinished_work`](../crates/anix-core/tests/rfc_runtime/provider.rs#L234) | [§3.3](../docs/v1.1.1-RFC.md?plain=1#L112) · [§6.5](../docs/v1.1.1-RFC.md?plain=1#L400) · [§9.5](../docs/v1.1.1-RFC.md?plain=1#L645) |
 
 ## `crates/anix-core/tests/rfc_runtime/session.rs`
 
