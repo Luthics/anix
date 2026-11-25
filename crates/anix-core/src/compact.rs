@@ -167,10 +167,15 @@ pub fn run_full_compaction(
         header: IrHeader {
             ir_version: IR_VERSION,
             record_type: HeaderTag::Header,
-            tools: vec![IrStream::msh_tool_def()],
+            tools: if cfg.shell_enabled() {
+                vec![IrStream::msh_tool_def()]
+            } else {
+                Vec::new()
+            },
             max_output_tokens: cfg.max_output_tokens,
             params: cfg.params.clone(),
             meta: IrMeta {
+                output_mode: Some(cfg.output),
                 stderr_mode: cfg.stderr,
                 cwd: cfg.paths.cwd.display().to_string(),
                 turn_budget: Some(cfg.max_turns),
@@ -183,6 +188,8 @@ pub fn run_full_compaction(
     let refreshed_ir = hooks::run_pre_context(
         seed_ir,
         &cfg.paths,
+        cfg.output,
+        cfg.shell_enabled(),
         cfg.stderr,
         cfg.vision,
         cfg.vision_bridge.bin.is_some(),
@@ -213,6 +220,8 @@ pub fn run_full_compaction(
         ts,
         session_id: Some(session_id.to_owned()),
         config: WalConfigSnapshot {
+            output: Some(cfg.output),
+            shell: Some(cfg.shell.clone()),
             stderr: Some(cfg.stderr),
             approval: Some(cfg.approval),
             vision: Some(cfg.vision),
@@ -302,6 +311,7 @@ fn build_toolless_ir(cfg: &ResolvedConfig, messages: Vec<IrMessage>) -> IrStream
             max_output_tokens: None,
             params: BTreeMap::new(),
             meta: IrMeta {
+                output_mode: None,
                 stderr_mode: cfg.stderr,
                 cwd: cfg.paths.cwd.display().to_string(),
                 turn_budget: None,
@@ -472,6 +482,7 @@ fn run_builtin_compactor(
         &cfg.paths,
         cfg.stderr,
         false,
+        provider::TextStreamMode::StderrIfAuto,
         signals,
         provider_pool,
         stderr_tracker,

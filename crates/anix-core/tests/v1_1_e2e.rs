@@ -107,6 +107,9 @@ fn base_cmd(home: &Path, workdir: &Path) -> Command {
         .env_remove("ANIX_TRACE_LEVEL")
         .env_remove("ANIX_VISION")
         .env_remove("ANIX_APPROVAL")
+        .env_remove("ANIX_OUTPUT")
+        .env_remove("ANIX_SHELL")
+        .env_remove("ANIX_STDERR")
         .env_remove("ANIX_YES")
         .env_remove("ANIX_CONTEXT")
         .env_remove("ANIX_INBOX");
@@ -193,7 +196,7 @@ done
     let script = work.join("hello.agent");
     fs::write(
         &script,
-        "---\nname: trace-demo\napproval: auto\n---\nSay hi.\n",
+        "---\nname: trace-demo\napproval: auto\noutput: explicit\n---\nSay hi.\n",
     )
     .unwrap();
 
@@ -677,7 +680,7 @@ done
     let script = work.join("worker.agent");
     fs::write(
         &script,
-        "---\nname: inbox-worker\napproval: auto\n---\nWork.\n",
+        "---\nname: inbox-worker\napproval: auto\noutput: explicit\n---\nWork.\n",
     )
     .unwrap();
 
@@ -895,7 +898,7 @@ timeout_sec = 30
     let script = workdir.join("sess.agent");
     write_exec(
         &script,
-        "#!/usr/bin/env anix\n---\nname: sess-test\n---\nSession test prompt\n",
+        "#!/usr/bin/env anix\n---\nname: sess-test\noutput: explicit\n---\nSession test prompt\n",
     );
 
     // Run 1: fresh WAL -> tool call (aclr -s) -> built-in compaction (writes checkpoint) -> final turn.
@@ -1221,6 +1224,476 @@ done
     assert_eq!(bg_started.len(), 2, "bg_started={bg_started:?}");
     assert_eq!(bg_finished.len(), 2, "bg_finished={bg_finished:?}");
     assert!(bg_finished.iter().all(|e| e["exit_code"] == 0));
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn test_v1_2_0_orthogonal_output_contracts_and_shell_none() {
+    let root = make_temp_env("v120-output");
+    let home = setup_fhs_home(&root);
+    let work = root.join("work");
+    fs::create_dir_all(&work).unwrap();
+
+    // -------------------------------------------------------------------------
+    // Case 1: `shell: none` + `output: reply` (pure-text filter + real 2-stage pipeline)
+    // -------------------------------------------------------------------------
+    let req_log_pure = root.join("reqs_pure.jsonl");
+    let mock_pure = root.join("mock-pure.sh");
+    write_exec(
+        &mock_pure,
+        &format!(
+            r#"#!/usr/bin/env python3
+import json, sys
+for raw in sys.stdin:
+    line = raw.strip()
+    if not line:
+        continue
+    with open({req_log:?}, "a") as f:
+        f.write(line + "\n")
+    req = json.loads(line)
+    last_user = ""
+    for m in req["messages"]:
+        if m["role"] == "user":
+            last_user = m["text"]
+    out = "EN:" + last_user.strip()
+    print(json.dumps({{"type": "text_delta", "text": out}}), flush=True)
+    print(json.dumps({{"type": "usage", "input_tokens": 12, "output_tokens": 6}}), flush=True)
+    print(json.dumps({{"type": "done", "finish_reason": "stop"}}), flush=True)
+"#,
+            req_log = req_log_pure.display().to_string()
+        ),
+    );
+
+    let cfg_dir = home.join(".config/anix");
+    fs::create_dir_all(&cfg_dir).unwrap();
+    fs::write(
+        cfg_dir.join("config.toml"),
+        format!(
+            "[defaults]\nprovider = \"pure\"\nmodel = \"m1\"\n\n[providers.pure]\nbin = \"{}\"\nmode = \"coprocess\"\napi_key_env = \"\"\n",
+            mock_pure.display()
+        ),
+    )
+    .unwrap();
+
+    let pure_script = work.join("to_en.agent");
+    write_exec(
+        &pure_script,
+        "#!/usr/bin/env anix\n---\nname: to-en\nshell: none\noutput: reply\napproval: deny\n---\nTranslate input to English.\n",
+    );
+
+    let trace_pure = root.join("trace_pure.jsonl");
+    let tf_pure = File::create(&trace_pure).unwrap();
+    let mut cmd_pure = base_cmd(&home, &work);
+    cmd_pure
+        .args(["--trace-fd=3"])
+        .arg(&pure_script)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_child_fds(&mut cmd_pure, Some((&tf_pure, 3)));
+    let mut child_pure = cmd_pure.spawn().expect("spawn pure filter");
+    child_pure
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"Ciallo")
+        .unwrap();
+    let out_pure = child_pure.wait_with_output().expect("wait pure filter");
+    drop(tf_pure);
+    assert_eq!(
+        out_pure.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&out_pure.stderr)
+    );
+    // Non-TTY stdout must emit exact bytes without appending `\n`.
+    assert_eq!(String::from_utf8_lossy(&out_pure.stdout), "EN:Ciallo");
+    let pure_stderr = String::from_utf8_lossy(&out_pure.stderr);
+    // Final reply must NOT be echoed to fd 2, and `approval: deny` with `shell: none` must emit no warning.
+    assert!(
+        !pure_stderr.contains("EN:Ciallo"),
+        "stdout reply must not double-print to stderr: {pure_stderr:?}"
+    );
+    assert!(
+        !pure_stderr.contains("warning:"),
+        "shell=none + approval=deny should emit no warning: {pure_stderr:?}"
+    );
+
+    // Inspect IR sent to provider: `tools: []`, `output_mode: "reply"`, no `<runtime_tips>`/`<available_skills>`.
+    let pure_req: Value = serde_json::from_str(
+        fs::read_to_string(&req_log_pure)
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(pure_req["header"]["tools"].as_array().unwrap().len(), 0);
+    assert_eq!(pure_req["header"]["meta"]["output_mode"], "reply");
+    let sys_text = pure_req["messages"][0]["text"].as_str().unwrap();
+    assert!(sys_text.contains("shell=none"), "sys={sys_text}");
+    assert!(!sys_text.contains("<runtime_tips>"), "sys={sys_text}");
+    assert!(!sys_text.contains("<available_skills>"), "sys={sys_text}");
+
+    let pure_trace: Vec<Value> = fs::read_to_string(&trace_pure)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let rs = pure_trace
+        .iter()
+        .find(|e| e["type"] == "run_start")
+        .unwrap();
+    assert_eq!(rs["shell"], "none");
+    assert_eq!(rs["output"], "reply");
+
+    // -------------------------------------------------------------------------
+    // Case 2: `shell: msh` + `output: reply` (default):
+    //   - Turn 1 intermediate text goes to fd 2 ONLY (never fd 1)
+    //   - Inside `msh`, `$ANIX_OUT` is UNSET and `fd 4` is CLOSED
+    //   - Turn 2 final reply goes to fd 1 ONLY (exact bytes, no fd 2 echo)
+    //   - Prompt mentioning `ANIX_OUT` emits non-blocking migration warning
+    // -------------------------------------------------------------------------
+    let probe_file = work.join("msh_probe.txt");
+    let state_hybrid = root.join("hybrid_turn");
+    let mock_hybrid = root.join("mock-hybrid.sh");
+    write_exec(
+        &mock_hybrid,
+        &format!(
+            r#"#!/usr/bin/env python3
+import json, os, shlex, sys
+state_file = {state_file:?}
+probe_file = {probe_file:?}
+for raw in sys.stdin:
+    line = raw.strip()
+    if not line:
+        continue
+    n = int(open(state_file).read().strip()) if os.path.exists(state_file) else 0
+    n += 1
+    open(state_file, "w").write(str(n))
+    if n == 1:
+        cmd = 'fd4_state=OPEN; ( : >&4 ) 2>/dev/null || fd4_state=CLOSED; printf "ANIX_OUT=%s FD4=%s\\n" "${{ANIX_OUT:-UNSET}}" "$fd4_state" > ' + shlex.quote(probe_file)
+        print(json.dumps({{"type": "text_delta", "text": "INTERMEDIATE_NOTE"}}), flush=True)
+        print(json.dumps({{"type": "tool_call", "id": "c_hyb", "name": "msh", "arguments": {{"cmd": cmd}}}}), flush=True)
+        print(json.dumps({{"type": "usage", "input_tokens": 20, "output_tokens": 10}}), flush=True)
+        print(json.dumps({{"type": "done", "finish_reason": "tool_calls"}}), flush=True)
+    else:
+        print(json.dumps({{"type": "text_delta", "text": "HYBRID_FINAL_REPLY"}}), flush=True)
+        print(json.dumps({{"type": "usage", "input_tokens": 30, "output_tokens": 10}}), flush=True)
+        print(json.dumps({{"type": "done", "finish_reason": "stop"}}), flush=True)
+"#,
+            state_file = state_hybrid.display().to_string(),
+            probe_file = probe_file.display().to_string(),
+        ),
+    );
+
+    fs::write(
+        cfg_dir.join("config.toml"),
+        format!(
+            "[defaults]\nprovider = \"hybrid\"\nmodel = \"m1\"\n\n[providers.hybrid]\nbin = \"{}\"\nmode = \"coprocess\"\napi_key_env = \"\"\n\n[providers.pure]\nbin = \"{}\"\nmode = \"coprocess\"\napi_key_env = \"\"\n",
+            mock_hybrid.display(),
+            mock_pure.display(),
+        ),
+    )
+    .unwrap();
+
+    let hybrid_script = work.join("hybrid.agent");
+    write_exec(
+        &hybrid_script,
+        "#!/usr/bin/env anix\n---\nname: hybrid\nprovider: hybrid\napproval: auto\n---\nLegacy prompt mentioning ANIX_OUT.\n",
+    );
+
+    let mut cmd_hyb = base_cmd(&home, &work);
+    cmd_hyb
+        .arg(&hybrid_script)
+        .arg("go")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_child_fds(&mut cmd_hyb, None);
+    let out_hyb = cmd_hyb.output().expect("run hybrid");
+    assert_eq!(out_hyb.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&out_hyb.stdout),
+        "HYBRID_FINAL_REPLY"
+    );
+    let hyb_stderr = String::from_utf8_lossy(&out_hyb.stderr);
+    assert!(
+        hyb_stderr.contains("INTERMEDIATE_NOTE"),
+        "intermediate text must flush to stderr: {hyb_stderr:?}"
+    );
+    assert!(
+        !hyb_stderr.contains("HYBRID_FINAL_REPLY"),
+        "final reply must not double-print to stderr: {hyb_stderr:?}"
+    );
+    assert!(
+        hyb_stderr.contains("warning:") && hyb_stderr.contains("ANIX_OUT"),
+        "expected migration warning for ANIX_OUT in prompt: {hyb_stderr:?}"
+    );
+    let probe = fs::read_to_string(&probe_file).unwrap();
+    assert_eq!(
+        probe.trim(),
+        "ANIX_OUT=UNSET FD4=CLOSED",
+        "fd 4 and ANIX_OUT must be unmounted in output=reply: {probe:?}"
+    );
+
+    // Real 2-stage pipeline: `hybrid.agent` -> `to_en.agent` (`shell: none`)!
+    let _ = fs::remove_file(&state_hybrid);
+    let mut p1_cmd = base_cmd(&home, &work);
+    p1_cmd
+        .arg(&hybrid_script)
+        .arg("go")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    configure_child_fds(&mut p1_cmd, None);
+    let mut p1 = p1_cmd.spawn().expect("spawn pipe stage 1");
+    let p1_stdout = p1.stdout.take().unwrap();
+
+    let mut p2_cmd = base_cmd(&home, &work);
+    p2_cmd
+        .args(["--provider", "pure"])
+        .arg(&pure_script)
+        .stdin(Stdio::from(p1_stdout))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_child_fds(&mut p2_cmd, None);
+    let p2_out = p2_cmd.output().expect("run pipe stage 2");
+    let p1_status = p1.wait().expect("wait pipe stage 1");
+    assert_eq!(p1_status.code(), Some(0));
+    assert_eq!(p2_out.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&p2_out.stdout),
+        "EN:HYBRID_FINAL_REPLY"
+    );
+
+    // -------------------------------------------------------------------------
+    // Case 3: `output: explicit` (`-o explicit`) and Case 4: `output: none` (`-o none`)
+    // -------------------------------------------------------------------------
+    let state_exp = root.join("exp_turn");
+    let mock_exp = root.join("mock-exp.sh");
+    write_exec(
+        &mock_exp,
+        &format!(
+            r#"#!/usr/bin/env python3
+import json, os, sys
+state_file = {state_file:?}
+for raw in sys.stdin:
+    line = raw.strip()
+    if not line:
+        continue
+    n = int(open(state_file).read().strip()) if os.path.exists(state_file) else 0
+    n += 1
+    open(state_file, "w").write(str(n))
+    if n == 1:
+        cmd = 'if [ -n "${{ANIX_OUT:-}}" ]; then printf "RAW_EXPLICIT" > "$ANIX_OUT"; else touch side_effect_only.txt; fi'
+        print(json.dumps({{"type": "tool_call", "id": "c_exp", "name": "msh", "arguments": {{"cmd": cmd}}}}), flush=True)
+        print(json.dumps({{"type": "done", "finish_reason": "tool_calls"}}), flush=True)
+    else:
+        print(json.dumps({{"type": "text_delta", "text": "PROSE_ON_STDERR"}}), flush=True)
+        print(json.dumps({{"type": "done", "finish_reason": "stop"}}), flush=True)
+"#,
+            state_file = state_exp.display().to_string(),
+        ),
+    );
+    fs::write(
+        cfg_dir.join("config.toml"),
+        format!(
+            "[defaults]\nprovider = \"exp\"\nmodel = \"m1\"\n\n[providers.exp]\nbin = \"{}\"\nmode = \"coprocess\"\napi_key_env = \"\"\n",
+            mock_exp.display(),
+        ),
+    )
+    .unwrap();
+    let exp_script = work.join("exp.agent");
+    write_exec(
+        &exp_script,
+        "#!/usr/bin/env anix\n---\nname: exp\napproval: auto\n---\nRun.\n",
+    );
+
+    // Case 3: `-o explicit`
+    let mut cmd_exp = base_cmd(&home, &work);
+    cmd_exp
+        .args(["-o", "explicit"])
+        .arg(&exp_script)
+        .arg("go")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_child_fds(&mut cmd_exp, None);
+    let out_exp = cmd_exp.output().expect("run explicit");
+    assert_eq!(out_exp.status.code(), Some(0));
+    assert_eq!(String::from_utf8_lossy(&out_exp.stdout), "RAW_EXPLICIT");
+    assert!(String::from_utf8_lossy(&out_exp.stderr).contains("PROSE_ON_STDERR"));
+
+    // Case 4: `-o none` -> strictly 0 bytes on fd 1, side effect performed, prose on fd 2.
+    let _ = fs::remove_file(&state_exp);
+    let mut cmd_none = base_cmd(&home, &work);
+    cmd_none
+        .args(["-o", "none"])
+        .arg(&exp_script)
+        .arg("go")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_child_fds(&mut cmd_none, None);
+    let out_none = cmd_none.output().expect("run none");
+    assert_eq!(out_none.status.code(), Some(0));
+    assert!(
+        out_none.stdout.is_empty(),
+        "output=none must keep fd 1 strictly 0 bytes, got {:?}",
+        String::from_utf8_lossy(&out_none.stdout)
+    );
+    assert!(work.join("side_effect_only.txt").is_file());
+    assert!(String::from_utf8_lossy(&out_none.stderr).contains("PROSE_ON_STDERR"));
+
+    // -------------------------------------------------------------------------
+    // Case 5: Startup Fail-Fast (exit 2, before writing WAL `session_init`)
+    // -------------------------------------------------------------------------
+    let ff_wal = root.join("never_created.ctx.jsonl");
+    for args in [
+        vec!["-o", "explicit", "--shell", "none"],
+        vec!["-o", "explicit", "--approval", "deny"],
+        vec!["-o", "reply", "--shell", "/nonexistent/anix-no-such-shell"],
+    ] {
+        let mut cmd_ff = base_cmd(&home, &work);
+        cmd_ff
+            .args(&args)
+            .arg("-c")
+            .arg(&ff_wal)
+            .arg(&exp_script)
+            .arg("go")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        configure_child_fds(&mut cmd_ff, None);
+        let out_ff = cmd_ff.output().expect("run fail-fast");
+        assert_eq!(
+            out_ff.status.code(),
+            Some(2),
+            "args={args:?} expected exit 2, stderr={}",
+            String::from_utf8_lossy(&out_ff.stderr)
+        );
+        assert!(
+            !ff_wal.exists(),
+            "fail-fast must exit before creating WAL for args={args:?}"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Case 6: Legacy WAL lacking `output` field resumes under default `output=reply`
+    //         and emits trailing `<runtime_update>` drift notice!
+    // -------------------------------------------------------------------------
+    let legacy_wal = root.join("legacy_v11.ctx.jsonl");
+    fs::write(
+        &legacy_wal,
+        concat!(
+            r#"{"ir_version":1,"type":"session_init","ts":"2026-11-24T12:00:00Z","session_id":"sid-legacy-120","config":{"stderr":"auto","approval":"auto","vision":true}}"#,
+            "\n",
+            r#"{"type":"message","turn_id":0,"role":"system","ts":"2026-11-24T12:00:00Z","text":"FROZEN_LEGACY_SYS"}"#,
+            "\n",
+            r#"{"type":"message","turn_id":1,"role":"user","ts":"2026-11-24T12:00:01Z","text":"hi"}"#,
+            "\n",
+            r#"{"type":"message","turn_id":2,"role":"assistant","ts":"2026-11-24T12:00:02Z","text":"ok"}"#,
+            "\n"
+        ),
+    )
+    .unwrap();
+    let legacy_req_log = root.join("legacy_req.jsonl");
+    let mock_echo_req = root.join("mock-echo-req.sh");
+    write_exec(
+        &mock_echo_req,
+        &format!(
+            r#"#!/usr/bin/env python3
+import json, sys
+for raw in sys.stdin:
+    line = raw.strip()
+    if not line:
+        continue
+    with open({log:?}, "a") as f:
+        f.write(line + "\n")
+    print(json.dumps({{"type": "text_delta", "text": "RESUMED_OK"}}), flush=True)
+    print(json.dumps({{"type": "done", "finish_reason": "stop"}}), flush=True)
+"#,
+            log = legacy_req_log.display().to_string(),
+        ),
+    );
+    fs::write(
+        cfg_dir.join("config.toml"),
+        format!(
+            "[defaults]\nprovider = \"echo\"\nmodel = \"m1\"\n\n[providers.echo]\nbin = \"{}\"\nmode = \"coprocess\"\napi_key_env = \"\"\n",
+            mock_echo_req.display(),
+        ),
+    )
+    .unwrap();
+
+    let mut cmd_leg = base_cmd(&home, &work);
+    cmd_leg
+        .args(["-c"])
+        .arg(&legacy_wal)
+        .arg(&exp_script)
+        .arg("continue")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_child_fds(&mut cmd_leg, None);
+    let out_leg = cmd_leg.output().expect("run legacy resume");
+    assert_eq!(out_leg.status.code(), Some(0));
+    assert_eq!(String::from_utf8_lossy(&out_leg.stdout), "RESUMED_OK");
+    let leg_req = fs::read_to_string(&legacy_req_log).unwrap();
+    assert!(
+        leg_req.contains("output contract switched to reply"),
+        "expected output drift runtime_update for legacy WAL: {leg_req}"
+    );
+    let leg_wal_after = fs::read_to_string(&legacy_wal).unwrap();
+    assert!(
+        leg_wal_after.contains("\"type\":\"runtime_update\"")
+            && leg_wal_after.contains("\"output\":\"reply\""),
+        "expected persisted runtime_update in WAL: {leg_wal_after}"
+    );
+
+    // -------------------------------------------------------------------------
+    // Case 7: Error safety under `output=reply` + `shell=msh`: partial text flushes
+    //         to fd 2 and keeps fd 1 strictly at 0 bytes!
+    // -------------------------------------------------------------------------
+    let mock_err = root.join("mock-err.sh");
+    write_exec(
+        &mock_err,
+        r#"#!/usr/bin/env sh
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  printf '%s\n' '{"type":"text_delta","text":"PARTIAL_BEFORE_ERR"}'
+  printf '%s\n' '{"type":"error","code":"upstream","message":"boom","retryable":false}'
+done
+"#,
+    );
+    fs::write(
+        cfg_dir.join("config.toml"),
+        format!(
+            "[defaults]\nprovider = \"errp\"\nmodel = \"m1\"\n\n[providers.errp]\nbin = \"{}\"\nmode = \"coprocess\"\napi_key_env = \"\"\n",
+            mock_err.display(),
+        ),
+    )
+    .unwrap();
+    let mut cmd_err = base_cmd(&home, &work);
+    cmd_err
+        .arg(&exp_script)
+        .arg("fail")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_child_fds(&mut cmd_err, None);
+    let out_err = cmd_err.output().expect("run error safety");
+    assert_eq!(out_err.status.code(), Some(1));
+    assert!(
+        out_err.stdout.is_empty(),
+        "partial text before error must NEVER reach fd 1, got {:?}",
+        String::from_utf8_lossy(&out_err.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&out_err.stderr).contains("PARTIAL_BEFORE_ERR"),
+        "partial text before error should flush to fd 2 for diagnostics"
+    );
 
     let _ = fs::remove_dir_all(&root);
 }

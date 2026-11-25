@@ -1,7 +1,7 @@
-# Anix（POSIX 原生 Agent 运行时）v1.1 技术规范
+# Anix（POSIX 原生 Agent 运行时）v1.2 技术规范
 
-**版本**：v1.1.2-rfc  
-**状态**：Normative Specification（合并 v1.0.0-rfc 基线与 v1.1 增量演进）  
+**版本**：v1.2.0-rfc  
+**状态**：Normative Specification（合并 v1.0.0-rfc / v1.1.x 基线与 v1.2 三轴正交输出契约）  
 **协议版本**：`ir_version = 1`  
 **目标平台**：Linux (`x86_64` / `arm64`)、macOS (Apple Silicon / Intel)、WSL2  
 **参考实现语言**：Rust（多个独立静态编译二进制，零外部运行时依赖）
@@ -35,6 +35,11 @@
 * **保持兼容（Forward-Compatible）**：Canonical IR 维持 `ir_version = 1`；WAL 保持 Append-Only 格式前向兼容（v1.1 / v1.1.1 / v1.1.2 新增字段均为可选）；`*.agent` 脚本格式、`$ANIX_OUT`/`$ANIX_ERR`/`$ANIX_CTL` 侧信道与 Lifecycle Hooks 线协议保持不变；所有新增可选插件（`[approval].bin`、`[vision].bin`）未配置时保持原有默认行为。
 * **v1.1.0 → v1.1.1 增量扩展（100% 向后兼容）**：新增会话级路由亲和标识 `session_id`（WAL `session_init`/`checkpoint` 可选字段、Provider 公共环境 `ANIX_SESSION_ID` 与 `coprocess` 信封可选 `session_id`、Trace `run_start.session_id`），用于多副本推理集群、多号池代理与聚合网关的 KV-Cache 粘滞路由与会话溯源；无状态运行自动生成进程级 UUID v4，历史无 `session_id` 的旧 WAL 自动派生确定性回退值。
 * **v1.1.1 → v1.1.2 增量扩展（100% 向后兼容）**：`msh` 工具与运行时升级为**按需等待 + 超时自动转后台（Yield-to-Background）+ 完成自动通知**——模型可在每次 `msh` 工具调用中按需传入可选 `timeout_sec`（`0` 立即后台启动，正数受 `[defaults].max_msh_timeout_sec` 硬上限约束）与 `kill_on_timeout`（默认 `false`）；前台等待到期时默认不杀进程，保留完整日志与退出码文件并通过 `$ANIX_CTL` `bg_job` 帧上报 `anix`，后续后台任务结束时由运行时在下一轮推理前通过 `<runtime_update>` 自动汇报退出码与尾部日志，同时将 `msh` 自身等待循环一并升级为纯事件驱动（`pidfd`/`kqueue`）。
+* **v1.1.2 → v1.2.0 架构收口（三轴正交静态输出契约）**：将**能力轴（`shell: msh | none`）**、**策略轴（`approval: ask | auto | deny`）**与**输出契约轴（`output: reply | explicit | none`，默认 `reply`，CLI `-o/--output` 与 `ANIX_OUTPUT` 覆盖）**彻底正交解耦：
+  * 任何配置下 `fd 1`（`stdout`）均只有**唯一静态确定的写者**，绝不由 LLM 运行时采样决定；
+  * `shell: none` 支持零 Shell 攻击面的纯函数文本过滤器 Agent（`tools: []`，单轮实时流式直出 `fd 1`）；
+  * 默认 `output: reply`（改变 v1.1 默认仅靠 `$ANIX_OUT` 写 `fd 1` 的行为；需要精确工具直通字节流或大文件零拷贝的脚本显式声明 `output: explicit`；仅靠磁盘副作用交付的脚本声明 `output: none`）；
+  * 旧 WAL 未记录 `output` 字段时，恢复漂移对比按 `explicit` 视之并按需注入 `<runtime_update>`；若最终 `output != explicit` 但脚本正文出现 `ANIX_OUT`，向 `fd 2` 输出非阻断迁移警告。
 * **显式契约收口（v1.0 → v1.1 破坏性变更，共 4 项）**：
   1. **废除硬编码 `fd 3` Trace**（§4.1、§9.5）：改为显式 `--trace-fd=<N>` 或 `ANIX_TRACE_FD=<N>`，未指定时不探测、不写入任何额外 FD。
   2. **标准化退出码 `75` 取代 `42`**（§6.5）：对齐 BSD `sysexits.h`，将原挂起/权限拦截退出码 `42` 统一收口为 `75`（`EX_TEMPFAIL`）。
@@ -74,7 +79,8 @@ anix --version             # 输出版本号与支持的 ir_version
 核心 CLI 选项（优先级最高）：
 
 * `-c, --context <FILE>`：指定持久化 WAL JSONL 文件路径；传空串 `""` 强制无状态。
-* `--provider <NAME>` / `--model <ID>` / `--shell <PATH>`
+* `--provider <NAME>` / `--model <ID>` / `--shell <PATH|none>`（`none` 禁用全部 Shell 工具，进入零注入纯文本模式）
+* `-o, --output <reply|explicit|none>`：声明 `fd 1`（stdout）的唯一静态输出契约（默认 `reply`，见 §4.1）
 * `--vision` / `--no-vision`：显式声明当前模型是否支持原生视觉输入（默认 `true`，见 §5.5）。
 * `--max-turns <N>` / `--max-tokens <N>` / `--max-output-tokens <N>` / `--compact-threshold <VAL>` / `--no-compact`
 * `--approval <ask|auto|deny>` / `-y, --yes`（等价于 `--approval auto`）/ `--fail-on-deny`
@@ -118,7 +124,8 @@ stderr: auto
 | `provider` | string | 全局 `defaults.provider` | 必须匹配 `config.toml` 中已定义的 `[providers.<name>]`。 |
 | `model` | string | 全局 `defaults.model` | 非空字符串，传给 Provider 驱动。 |
 | `vision` | bool | `true`（回退 Provider / `defaults`） | 显式声明当前模型是否支持原生视觉输入（见 §5.5）。 |
-| `shell` | string | `"msh"` | 可执行文件路径或 `$PATH` 中的命令名。 |
+| `shell` | string | `"msh"` | 能力轴：可执行文件路径、`$PATH` 命令名，或字面量 `"none"`（禁用 `msh` 工具，`tools: []`）。 |
+| `output` | enum | `"reply"` | 契约轴（v1.2.0）：仅允许 `reply` \| `explicit` \| `none`，静态声明 `fd 1`（stdout）唯一写者（见 §4.1）。 |
 | `max_turns` | uint32 | `20` | 必须 `>= 1`；达到上限且任务未完成时以退出码 `124` 退出。 |
 | `max_tokens` | uint32 | `128000` | 必须 `>= 1024`；上下文硬上限，超出且无法压缩时以退出码 `124` 退出。 |
 | `max_output_tokens` | uint32 | `0`（由上游决定） | 为 `0` 或省略时不写入 IR，沿用上游模型默认上限；若显式设为 `>= 1`，则必须 `< max_tokens`，且写入 IR `header.max_output_tokens`，Provider 必须将其映射至上游输出 Token 上限参数。 |
@@ -137,12 +144,17 @@ stderr: auto
 
 标准环境变量映射：
 
-* `ANIX_PROVIDER`、`ANIX_MODEL`、`ANIX_VISION`（`1`/`true` 为真，`0`/`false` 为假）、`ANIX_SHELL`、`ANIX_MAX_TURNS`、`ANIX_MAX_TOKENS`、`ANIX_MAX_OUTPUT_TOKENS`、`ANIX_COMPACT_THRESHOLD`、`ANIX_APPROVAL`、`ANIX_YES`（`1`/`true` 等价于 `--approval auto`）、`ANIX_STDERR`、`ANIX_LOG`（`human`|`info`|`trace`）、`ANIX_TRACE_FD`、`ANIX_TRACE_LEVEL`、`ANIX_CONTEXT`、`ANIX_INBOX`、`ANIX_IDLE_TIMEOUT`。
+* `ANIX_PROVIDER`、`ANIX_MODEL`、`ANIX_VISION`（`1`/`true` 为真，`0`/`false` 为假）、`ANIX_SHELL`、`ANIX_OUTPUT`（`reply`|`explicit`|`none`）、`ANIX_MAX_TURNS`、`ANIX_MAX_TOKENS`、`ANIX_MAX_OUTPUT_TOKENS`、`ANIX_COMPACT_THRESHOLD`、`ANIX_APPROVAL`、`ANIX_YES`（`1`/`true` 等价于 `--approval auto`）、`ANIX_STDERR`、`ANIX_LOG`（`human`|`info`|`trace`）、`ANIX_TRACE_FD`、`ANIX_TRACE_LEVEL`、`ANIX_CONTEXT`、`ANIX_INBOX`、`ANIX_IDLE_TIMEOUT`。
 * **空串覆盖规则**：`ANIX_CONTEXT=""`（已设置但为空）必须覆盖 Frontmatter 中的 `context`，强制本次运行无状态。
+* **启动期静态校验（Fail-Fast，v1.2.0）**：在全部 6 层配置合并完成之后、写入 WAL `session_init` 之前，必须执行以下确定性校验；凡违规一律向 `fd 2` 报错并以退出码 **`2`** 立即退出（严禁留下无效 WAL 或发起 Provider 请求）：
+  1. `output`、`approval`、`stderr` 枚举值非法 → 退出 `2`；
+  2. `output == explicit` 且 (`shell == none` 或 `approval == deny`) → 退出 `2`（`explicit` 契约要求存在可执行的 Shell 工具向 `$ANIX_OUT` 写入）；
+  3. `shell != none` 但无法解析到具备 `+x` 权限的 Shell 可执行文件 → 退出 `2`（`shell == none` 时跳过检查，且忽略 `approval` 策略）；
+  4. **非阻断警告（输出至 `fd 2`）**：`output == reply && shell != none && approval == deny`、`output == none && shell == none`、以及 `output != explicit` 但脚本正文出现 `ANIX_OUT`（迁移提示）。
 * **子进程隔离规则（默认清空 + 观测白名单 + 主动注入生效审批）**：`anix` 拉起 `msh` 前必须**清空（`unset`）所有 `ANIX_*` 环境变量**（防止父进程的 `ANIX_CONTEXT`、`ANIX_INBOX`、`ANIX_MODEL`、`ANIX_VISION`、`ANIX_TRACE_FD`、`ANIX_MAX_TURNS` 等单实例状态、FD 编号或预算配置隐式污染子 Agent 并覆盖其 Frontmatter），仅按以下规则向下传递：
   * **可观测性白名单透传**：若父进程环境中存在 `ANIX_LOG` 或 `ANIX_TRACE_LEVEL`，原样透传（保证排障时整棵父子 Agent 树保持统一观测粒度；注意 `ANIX_TRACE_FD` 绝不透传，因为父进程的 Trace FD 在 `exec` 前已因 `FD_CLOEXEC` 关闭）；
   * **审批策略主动注入**：必须将当前父进程已解析生效的审批策略主动注入为 `ANIX_APPROVAL=<ask|auto|deny>`（不再单独透传 `ANIX_YES`，统一归一至 `ANIX_APPROVAL`），确保通过 CLI `-y` / `--approval auto` 启动的父进程不会导致子 Agent 回退到 `ask` 并触发 `exit 75`，同时确保 `--approval deny` 不会被子 Agent 的 Frontmatter 绕过提权；
-  * **侧信道主动注入**：注入 `msh` 专属侧信道变量 `ANIX_OUT`、`ANIX_ERR`、`ANIX_CTL`。
+  * **侧信道主动注入**：仅当 `output == explicit` 时注入 `ANIX_OUT=/dev/fd/4` 并挂载 `fd 4`；当 `output == reply | none` 时严禁注入 `ANIX_OUT` 且在子进程 `pre_exec` 显式关闭 `fd 4`。`ANIX_ERR=/dev/fd/5` 与 `ANIX_CTL=/dev/fd/6` 始终注入。
   * 不带 `ANIX_` 前缀的外部变量（如 `OPENAI_API_KEY` 等）保持常规继承。
 * **`params` 浅合并规则**：`params` 字典按 `CLI --param > *.agent Frontmatter params > 项目/全局 config.toml [providers.<name>.params]` 的优先级执行键级浅合并（Shallow Merge），高优先级仅覆盖同名键，不整体清空低优先级字典。
 
@@ -157,7 +169,7 @@ stderr: auto
 | FD | 方向 | 角色 | 确定性行为规范 |
 | :--- | :--- | :--- | :--- |
 | **`fd 0`** | R | 主输入（stdin） | 阻塞读取全部字节直至 EOF（默认不支持流式边读边推）。若 CLI 传入了 `<SCRIPT_ARGS>`，将其按空格拼接并包装为 `<args>...</args>` 置于 `fd 0` 内容之前作为首条 `turn_user` 文本；当 `isatty(0)` 为真且已传入 `<SCRIPT_ARGS>` 时，**严禁阻塞等待 `stdin` EOF**，直接以 `<SCRIPT_ARGS>` 作为用户输入启动推理；仅当 `isatty(0)` 为真且未传入任何 `<SCRIPT_ARGS>` 时，阻塞读取 `stdin` 至 Ctrl+D（EOF）。 |
-| **`fd 1`** | W | 纯净 Payload（stdout） | **无论 `isatty(1)` 真假，严禁写入模型普通文本或日志**。仅转发子进程显式写入 `$ANIX_OUT` 的原始字节流。**严禁**对 `fd 1` 自动追加、裁剪或修改任何换行符，保证二进制或精确 Payload 的字节级原样透传。 |
+| **`fd 1`** | W | 纯净 Payload（stdout） | 遵循静态单写者 **`output`** 契约（v1.2.0，严禁由 LLM 运行时概率决定）：<br>• **`output = reply`（默认）**：仅输出本轮周期成功结束（无 `tool_calls` 的正常 `done`）时最终轮的 assistant 正文（不再重复写入 `fd 2`）。当 `shell = none` 时零延迟实时流式直出 `fd 1`；当 `shell != none` 时按轮缓冲 `text_delta`，确认无 `tool_calls` 后整块写出 `fd 1`（若该轮含 `tool_calls` 或发生错误/中断/预算耗尽，则已缓冲文本按 `stderr` 模式刷至 `fd 2`，`fd 1` 保持 0 字节）。仅当 `isatty(1)` 为真、内容非空且末尾非 `\n` 时补 1 个 `\n`；非 TTY（管道/重定向）时字节级原样输出。<br>• **`output = explicit`**：仅转发子进程显式写入 `$ANIX_OUT` 的原始字节流，无论 `isatty(1)` 真假均严禁写入模型普通文本、日志或自动补换行。<br>• **`output = none`**：严禁向 `fd 1` 写入任何字节（严格 0 字节，适用于纯磁盘副作用型 Agent）。 |
 | **`fd 2`** | W | 人类诊断流（stderr） | `auto` 模式：接收模型普通文本、思考摘要、工具执行状态、`$ANIX_ERR` 写入内容及致命错误；`isatty(2)` 为真时以 ANSI Dim（`\x1b[2m`）降噪渲染。每次推理循环结束（单次模式在进程退出前；`--inbox` 模式在每条消息 `cycle_end` 时）向 `fd 2` 输出一行静态 ANSI Dim `[usage]` 汇总（严禁光标回退或动态刷新），包含当前上下文水位 `ctx <cur>/<max> (<pct>%)`、本次运行/本轮循环累计消耗（含内置压缩器与自动折叠开销，非零细项如 `cached`/`write`/`reasoning` 按需展示），以及 `-c` 持久化会话下的跨压缩总消耗 `total`。<br>`explicit` 模式（含 `-q`）：仅输出 `$ANIX_ERR` 写入内容及运行时致命错误；普通文本与思考仅落 Trace；严禁向 `fd 2` 输出 `[usage]` 汇总行（仍落 Trace 与 `on-exit.d/`）。<br>**确定性换行契约**：见下方专项条款。 |
 | **`--trace-fd=<N>`** | W（可选） | 可配置结构化 Trace（JSONL） | 运行时 **严禁（MUST NOT）** 假定 `fd 3` 为空闲或默认观测通道。仅当通过 `--trace-fd=<N>` 或 `ANIX_TRACE_FD=<N>` 显式指定（CLI 优先级高于环境变量，且 `<N> >= 3`）时，通过 `fcntl(N, F_GETFL)` 校验其已打开且可写（`O_WRONLY`/`O_RDWR`），以单行 UTF-8 JSONL 写入事件；若指定了无效/不可写 FD，必须向 `fd 2` 报错并以退出码 `2` 退出。未指定时，FD 观测流默认关闭（不打开、不探测、不写入任何额外 FD；若 `$XDG_RUNTIME_DIR/anix/journal.sock` 显式存在，可按 §9.5 连接采集器）。 |
 | **`fd 4..=9`** | R（可选） | 静态多路输入 | 启动时按序探测 `fd 4` 至 `fd 9`（**跳过已被 `--trace-fd=<N>` 占用的编号**）：凡处于打开且可读状态（`O_RDONLY`/`O_RDWR`）的 FD，阻塞读取至 EOF，按编号顺序包装为 `<input fd="N">...</input>` 附加在 `fd 0` 内容之后。 |
@@ -201,7 +213,7 @@ git diff HEAD~1 | ./audit.agent --trace-fd=3 3> audit.trace.jsonl 4< error.log |
 | :--- | :--- | :--- |
 | **`fd 0`** | — | 绑定 `/dev/null`（严禁继承外部 stdin，彻底杜绝交互挂起）。 |
 | **`fd 1, fd 2`** | — | 绑定至 `msh` 内部捕获管道，经 ANSI 清洗、超长折叠与二进制熔断后作为工具结果返回模型。 |
-| **`fd 4`** | `ANIX_OUT=/dev/fd/4` | **匿名 `pipe()` 写端**。主进程后台中转将读端原样字节流转发至外部 `anix` 的 `fd 1`。 |
+| **`fd 4`** | `ANIX_OUT=/dev/fd/4`（仅 `output=explicit`） | **仅当 `output == explicit` 时挂载匿名 `pipe()` 写端**，主进程后台中转将读端原样字节流转发至外部 `anix` 的 `fd 1`。当 `output == reply \| none` 时**必须（MUST）**在 `pre_exec` 显式关闭 `fd 4` 且从子进程环境移除 `ANIX_OUT`，确保 `fd 1` 严格单写者。 |
 | **`fd 5`** | `ANIX_ERR=/dev/fd/5` | **匿名 `pipe()` 写端**。主进程后台中转将读端原样字节流转发至外部 `anix` 的 `fd 2`（`auto` 与 `explicit` 模式均始终可用）。 |
 | **`fd 6`** | `ANIX_CTL=/dev/fd/6` | **统一侧信道控制管道（匿名 `pipe()` 写端）**。供 `aview`、`aclr` 等 `a*` 工具向主进程发送单行 JSONL 控制帧（格式见 §7.2）。 |
 
@@ -209,11 +221,13 @@ git diff HEAD~1 | ./audit.agent --trace-fd=3 3> audit.trace.jsonl 4< error.log |
 
 ### 4.4 运行时动态契约注入（`00-posix-runtime`）
 
-`00-posix-runtime` 的默认逻辑必须内置于 `anix` 二进制中（无需依赖磁盘预置文件，确保全新环境与测试开箱即用）；仅当全局或已信任项目 `hooks/pre-context.d/` 中存在同名文件 `00-posix-runtime`（或 0 字节文件 / 指向 `/dev/null` 的软链）时，按 §8.3 规则被外部覆盖或屏蔽。用户编写 `*.agent` 时无需提及 `$ANIX_OUT`/`$ANIX_ERR`。内置默认钩子 `00-posix-runtime` 必须在首轮组装冻结 `system_context` 时按当前生效配置确定性注入契约：
+`00-posix-runtime` 的默认逻辑必须内置于 `anix` 二进制中（无需依赖磁盘预置文件，确保全新环境与测试开箱即用）；仅当全局或已信任项目 `hooks/pre-context.d/` 中存在同名文件 `00-posix-runtime`（或 0 字节文件 / 指向 `/dev/null` 的软链）时，按 §8.3 规则被外部覆盖或屏蔽。用户编写 `*.agent` 时无需手写底层 FD 规则。内置默认钩子 `00-posix-runtime` 必须在首轮组装冻结 `system_context` 时按当前生效的 `(output, shell, stderr, vision)` 四元组确定性注入契约：
 
-* **`stderr = auto`**：声明普通回复展示于 `stderr`，最终交付数据必须通过 `msh` 重定向至 `$ANIX_OUT`，可使用 `$ANIX_ERR` 在命令执行时向人类汇报状态，可使用 `aclr`。
-* **`stderr = explicit`**：声明普通回复仅为内心独白、对人类完全不可见；面向人类的任何提示或警告必须显式写入 `$ANIX_ERR`，最终交付数据必须写入 `$ANIX_OUT`。
-* **`vision` 能力动态适配**：
+* **`output = reply` + `shell = none`**：声明当前为无工具纯文本过滤器模式，最终正文回复将直接流式写入 `fd 1`（stdout）；严禁输出多余寒暄或包装，除非用户提示词明确要求。
+* **`output = reply` + `shell != none`**：声明可使用 `msh` 执行命令与探索；`$ANIX_OUT` 未挂载；仅**最后一轮（不再调用工具）的正文回复**将输出至 `fd 1`（stdout），中间轮次文本与 `$ANIX_ERR` 走 `fd 2`（受 `stderr` 控制）；可使用 `aclr` 及（按 `vision`）`aview`。
+* **`output = explicit`**：声明 `$ANIX_OUT` 已挂载为 `fd 1` 唯一交付通道；`stderr = auto` 时普通回复展示于 `stderr`，`stderr = explicit` 时普通回复仅为内心独白对人类不可见（人类提示须显式写入 `$ANIX_ERR`）；最终交付数据必须通过 `msh` 重定向至 `$ANIX_OUT`。
+* **`output = none`**：声明 `fd 1` 严格静默（`$ANIX_OUT` 未挂载），任务交付通过 `msh` 副作用（如修改文件）完成，人类可读说明走 `fd 2`（`stderr = auto` 为普通文本，`stderr = explicit` 为 `$ANIX_ERR`）。
+* **`vision` 能力动态适配**（仅 `shell != none` 时注入 `aview` 引导）：
   * 当 `vision = true` 时：声明可使用 `aview` 直接查看图片或 PDF 页面。
   * 当 `vision = false` 且未配置 `[vision].bin` 时：**严禁**宣称模型可直接通过 `aview` 原生看图，改为明确提示当前模型无原生视觉能力，处理图片/PDF 需使用文本工具（如 OCR、`pdftotext`）或委派具备视觉能力的子 Agent（如 `vision.agent`）。
   * 当 `vision = false` 且配置了 `[vision].bin` 时：可告知模型 `aview` 会自动将图片转译为纯文本描述返回。
@@ -349,7 +363,7 @@ safe_commands = ["ls", "cat", "head", "tail", "rg", "grep", "find", "pwd", "git 
 2. **KV-Cache 工程让步（不可变 Prefix + 尾部追加）**：
    * *工程注记：在 Transformer 推理架构中，修改历史 Prefix 的任意字节都会导致整条 KV-Cache 失效与 TTFT 崩溃。因此本规范明确采用“首轮冻结 Prefix、后续变更一律尾部追加（Tail-Only Append）”的确定性契约。*
    * **首轮冻结**：新建 `<file>` 时，执行 `pre-context.d/` 并将初始配置写入 `session_init` 行，紧随其后将冻结的系统提示词写入 `turn_id: 0` 的 `role: "system"` 消息行；后续恢复时原样复用该冻结前缀。
-   * **Config Drift 尾部通知**：恢复运行若检测到契约类配置（如 `stderr`、`approval`、`vision`）与 WAL 中最新生效状态不一致，当前调用参数胜出，严禁改动头部 `role: "system"`，仅在尾部追加一条 `runtime_update` 事件（映射至 IR 时作为尾部 `role: "system"` 增量消息，若上游 API 不支持中间 `system` 则由 Provider 降级为 `user`）。
+   * **Config Drift 尾部通知**：恢复运行若检测到契约类配置（如 `output`、`shell` 启用状态、`stderr`、`approval`、`vision`）与 WAL 中最新生效状态不一致，当前调用参数胜出，严禁改动头部 `role: "system"`，仅在尾部追加一条 `runtime_update` 事件（映射至 IR 时作为尾部 `role: "system"` 增量消息，若上游 API 不支持中间 `system` 则由 Provider 降级为 `user`）。**v1.2.0 向后兼容**：若逆读的旧版 WAL 缺失 `output` 字段，漂移检测必须将其视作 `explicit`（从而在默认 `output=reply` 下恢复时自动向模型注入一次 `runtime_update` 切换通知）。
    * **大压缩分节（唯一刷新时机）**：仅当自动压缩、`aclr -s` 或 `SIGUSR1` 触发大压缩时，在文件末尾追加一个新的 **`checkpoint` 分节头**（携带 `ir_version: 1`、最新 `config` 与新 `turn_id`），紧接着追加重新执行 `pre-context.d/` 生成的新冻结 `role: "system"` 行与摘要行；`aclr -t` 尾部折叠严禁刷新头部 Prefix。
 3. **WAL JSONL 事件 Schema**（每行必须为合法 JSON + `\n`，每轮结束原子 flush）：
    * **会话路由标识（`session_id`，v1.1.1）**：`session_init` 与 `checkpoint` 分节头均携带可选字段 `session_id`（UTF-8 字符串，默认 UUID v4）。新建 WAL 时生成一次并写入 `session_init`；触发大压缩写入 `checkpoint` 时**必须（MUST）**原样延续当前会话的 `session_id`，确保 `O(当前活跃窗口)` 逆读停在 `checkpoint` 时仍能恢复同一会话标识；无状态运行（未传 `-c`）时，进程启动生成 1 个临时 UUID v4 并在本次运行的全部推理轮次（含内置压缩器调用）内保持不变；逆读缺失 `session_id` 的旧版本 WAL 时严禁报错，必须基于该 WAL 规范路径派生确定性回退标识。
@@ -358,14 +372,14 @@ safe_commands = ["ls", "cat", "head", "tail", "rg", "grep", "find", "pwd", "git 
    * `checkpoint` 分节头可携带可选字段 `compact_usage`（仅内置压缩器生效时记录本次压缩消耗）与 `cumulative_usage`（5 字段前缀和，等于上一 `checkpoint` 的 `cumulative_usage`（无则为全 0）加上本段窗口内所有 `assistant.usage`（含后续被 `fold` 剪枝的行）、本段所有 `fold.fold_usage` 与本次 `compact_usage`）。
 
 ```json
-{"ir_version":1,"type":"session_init","ts":"2026-11-24T12:00:00Z","session_id":"550e8400-e29b-41d4-a716-446655440000","config":{"stderr":"auto","approval":"ask","vision":true}}
+{"ir_version":1,"type":"session_init","ts":"2026-11-24T12:00:00Z","session_id":"550e8400-e29b-41d4-a716-446655440000","config":{"output":"reply","shell":"msh","stderr":"auto","approval":"ask","vision":true}}
 {"type":"message","turn_id":0,"role":"system","ts":"2026-11-24T12:00:00Z","text":"<posix_runtime>...</posix_runtime>\n\n你是一个安全审计专家..."}
 {"type":"message","turn_id":1,"role":"user","ts":"...","text":"分析这个报错截图"}
 {"type":"message","turn_id":2,"role":"assistant","ts":"...","text":"","reasoning":"...","tool_calls":[{"id":"call_1","name":"msh","arguments":{"cmd":"aview err.png"}}],"usage":{"input_tokens":4200,"output_tokens":380,"cached_tokens":3600,"cache_write_tokens":400,"reasoning_tokens":200}}
 {"type":"message","turn_id":3,"role":"tool","ts":"...","tool_call_id":"call_1","text":"[t3] exit=0\n","media":[{"mime":"image/png","path":"/tmp/aview_xxx.png"}]}
-{"type":"runtime_update","turn_id":4,"ts":"...","content":"stderr mode switched to explicit...","config":{"stderr":"explicit"}}
+{"type":"runtime_update","turn_id":4,"ts":"...","content":"stderr mode switched to explicit...","config":{"output":"reply","shell":"msh","stderr":"explicit"}}
 {"type":"fold","ts":"...","from_turn":3,"to_turn":6,"summary":"使用xx是错误的","fold_usage":{"input_tokens":1800,"output_tokens":95,"cached_tokens":0,"cache_write_tokens":0,"reasoning_tokens":0}}
-{"ir_version":1,"type":"checkpoint","turn_id":7,"ts":"...","session_id":"550e8400-e29b-41d4-a716-446655440000","config":{"stderr":"explicit","approval":"ask","vision":true},"compact_usage":{"input_tokens":98000,"output_tokens":1200,"cached_tokens":80000,"cache_write_tokens":0,"reasoning_tokens":400},"cumulative_usage":{"input_tokens":246800,"output_tokens":8695,"cached_tokens":192000,"cache_write_tokens":6400,"reasoning_tokens":3100}}
+{"ir_version":1,"type":"checkpoint","turn_id":7,"ts":"...","session_id":"550e8400-e29b-41d4-a716-446655440000","config":{"output":"reply","shell":"msh","stderr":"explicit","approval":"ask","vision":true},"compact_usage":{"input_tokens":98000,"output_tokens":1200,"cached_tokens":80000,"cache_write_tokens":0,"reasoning_tokens":400},"cumulative_usage":{"input_tokens":246800,"output_tokens":8695,"cached_tokens":192000,"cache_write_tokens":6400,"reasoning_tokens":3100}}
 {"type":"message","turn_id":7,"role":"system","ts":"...","text":"<posix_runtime>...</posix_runtime>\n\n你是一个安全审计专家..."}
 {"type":"message","turn_id":8,"role":"user","ts":"...","text":"<checkpoint>\n...\n</checkpoint>"}
 ```
@@ -487,6 +501,7 @@ max_turns = 20
 max_tokens = 128000
 # max_output_tokens = 16384  # 可选：全局默认单轮输出上限（省略或为 0 时使用上游默认）
 compact_threshold = 0.8
+# output = "reply"           # 可选：全局默认 fd 1 输出契约（reply | explicit | none，默认 reply）
 # msh_timeout_sec = 120      # 可选：单条 msh 命令默认前台等待秒数（默认 120）
 # max_msh_timeout_sec = 600  # 可选：模型按次指定 timeout_sec 的硬上限（默认 600）
 approval = "ask"
@@ -562,7 +577,7 @@ Canonical IR 是 `anix` 核心与外部 Provider、`pre-context.d/` 钩子及外
   * `tools` (`ToolDef[]`, 必填)：工具声明数组（全量压缩与自动尾部折叠时为 `[]`，为空时 Provider 必须省略上游工具字段）。
   * `max_output_tokens` (`uint32`, 可选)：单轮输出 Token 上限（未设置或为 `0` 时省略）。存在时 Provider **必须**将其映射至上游 API 的对应输出上限参数，严禁静默忽略。
   * `params` (`object`, 可选)：经运行时浅合并后的模型透传参数字典（为空时省略），由 Provider 自行解释与映射。推荐生态对齐键：`reasoning_effort`（`"none"|"low"|"medium"|"high"`）、`temperature`（`float`）；Provider 遇到不支持的键时**应当**忽略或向 `stderr` 输出非致命警告，严禁因此失败退出。
-  * `meta` (`Meta`, 必填)：`{"stderr_mode": "auto"|"explicit", "cwd": "<abs_path>"}`，可选含 `turn_budget`。
+  * `meta` (`Meta`, 必填)：`{"stderr_mode": "auto"|"explicit", "output_mode": "reply"|"explicit"|"none", "cwd": "<abs_path>"}`，可选含 `turn_budget`（`output_mode` 为 v1.2.0 新增可选字段，保持 `ir_version = 1` 前向兼容）。
   * *前向兼容*：`ir_version = 1` 下遇到未识别扩展字段（如 `x_*`）必须忽略而非报错；钩子应当原样透传未修改字段。
 * **消息项（按 `role` 区分，顺序即时间顺序）**：
   * **`role = "system"`**：`turn_id` (`uint64`, 必填)、`text` (`string`, 必填)。首条 `role: "system"` 为冻结系统前缀，Provider 必须映射至上游 `system` / `instructions` 且严禁改动其字节内容以保 KV-Cache；尾部因 `runtime_update` 追加的 `role: "system"` 若上游 API 不支持中间 `system` 角色，由 Provider 降级映射为 `user` 消息。
@@ -675,7 +690,7 @@ JSONL 形态示例：
    ```
 3. **三级存储粒度（`ANIX_TRACE_LEVEL`）**：
    * `events`（`journal.sock` 推荐默认）：记录完整嵌套生命周期事件（`run_start`、`cycle_start`、`llm_request_start`、`llm_response`、`provider_error`、`tool_approval`、`tool_start`、`tool_end`、`bg_job_started`、`bg_job_finished`、`compact`、`fold`、`cycle_end`、`idle`、`warning`、`error`、`run_end`）：
-     * `run_start`：携带 `session_id`（v1.1.1）、`provider`、`model`、`vision`、`fresh_session` 与 `inbox_mode`；
+     * `run_start`：携带 `session_id`（v1.1.1）、`provider`、`model`、`shell`（v1.2.0）、`output`（v1.2.0）、`vision`、`fresh_session` 与 `inbox_mode`；
      * `cycle_start`：每次进入推理循环前发出（单次模式与 `--inbox` 模式同构），携带 `cycle_id`（从 `1` 单调递增）、`source`（初始输入为 `"initial"`，Inbox 消息为文件名 `<name>`）与 `start_turn_id`；
      * `cycle_end`：作为**严格提交屏障**，在该次推理循环结束、WAL 已原子落盘且 `--inbox` 消息已移入 `done/` **之后**发出，携带 `cycle_id`、`source`、`reason`（`"completed"` | `"max_turns"` | `"max_tokens"` | `"approval_blocked"` | `"provider_error"` | `"error"` | `"interrupted"`）、`exit_code`、`turns`（本轮循环内执行轮次）、`cycle_usage`（本轮循环 5 字段消耗）、`usage`（本次进程累计 5 字段消耗）、`session_usage` 与 `context` 水位对象；
      * `idle`：仅 `--inbox` 模式在 `new/` 队列排空、进入事件阻塞待命时发出一次（携带 `idle_timeout_sec`），直至新消息到达前不重复发出；
@@ -799,3 +814,4 @@ JSONL 形态示例：
 | 品牌与命名统一（Anix） | 全局 | 项目更名为 Anix；主二进制 `anix`、`anix-provider*`、路径 `.anix/` / `libexec/anix`、环境变量 `ANIX_*`（`msh`/`aview`/`aclr` 不变） | `anix` | 不适用 | **破坏性收口** |
 | 会话路由亲和（v1.1.1） | §6.2, §9.2, §9.5 | WAL `session_id`、Provider `ANIX_SESSION_ID` / 信封 `session_id`、Trace `run_start.session_id` | 自动生成 UUID v4 | 不适用 | 向后兼容增量 |
 | 按需超时与自动转后台（v1.1.2） | §6.3, §7.1.5, §7.2, §8.2, §9.1, §9.5 | `msh` 入参 `timeout_sec`/`kill_on_timeout`、`max_msh_timeout_sec`、`$ANIX_CTL` `bg_job` 帧、`<runtime_update>` 完成通知、`msh` 纯事件驱动等待 | `120s` / 上限 `600s` / 默认不杀转后台 | 不适用 | 向后兼容增量 |
+| 三轴正交输出契约（v1.2.0） | §3.1, §3.3, §3.4, §4.1, §4.3, §4.4, §6.2, §8.2, §9.1, §9.5 | 能力轴 `shell: msh \| none`、契约轴 `output: reply \| explicit \| none`（`-o`/`ANIX_OUTPUT`）、启动期 Fail-Fast 校验（exit 2）、`reply`/`none` 显式关闭 `fd 4` | `output = reply` | 不适用 | **默认输出契约升级（旧 WAL 回退按 `explicit` 处理）** |

@@ -3,11 +3,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::ir::{ApprovalMode, MediaAttachment, StderrMode, ToolCall};
+use crate::ir::{ApprovalMode, MediaAttachment, OutputMode, StderrMode, ToolCall};
 use crate::provider::TokenUsage;
 
 /// Contract-level configuration recorded in `session_init`, `checkpoint`, and `runtime_update`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WalConfigSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stderr: Option<StderrMode>,
@@ -15,6 +15,10 @@ pub struct WalConfigSnapshot {
     pub approval: Option<ApprovalMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vision: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<OutputMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell: Option<String>,
 }
 
 /// Message role stored in WAL `"type": "message"` entries.
@@ -104,6 +108,8 @@ mod tests {
             ts: "2026-11-24T12:00:00Z".into(),
             session_id: Some("550e8400-e29b-41d4-a716-446655440000".into()),
             config: WalConfigSnapshot {
+                output: Some(OutputMode::Reply),
+                shell: Some("msh".into()),
                 stderr: Some(StderrMode::Auto),
                 approval: Some(ApprovalMode::Ask),
                 vision: Some(true),

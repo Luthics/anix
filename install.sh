@@ -7,7 +7,7 @@
 #   gh api repos/Luthics/anix/contents/install.sh -H "Accept: application/vnd.github.raw" | sh
 #
 # Environment overrides:
-#   ANIX_VERSION=v0.0.5           Pin a specific release tag (default: latest release)
+#   ANIX_VERSION=v0.0.6           Pin a specific release tag (default: latest release)
 #   ANIX_PREFIX=$HOME/.local      Install prefix (default: ~/.local)
 #   ANIX_REPO=Luthics/anix
 #   GITHUB_TOKEN / GH_TOKEN       Optional GitHub token (needed if repo is private and `gh` is absent)
@@ -119,7 +119,7 @@ resolve_latest_version() {
       v*) printf '%s' "$tag"; return 0 ;;
     esac
   fi
-  printf '%s' "v0.0.5"
+  printf '%s' "v0.0.6"
 }
 
 download_release_assets() {
@@ -262,6 +262,7 @@ max_turns = 100
 max_tokens = 256000
 compact_threshold = 0.8
 approval = "auto"
+output = "reply"
 stderr = "auto"
 
 [providers.openai-responses]
@@ -295,6 +296,7 @@ max_turns: 100
 max_tokens: 256000
 compact_threshold: 0.8
 approval: auto
+output: reply
 stderr: auto
 ---
 你是 Bash 专家，响应用户的指令

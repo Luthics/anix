@@ -640,6 +640,7 @@ mod tests {
                 max_output_tokens: Some(4096),
                 params: BTreeMap::from([("reasoning_effort".into(), json!("medium"))]),
                 meta: IrMeta {
+                    output_mode: None,
                     stderr_mode: StderrMode::Auto,
                     cwd: "/tmp".into(),
                     turn_budget: None,
