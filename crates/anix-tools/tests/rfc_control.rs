@@ -3,7 +3,7 @@
 use image::{DynamicImage, GenericImageView, ImageFormat, Rgba, RgbaImage};
 use serde_json::{Value, json};
 use std::fs;
-use std::io::{Cursor, Write};
+use std::io::{Cursor, ErrorKind, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
@@ -20,8 +20,17 @@ fn invoke(tool: &str, args: &[&str], input: &[u8]) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child.stdin.take().unwrap().write_all(input).unwrap();
-    child.wait_with_output().unwrap()
+    let write_result = child.stdin.take().unwrap().write_all(input);
+    let output = child.wait_with_output().unwrap();
+    if let Err(err) = write_result {
+        // Invalid options may terminate the tool before it reads stdin.
+        assert!(
+            err.kind() == ErrorKind::BrokenPipe && !output.status.success(),
+            "stdin write failed for {args:?}: {err}; child status {}",
+            output.status
+        );
+    }
+    output
 }
 
 fn frame(result: &Output) -> Value {

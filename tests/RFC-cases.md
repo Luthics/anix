@@ -362,16 +362,16 @@
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`aclr_emits_a_single_compact_or_fold_frame_with_lossless_json_escaping`](../crates/anix-tools/tests/rfc_control.rs#L41) | [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) · [§6.1](../docs/v1.1.2-RFC.md?plain=1#L317) |
-| [`aclr_without_a_summary_omits_the_field_at_each_valid_turn_id_boundary`](../crates/anix-tools/tests/rfc_control.rs#L58) | [§6.1](../docs/v1.1.2-RFC.md?plain=1#L317) · [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
-| [`invalid_aclr_argv_never_submits_a_frame`](../crates/anix-tools/tests/rfc_control.rs#L68) | [§6.1](../docs/v1.1.2-RFC.md?plain=1#L317) · [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
-| [`fold_control_frames_stay_within_64_kib_even_after_json_escaping`](../crates/anix-tools/tests/rfc_control.rs#L87) | [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
-| [`aview_resizes_portrait_landscape_and_square_images_only_when_needed`](../crates/anix-tools/tests/rfc_control.rs#L139) | [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
-| [`aview_file_input_and_stdin_agree_on_image_dimensions`](../crates/anix-tools/tests/rfc_control.rs#L162) | [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
-| [`aview_preserves_image_content_and_orientation_in_the_published_png`](../crates/anix-tools/tests/rfc_control.rs#L177) | [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
-| [`undecodable_input_or_invalid_options_do_not_emit_media`](../crates/anix-tools/tests/rfc_control.rs#L221) | [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
-| [`aview_selects_pdf_pages_with_their_actual_geometry_and_colors`](../crates/anix-tools/tests/rfc_control.rs#L236) | [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
-| [`aview_rejects_invalid_pdf_page_expressions_without_publishing_attachments`](../crates/anix-tools/tests/rfc_control.rs#L305) | [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
+| [`aclr_emits_a_single_compact_or_fold_frame_with_lossless_json_escaping`](../crates/anix-tools/tests/rfc_control.rs#L50) | [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) · [§6.1](../docs/v1.1.2-RFC.md?plain=1#L317) |
+| [`aclr_without_a_summary_omits_the_field_at_each_valid_turn_id_boundary`](../crates/anix-tools/tests/rfc_control.rs#L67) | [§6.1](../docs/v1.1.2-RFC.md?plain=1#L317) · [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
+| [`invalid_aclr_argv_never_submits_a_frame`](../crates/anix-tools/tests/rfc_control.rs#L77) | [§6.1](../docs/v1.1.2-RFC.md?plain=1#L317) · [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
+| [`fold_control_frames_stay_within_64_kib_even_after_json_escaping`](../crates/anix-tools/tests/rfc_control.rs#L96) | [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
+| [`aview_resizes_portrait_landscape_and_square_images_only_when_needed`](../crates/anix-tools/tests/rfc_control.rs#L148) | [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
+| [`aview_file_input_and_stdin_agree_on_image_dimensions`](../crates/anix-tools/tests/rfc_control.rs#L171) | [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
+| [`aview_preserves_image_content_and_orientation_in_the_published_png`](../crates/anix-tools/tests/rfc_control.rs#L186) | [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
+| [`undecodable_input_or_invalid_options_do_not_emit_media`](../crates/anix-tools/tests/rfc_control.rs#L230) | [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
+| [`aview_selects_pdf_pages_with_their_actual_geometry_and_colors`](../crates/anix-tools/tests/rfc_control.rs#L245) | [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
+| [`aview_rejects_invalid_pdf_page_expressions_without_publishing_attachments`](../crates/anix-tools/tests/rfc_control.rs#L314) | [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
 
 ## `crates/msh/tests/rfc_shell.rs`
 
