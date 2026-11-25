@@ -83,7 +83,7 @@
 | 可验收行为 | 测试与问题 |
 | --- | --- |
 | [有参数的可执行脚本通过 PATH 或相对路径启动，TTY 保持打开即可推理](../docs/v1.1.2-RFC.md?plain=1#L159) | [`test_installed_bash_script_accepts_args_on_path_and_by_relative_name_without_tty_eof`](../tests/test_distribution.py#L248) |
-| [无参数且 stdin 为终端时等待实际 EOF，再将输入交给 Provider](../docs/v1.1.2-RFC.md?plain=1#L159) | [`test_executable_script_on_path_and_by_relative_name_obeys_tty_eof_rules`](../tests/test_provider_streaming.py#L443) · [#34](https://github.com/Luthics/anix/issues/34) |
+| [无参数且 stdin 为终端时等待实际 EOF，再将输入交给 Provider](../docs/v1.1.2-RFC.md?plain=1#L159) | [`test_executable_script_on_path_and_by_relative_name_obeys_tty_eof_rules`](../tests/test_provider_streaming.py#L442) · [#34](https://github.com/Luthics/anix/issues/34) |
 | [带参数启动，Provider 首帧前是否必须显示等待提示](../docs/v1.1.2-RFC.md?plain=1#L159) | [#36](https://github.com/Luthics/anix/issues/36) |
 | [重定向与真实管道只转发显式 Payload，保留原始字节](../docs/v1.1.2-RFC.md?plain=1#L160) | [`repeated_payload_redirection_appends_raw_bytes_in_both_stderr_modes`](../crates/anix-core/tests/rfc_runtime/io.rs#L87) · [`test_installed_pipeline_and_fold`](../tests/test_distribution.py#L272) |
 | [末尾无换行的模型文本与使用量行分行显示](../docs/v1.1.2-RFC.md?plain=1#L169) | [`trace_fd_explicit_only_no_implicit_fd3_and_cycle_events`](../crates/anix-core/tests/v1_1_e2e.rs#L161) |
@@ -103,7 +103,7 @@
 | 可验收行为 | 测试与问题 |
 | --- | --- |
 | [当前工具批次闭合后才取下一条已发布消息](../docs/v1.1.2-RFC.md?plain=1#L188) | [`concurrent_publications_wait_for_tool_closure_and_preserve_each_complete_body`](../crates/anix-core/tests/rfc_runtime/inbox.rs#L19) |
-| [成功消息先提交，下一条被中断时仍可识别已完成的轮次](../docs/v1.1.2-RFC.md?plain=1#L190) | [`test_inbox_commits_one_message_then_interrupts_the_next_in_the_same_coprocess`](../tests/test_provider_streaming.py#L591) · [#37](https://github.com/Luthics/anix/issues/37) |
+| [成功消息先提交，下一条被中断时仍可识别已完成的轮次](../docs/v1.1.2-RFC.md?plain=1#L190) | [`test_inbox_commits_one_message_then_interrupts_the_next_in_the_same_coprocess`](../tests/test_provider_streaming.py#L590) · [#37](https://github.com/Luthics/anix/issues/37) |
 | [Linux 空闲时只发一次 idle，新任务结束后重新待命](../docs/v1.1.2-RFC.md?plain=1#L193) | [`an_idle_inbox_sleeps_without_periodic_wakeups_then_consumes_a_publication`](../crates/anix-core/tests/rfc_runtime/inbox.rs#L336) |
 | [新建四个子目录及根目录的权限与就绪时间](../docs/v1.1.2-RFC.md?plain=1#L185) | [`concurrent_publications_wait_for_tool_closure_and_preserve_each_complete_body`](../crates/anix-core/tests/rfc_runtime/inbox.rs#L19) · [`a_publisher_can_queue_work_while_the_initial_cli_task_is_running`](../crates/anix-core/tests/rfc_runtime/inbox.rs#L120) · [#21](https://github.com/Luthics/anix/issues/21) |
 | [多发送方只发布完整文件](../docs/v1.1.2-RFC.md?plain=1#L186) | [`concurrent_publications_wait_for_tool_closure_and_preserve_each_complete_body`](../crates/anix-core/tests/rfc_runtime/inbox.rs#L19) |
@@ -230,7 +230,7 @@
 
 | 可验收行为 | 测试与问题 |
 | --- | --- |
-| [Ctrl+C 在等待 Provider 或其关闭 stdout 后回到可继续执行管道的同一 shell](../docs/v1.1.2-RFC.md?plain=1#L395) | [`test_keyboard_interrupt_returns_to_the_same_shell_while_waiting_for_provider`](../tests/test_provider_streaming.py#L493) · [`test_keyboard_interrupt_reaches_a_provider_that_closed_stdout_before_exit`](../tests/test_provider_streaming.py#L550) · [#35](https://github.com/Luthics/anix/issues/35) |
+| [Ctrl+C 在等待 Provider 或其关闭 stdout 后回到可继续执行管道的同一 shell](../docs/v1.1.2-RFC.md?plain=1#L395) | [`test_keyboard_interrupt_returns_to_the_same_shell_while_waiting_for_provider`](../tests/test_provider_streaming.py#L492) · [`test_keyboard_interrupt_reaches_a_provider_that_closed_stdout_before_exit`](../tests/test_provider_streaming.py#L549) · [#35](https://github.com/Luthics/anix/issues/35) |
 | [在内置审批处只按一次 Ctrl+C，命令不执行，原 shell 恢复并读到退出码 130](../docs/v1.1.2-RFC.md?plain=1#L395) | [`test_ctrl_c_at_the_approval_prompt_returns_to_the_same_shell`](../tests/test_approval.py#L345) · [#49](https://github.com/Luthics/anix/issues/49) |
 | [外部审批中收到 SIGTERM，退出 143 并记录中断](../docs/v1.1.2-RFC.md?plain=1#L396) | [`test_interrupt_during_external_decision_identifies_the_decider_in_trace`](../tests/test_approval.py#L379) · [#50](https://github.com/Luthics/anix/issues/50) |
 | [工具输出一部分后中断，shell 后代收到 TERM、释放 WAL 锁，恢复时没有半截工具结果](../docs/v1.1.2-RFC.md?plain=1#L395) | [`test_interrupting_a_live_msh_discards_its_partial_result_and_replays_a_closed_history`](../tests/test_shell_pipeline.py#L371) |
@@ -386,7 +386,7 @@
 | [消费者保持连接但停止读取时的背压及恢复语义](../docs/v1.1.2-RFC.md?plain=1#L671) | [#11](https://github.com/Luthics/anix/issues/11) |
 | [初始 Trace 与 WAL、Provider 环境和协进程信封可用同一标识关联](../docs/v1.1.2-RFC.md?plain=1#L678) | [`latest_checkpoint_supplies_exact_stored_id_to_trace_env_and_coprocess_envelope`](../crates/anix-core/tests/rfc_runtime/session.rs#L195) |
 | [模型只看清洗后文本，私有 wire 文件保留命令实际输出的 ANSI 字节](../docs/v1.1.2-RFC.md?plain=1#L689) | [`test_wire_trace_keeps_raw_msh_output_while_the_model_receives_cleaned_text`](../tests/test_provider_streaming.py#L198) · [#52](https://github.com/Luthics/anix/issues/52) |
-| [协进程的 error 帧和 stderr 异步抵达时，诊断文本如何划分到对应请求](../docs/v1.1.2-RFC.md?plain=1#L687) | [#38](https://github.com/Luthics/anix/issues/38) |
+| [协进程错误事件含字符串 provider_stderr。异步诊断是否完整、如何划分到对应请求待裁定](../docs/v1.1.2-RFC.md?plain=1#L687) | [`test_http_429_and_503_are_traced_by_the_core_before_replaying_the_request`](../tests/test_provider_streaming.py#L409) · [#38](https://github.com/Luthics/anix/issues/38) |
 | [Trace 通用 error 事件的适用故障范围待明确](../docs/v1.1.2-RFC.md?plain=1#L677) | [#32](https://github.com/Luthics/anix/issues/32) |
 | [检查已终止的任务组且没有退出码文件时，完成事件含显式 null，后续推理不重复通知](../docs/v1.1.2-RFC.md?plain=1#L684) | [`test_finished_group_without_an_exit_file_reports_null_exactly_once`](../tests/test_msh_jobs.py#L342) |
 | [started 和 finished 通过相同任务标识、PID、进程组和日志路径关联，并报告真实状态及经过的毫秒数](../docs/v1.1.2-RFC.md?plain=1#L684) | [`test_background_completion_is_reported_once_before_inference_and_replays_from_wal`](../tests/test_msh_jobs.py#L280) |

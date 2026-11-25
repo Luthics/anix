@@ -227,7 +227,7 @@
 9.5	严禁阻塞推理循环	消费者保持连接但停止读取时的背压及恢复语义	#11
 9.5	携带 `session_id`（v1.1.1）	初始 Trace 与 WAL、Provider 环境和协进程信封可用同一标识关联	latest_checkpoint_supplies_exact_stored_id_to_trace_env_and_coprocess_envelope
 9.5	未清洗的	模型只看清洗后文本，私有 wire 文件保留命令实际输出的 ANSI 字节	test_wire_trace_keeps_raw_msh_output_while_the_model_receives_cleaned_text #52
-9.5	provider_stderr	协进程的 error 帧和 stderr 异步抵达时，诊断文本如何划分到对应请求	#38
+9.5	provider_stderr	协进程错误事件含字符串 provider_stderr。异步诊断是否完整、如何划分到对应请求待裁定	test_http_429_and_503_are_traced_by_the_core_before_replaying_the_request #38
 9.5	生命周期事件	Trace 通用 error 事件的适用故障范围待明确	#32
 9.5	外部强杀缺失	检查已终止的任务组且没有退出码文件时，完成事件含显式 null，后续推理不重复通知	test_finished_group_without_an_exit_file_reports_null_exactly_once
 9.5	外部强杀缺失	started 和 finished 通过相同任务标识、PID、进程组和日志路径关联，并报告真实状态及经过的毫秒数	test_background_completion_is_reported_once_before_inference_and_replays_from_wal
