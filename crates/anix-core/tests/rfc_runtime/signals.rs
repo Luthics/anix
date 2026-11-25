@@ -165,9 +165,19 @@ fn usr1_forces_one_tool_free_compaction_before_the_next_inbox_inference() {
     assert!(!root.join("request-4").exists());
 }
 
-// RFC v1.1 §6.4, §6.5
+// RFC v1.1.1 §6.3, §6.4, §6.5, §10.2
 #[test]
-fn interruption_waits_three_seconds_then_stops_a_provider_that_handles_term_without_exiting() {
+fn sigterm_bounds_cleanup_of_a_provider_that_acknowledges_term() {
+    assert_bounded_provider_cleanup(libc::SIGTERM, 143);
+}
+
+// RFC v1.1.1 §6.3, §6.4, §6.5, §10.2
+#[test]
+fn sigint_bounds_cleanup_of_a_provider_that_acknowledges_term() {
+    assert_bounded_provider_cleanup(libc::SIGINT, 130);
+}
+
+fn assert_bounded_provider_cleanup(signal: libc::c_int, expected_code: i32) {
     let fx = Fixture::new();
     let root = &fx.dir.0;
     fs::write(
@@ -186,8 +196,8 @@ printf finished > natural-exit
     let mut agent = Agent::start(&fx, &["-q", "-c", "history", "case.anix", "--", "go"]);
     until("active provider", || root.join("ready").is_file());
     let start = Instant::now();
-    agent.signal(libc::SIGTERM);
-    agent.finish(143);
+    agent.signal(signal);
+    agent.finish(expected_code);
     assert!(start.elapsed() >= Duration::from_millis(2950));
     assert_eq!(
         fs::read_to_string(root.join("term-seen")).unwrap(),

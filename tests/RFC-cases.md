@@ -125,7 +125,7 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 | [`pre_context_filters_can_rewrite_and_append_conversation_records_before_freezing`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L10) | [§9.3](../docs/v1.1.1-RFC.md?plain=1#L626) · [§9.1](../docs/v1.1.1-RFC.md?plain=1#L532) · [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) |
 | [`pre_context_failure_forwards_stderr_and_stops_before_inference`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L81) | [§9.3](../docs/v1.1.1-RFC.md?plain=1#L626) |
 | [`post_tool_failure_stops_before_later_hooks_tools_and_provider_turns`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L107) | [§9.3](../docs/v1.1.1-RFC.md?plain=1#L626) · [§9.5](../docs/v1.1.1-RFC.md?plain=1#L645) |
-| [`on_exit_timeout_is_local_to_one_hook_and_preserves_the_primary_exit_code`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L155) | [§9.3](../docs/v1.1.1-RFC.md?plain=1#L626) · [§9.5](../docs/v1.1.1-RFC.md?plain=1#L645) |
+| [`on_exit_timeout_is_local_to_one_hook_and_preserves_the_primary_exit_code`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L155) | [§6.3](../docs/v1.1.1-RFC.md?plain=1#L382) · [§9.3](../docs/v1.1.1-RFC.md?plain=1#L626) · [§9.5](../docs/v1.1.1-RFC.md?plain=1#L645) · [§10.2](../docs/v1.1.1-RFC.md?plain=1#L710) |
 | [`each_skill_search_layer_wins_once_and_the_body_stays_out_of_the_index`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L195) | [§9.4](../docs/v1.1.1-RFC.md?plain=1#L632) |
 | [`tips_are_restored_after_version_drift_and_fall_back_to_runtime_when_state_is_unwritable`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L258) | [§1.4](../docs/v1.1.1-RFC.md?plain=1#L33) · [§8.1](../docs/v1.1.1-RFC.md?plain=1#L452) · [§9.6](../docs/v1.1.1-RFC.md?plain=1#L669) |
 | [`masking_the_whole_tips_hook_suppresses_both_its_index_and_first_run_files`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L297) | [§9.6](../docs/v1.1.1-RFC.md?plain=1#L669) |
@@ -187,8 +187,9 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 | [`interruption_reaps_the_provider_discards_partial_assistant_and_releases_lock`](../crates/anix-core/tests/rfc_runtime/signals.rs#L12) | [§6.4](../docs/v1.1.1-RFC.md?plain=1#L390) · [§6.5](../docs/v1.1.1-RFC.md?plain=1#L400) · [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) |
 | [`idle_process_holds_wal_and_usr2_snapshots_exact_ir_at_a_safe_boundary`](../crates/anix-core/tests/rfc_runtime/signals.rs#L50) | [§4.2](../docs/v1.1.1-RFC.md?plain=1#L180) · [§6.2](../docs/v1.1.1-RFC.md?plain=1#L343) · [§6.4](../docs/v1.1.1-RFC.md?plain=1#L390) |
 | [`usr1_forces_one_tool_free_compaction_before_the_next_inbox_inference`](../crates/anix-core/tests/rfc_runtime/signals.rs#L117) | [§6.4](../docs/v1.1.1-RFC.md?plain=1#L390) · [§6.1](../docs/v1.1.1-RFC.md?plain=1#L316) |
-| [`interruption_waits_three_seconds_then_stops_a_provider_that_handles_term_without_exiting`](../crates/anix-core/tests/rfc_runtime/signals.rs#L170) | [§6.4](../docs/v1.1.1-RFC.md?plain=1#L390) · [§6.5](../docs/v1.1.1-RFC.md?plain=1#L400) |
-| [`abrupt_parent_exit_stops_the_active_provider_or_shell_child`](../crates/anix-core/tests/rfc_runtime/signals.rs#L210) | [§10.2](../docs/v1.1.1-RFC.md?plain=1#L710) |
+| [`sigterm_bounds_cleanup_of_a_provider_that_acknowledges_term`](../crates/anix-core/tests/rfc_runtime/signals.rs#L170) | [§6.3](../docs/v1.1.1-RFC.md?plain=1#L382) · [§6.4](../docs/v1.1.1-RFC.md?plain=1#L390) · [§6.5](../docs/v1.1.1-RFC.md?plain=1#L400) · [§10.2](../docs/v1.1.1-RFC.md?plain=1#L710) |
+| [`sigint_bounds_cleanup_of_a_provider_that_acknowledges_term`](../crates/anix-core/tests/rfc_runtime/signals.rs#L176) | [§6.3](../docs/v1.1.1-RFC.md?plain=1#L382) · [§6.4](../docs/v1.1.1-RFC.md?plain=1#L390) · [§6.5](../docs/v1.1.1-RFC.md?plain=1#L400) · [§10.2](../docs/v1.1.1-RFC.md?plain=1#L710) |
+| [`abrupt_parent_exit_stops_the_active_provider_or_shell_child`](../crates/anix-core/tests/rfc_runtime/signals.rs#L220) | [§10.2](../docs/v1.1.1-RFC.md?plain=1#L710) |
 
 ## `crates/anix-core/tests/rfc_runtime/vision.rs`
 

@@ -150,7 +150,7 @@ fn post_tool_failure_stops_before_later_hooks_tools_and_provider_turns() {
     }
 }
 
-// RFC v1.1 §9.3, §9.5
+// RFC v1.1.1 §6.3, §9.3, §9.5, §10.2
 #[test]
 fn on_exit_timeout_is_local_to_one_hook_and_preserves_the_primary_exit_code() {
     let fx = Fixture::new();

@@ -51,12 +51,32 @@ jobs:
           ./target/debug/anix --version
           ./target/debug/anix-provider --version
           test "$(./target/debug/msh -c 'echo ok')" = "ok"
-      - name: RFC v1.1 provider and terminal conformance
+      - name: RFC provider and terminal conformance
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: python3 -B -m unittest discover -s tests -p 'test_*.py' -v
       - name: Rust workspace tests
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: cargo xtest --no-fail-fast
+
+      - name: Linux deadlines without pidfd_open
+        if: ${{ runner.os == 'Linux' && !cancelled() && steps.build.outcome == 'success' }}
+        shell: bash
+        run: |
+          if ! command -v strace >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends strace
+          fi
+          test_bin=$(cargo test --locked -p anix-core --test rfc_runtime --no-run --message-format=json |
+            jq -ers '[.[] | select(.reason == "compiler-artifact" and .target.name == "rfc_runtime") | .executable | strings] | select(length == 1) | first')
+          trace="$RUNNER_TEMP/anix-no-pidfd.trace"
+          status=0
+          strace -f -qq -o "$trace" -e trace=pidfd_open -e inject=pidfd_open:error=ENOSYS \
+            "$test_bin" --test-threads=1 --exact \
+            hooks::on_exit_timeout_is_local_to_one_hook_and_preserves_the_primary_exit_code \
+            signals::sigint_bounds_cleanup_of_a_provider_that_acknowledges_term \
+            signals::sigterm_bounds_cleanup_of_a_provider_that_acknowledges_term || status=$?
+          grep -q 'ENOSYS .*INJECTED' "$trace"
+          exit "$status"
 
   linux-musl-static:
     name: Static Linux musl (x86_64)
