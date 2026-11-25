@@ -13,6 +13,8 @@ pub struct WalConfigSnapshot {
     pub stderr: Option<StderrMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval: Option<ApprovalMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vision: Option<bool>,
 }
 
 /// Message role stored in WAL `"type": "message"` entries.
@@ -66,6 +68,8 @@ pub enum WalEvent {
         from_turn: u64,
         to_turn: u64,
         summary: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fold_usage: Option<TokenUsage>,
     },
     Checkpoint {
         ir_version: u32,
@@ -96,6 +100,7 @@ mod tests {
             config: WalConfigSnapshot {
                 stderr: Some(StderrMode::Auto),
                 approval: Some(ApprovalMode::Ask),
+                vision: Some(true),
             },
         };
         let raw = serde_json::to_string(&init).expect("serialize wal init");

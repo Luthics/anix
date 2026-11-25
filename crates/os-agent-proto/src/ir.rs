@@ -229,6 +229,14 @@ impl IrStream {
         Ok(out)
     }
 
+    /// Returns `true` if any message in this stream carries one or more media attachments.
+    pub fn has_media(&self) -> bool {
+        self.messages.iter().any(|m| match m {
+            IrMessage::User { media, .. } | IrMessage::Tool { media, .. } => !media.is_empty(),
+            IrMessage::System { .. } | IrMessage::Assistant { .. } => false,
+        })
+    }
+
     /// Enforce Section 9.1 structural invariants before dispatching to a Provider.
     pub fn validate_invariants(&self) -> Result<(), IrError> {
         if self.header.ir_version != IR_VERSION {

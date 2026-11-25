@@ -1,20 +1,21 @@
-//! Standard POSIX exit codes for `agent` and helper binaries (Section 6.4).
+//! Standard POSIX / BSD `sysexits.h` exit codes for `agent` and helper binaries (Section 6.5).
 
 use std::process::ExitCode as StdExitCode;
 
-/// Normative OS Agent exit codes.
+/// Normative OS Agent v1.1 exit codes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum ExitCode {
-    /// Task completed cleanly; payload flushed to `fd 1`.
+    /// `EX_OK`: Task completed cleanly; payload flushed to `fd 1`.
     Success = 0,
-    /// General runtime error (Provider network/protocol failure, I/O error, `flock` lock contention, etc.).
+    /// General runtime error (Provider network/protocol failure, I/O error, WAL corruption, `flock` contention).
     RuntimeError = 1,
-    /// CLI argument, Frontmatter, `config.toml`, or incompatible `ir_version` error.
+    /// `EX_USAGE`: CLI argument, `--trace-fd`, Frontmatter, `config.toml`, or incompatible `ir_version` error.
     UsageError = 2,
-    /// Permission / approval gate denial (`approval=ask` without `/dev/tty`, untrusted hooks/bin).
-    PermissionDenied = 42,
-    /// Budget or timeout limit reached (`max_turns`, `max_tokens`, Provider timeout; or `msh` command timeout).
+    /// `EX_TEMPFAIL` (replaces v1.0 `42`): Suspended / awaiting external intervention
+    /// (`approval=ask` without `/dev/tty`, `--fail-on-deny`, `[approval].bin` Fail-Closed, untrusted hooks/bins).
+    TempFail = 75,
+    /// `EX_TIMEOUT`: Budget or timeout limit reached (`max_turns`, `max_tokens`, Provider timeout; or `msh` command timeout).
     TimeoutOrBudget = 124,
     /// Interrupted by `SIGINT` (`128 + 2`).
     SigInt = 130,

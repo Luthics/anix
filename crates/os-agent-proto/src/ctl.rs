@@ -18,8 +18,13 @@ pub enum CtlFrame {
     },
     /// Emitted by `aclr -s` to trigger full context compaction & new WAL checkpoint.
     Compact,
-    /// Emitted by `aclr -t <N> "<summary>"` to fold tail turns `N..=now` preserving KV-cache prefix.
-    Fold { from_turn: u64, summary: String },
+    /// Emitted by `aclr -t <N> ["<summary>"]` to fold tail turns `N..=now` preserving KV-cache prefix.
+    /// When `summary` is omitted (`None`), the runtime invokes `[compact]` to auto-summarize `N..=now` (v1.1 §6.1).
+    Fold {
+        from_turn: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        summary: Option<String>,
+    },
 }
 
 #[cfg(test)]
@@ -37,13 +42,20 @@ mod tests {
             CtlFrame::Compact,
             CtlFrame::Fold {
                 from_turn: 3,
-                summary: "dead end".into(),
+                summary: Some("dead end".into()),
+            },
+            CtlFrame::Fold {
+                from_turn: 4,
+                summary: None,
             },
         ];
 
         for frame in frames {
             let line = serde_json::to_string(&frame).expect("serialize ctl frame");
             assert!(line.len() <= MAX_CTL_FRAME_BYTES);
+            if matches!(frame, CtlFrame::Fold { summary: None, .. }) {
+                assert_eq!(line, "{\"op\":\"fold\",\"from_turn\":4}");
+            }
             let parsed: CtlFrame = serde_json::from_str(&line).expect("deserialize ctl frame");
             assert_eq!(parsed, frame);
         }
