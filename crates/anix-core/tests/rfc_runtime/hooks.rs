@@ -580,7 +580,7 @@ fn each_builtin_can_be_replaced_globally_then_overridden_or_masked_by_the_projec
     }
 }
 
-// RFC v1.1.1 §9.3, §9.1, §6.2, §4.1, §7.1
+// RFC v1.1.1 §9.3, §9.1, §6.1, §6.2, §4.1, §7.1
 #[test]
 fn post_tool_filters_chain_in_order_and_only_the_final_text_reaches_wal_and_provider() {
     for status in [0, 7, 124] {
@@ -656,11 +656,11 @@ fn post_tool_filters_chain_in_order_and_only_the_final_text_reaches_wal_and_prov
             if status == 0 {
                 assert!(!item["is_error"].as_bool().unwrap_or(false), "{name}");
             }
-            let text = item["text"].as_str().unwrap();
-            assert!(text.contains("FINAL fixture 文"), "{name}: {text}");
-            assert!(
-                !text.contains("RAW") && !text.contains("INTERMEDIATE"),
-                "{name}: {text}"
+            let turn_id = first["turn_id"].as_u64().unwrap();
+            assert_eq!(
+                item["text"],
+                format!("[t{turn_id}] exit={status}\nFINAL fixture 文"),
+                "{name}"
             );
         }
     }
