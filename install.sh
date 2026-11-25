@@ -7,7 +7,7 @@
 #   gh api repos/Luthics/anix/contents/install.sh -H "Accept: application/vnd.github.raw" | sh
 #
 # Environment overrides:
-#   ANIX_VERSION=v0.0.3           Pin a specific release tag (default: latest release)
+#   ANIX_VERSION=v0.0.5           Pin a specific release tag (default: latest release)
 #   ANIX_PREFIX=$HOME/.local      Install prefix (default: ~/.local)
 #   ANIX_REPO=Luthics/anix
 #   GITHUB_TOKEN / GH_TOKEN       Optional GitHub token (needed if repo is private and `gh` is absent)
@@ -119,7 +119,7 @@ resolve_latest_version() {
       v*) printf '%s' "$tag"; return 0 ;;
     esac
   fi
-  printf '%s' "v0.0.3"
+  printf '%s' "v0.0.5"
 }
 
 download_release_assets() {
@@ -277,14 +277,14 @@ else
   say "==> Kept existing config at ${CONFIG_DIR}/config.toml"
 fi
 
-if [ ! -f "${AGENTS_DIR}/bash.anix" ]; then
-  if [ -f "${STAGE}/examples/bash.anix" ]; then
-    install -m 0755 "${STAGE}/examples/bash.anix" "${AGENTS_DIR}/bash.anix"
-  elif download_repo_file "examples/bash.anix" "${TMP_DIR}/bash.anix" "${VERSION}" \
-       || download_repo_file "examples/bash.anix" "${TMP_DIR}/bash.anix" "main"; then
-    install -m 0755 "${TMP_DIR}/bash.anix" "${AGENTS_DIR}/bash.anix"
+if [ ! -f "${AGENTS_DIR}/bash.agent" ]; then
+  if [ -f "${STAGE}/examples/bash.agent" ]; then
+    install -m 0755 "${STAGE}/examples/bash.agent" "${AGENTS_DIR}/bash.agent"
+  elif download_repo_file "examples/bash.agent" "${TMP_DIR}/bash.agent" "${VERSION}" \
+       || download_repo_file "examples/bash.agent" "${TMP_DIR}/bash.agent" "main"; then
+    install -m 0755 "${TMP_DIR}/bash.agent" "${AGENTS_DIR}/bash.agent"
   else
-    cat > "${AGENTS_DIR}/bash.anix" <<'EOF'
+    cat > "${AGENTS_DIR}/bash.agent" <<'EOF'
 #!/usr/bin/env anix
 ---
 name: bash-agent
@@ -299,11 +299,11 @@ stderr: auto
 ---
 你是 Bash 专家，响应用户的指令
 EOF
-    chmod 0755 "${AGENTS_DIR}/bash.anix"
+    chmod 0755 "${AGENTS_DIR}/bash.agent"
   fi
-  say "==> Installed default agent script at ${AGENTS_DIR}/bash.anix"
+  say "==> Installed default agent script at ${AGENTS_DIR}/bash.agent"
 else
-  say "==> Kept existing ${AGENTS_DIR}/bash.anix"
+  say "==> Kept existing ${AGENTS_DIR}/bash.agent"
 fi
 
 say ""
@@ -311,7 +311,7 @@ say "Installed Anix successfully:"
 say "  $("${PREFIX}/bin/anix" --version)"
 say "  Binaries: ${PREFIX}/bin/anix, ${PREFIX}/libexec/anix/{msh,anix-provider{,-openai-responses,-openai-compat,-anthropic},tools/{aview,aclr}}"
 say "  Config:   ${CONFIG_DIR}/config.toml"
-say "  Agents:   ${AGENTS_DIR}/bash.anix"
+say "  Agents:   ${AGENTS_DIR}/bash.agent"
 
 case ":${PATH}:" in
   *":${PREFIX}/bin:"*) ;;
@@ -326,4 +326,4 @@ say ""
 say "Next steps:"
 say "  1. Set your provider base_url and API key in ${CONFIG_DIR}/config.toml (or export OPENAI_API_KEY=...)"
 say "  2. Run: ${PREFIX}/bin/anix --doctor"
-say "  3. Try: ${AGENTS_DIR}/bash.anix \"show disk usage\""
+say "  3. Try: ${AGENTS_DIR}/bash.agent \"show disk usage\""

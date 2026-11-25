@@ -235,7 +235,7 @@ fn apply_builtin_posix_runtime(
     } else if has_vision_bridge {
         "- Current model has `vision=false`, backed by a text vision bridge: calling `aview <file>` translates images/PDFs into `<vision_description>` text."
     } else {
-        "- Current model does NOT support native vision (`vision=false`). Do NOT use `aview` for native image viewing; use text tools (e.g. OCR, `pdftotext`) or delegate to a vision-capable sub-agent (e.g. `vision.anix`)."
+        "- Current model does NOT support native vision (`vision=false`). Do NOT use `aview` for native image viewing; use text tools (e.g. OCR, `pdftotext`) or delegate to a vision-capable sub-agent (e.g. `vision.agent`)."
     };
 
     let contract = match stderr_mode {

@@ -11,7 +11,7 @@ round=0
 until ./verify.sh > /tmp/verify.log 2>&1; do
   round=$((round + 1))
   [ "$round" -gt "$MAX_ROUNDS" ] && { echo "Goal budget exceeded" >&2; exit 1; }
-  ./coder.anix -c "$CTX" 4< /tmp/verify.log -- \
+  ./coder.agent -c "$CTX" 4< /tmp/verify.log -- \
     "Round $round: fix all failures shown in fd 4 so ./verify.sh exits 0."
 done
 ```

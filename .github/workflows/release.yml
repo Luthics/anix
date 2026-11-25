@@ -84,7 +84,7 @@ jobs:
           ln -sf anix-provider "${STAGE}/libexec/anix/anix-provider-anthropic"
           install -m 0755 "${BIN_DIR}/aview" "${STAGE}/libexec/anix/tools/aview"
           install -m 0755 "${BIN_DIR}/aclr" "${STAGE}/libexec/anix/tools/aclr"
-          install -m 0755 examples/bash.anix "${STAGE}/examples/bash.anix"
+          install -m 0755 examples/bash.agent "${STAGE}/examples/bash.agent"
           install -m 0644 LICENSE README.md "${STAGE}/"
 
           mkdir -p artifacts

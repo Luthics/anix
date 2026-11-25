@@ -1,4 +1,4 @@
-//! `*.anix` script parser: UTF-8, CRLF/LF, Shebang, and fail-closed YAML 1.2 Frontmatter (Sections 3.2 & 3.3).
+//! `*.agent` script parser: UTF-8, CRLF/LF, Shebang, and fail-closed YAML 1.2 Frontmatter (Sections 3.2 & 3.3).
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -70,7 +70,7 @@ impl CompactThreshold {
     }
 }
 
-/// Parsed fields from a `*.anix` script's YAML Frontmatter (all optional).
+/// Parsed fields from a `*.agent` script's YAML Frontmatter (all optional).
 #[derive(Debug, Clone, Default)]
 pub struct AgentFrontmatter {
     pub name: Option<String>,
@@ -88,7 +88,7 @@ pub struct AgentFrontmatter {
     pub params: BTreeMap<String, JsonValue>,
 }
 
-/// Parsed `*.anix` script (Frontmatter + prompt body).
+/// Parsed `*.agent` script (Frontmatter + prompt body).
 #[derive(Debug, Clone)]
 pub struct AgentScript {
     pub default_name: String,
@@ -118,7 +118,7 @@ pub enum FrontmatterError {
     InvalidValue { field: &'static str, reason: String },
 }
 
-/// Load and parse a `*.anix` file from disk.
+/// Load and parse a `*.agent` file from disk.
 pub fn parse_script_file(path: &Path) -> Result<AgentScript, FrontmatterError> {
     let bytes = fs::read(path).map_err(|source| FrontmatterError::Io {
         path: path.display().to_string(),
@@ -133,7 +133,7 @@ pub fn parse_script_file(path: &Path) -> Result<AgentScript, FrontmatterError> {
     parse_script_str(&raw, &default_name)
 }
 
-/// Parse a `*.anix` script string (supports `\n` & `\r\n`, optional Shebang, optional YAML 1.2 Frontmatter).
+/// Parse a `*.agent` script string (supports `\n` & `\r\n`, optional Shebang, optional YAML 1.2 Frontmatter).
 pub fn parse_script_str(raw: &str, default_name: &str) -> Result<AgentScript, FrontmatterError> {
     let normalized = raw.replace("\r\n", "\n");
     let mut lines: Vec<&str> = normalized.split('\n').collect();

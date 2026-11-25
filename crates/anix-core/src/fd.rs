@@ -182,6 +182,8 @@ pub fn run_msh_command(
     cmd_str: &str,
     cwd: &Path,
     msh_timeout_sec: u64,
+    msh_kill_on_timeout: bool,
+    jobs_dir: &Path,
     approval: ApprovalMode,
     sandbox: Option<&PreparedSandbox>,
     signals: &SignalState,
@@ -202,18 +204,36 @@ pub fn run_msh_command(
     let mut err_reader = unsafe { File::from_raw_fd(err_r) };
     let mut ctl_reader = unsafe { File::from_raw_fd(ctl_r) };
 
+    // Disable stdout/stderr relay once this tool turn finishes its bounded drain so a command
+    // that yielded to background can never asynchronously corrupt a later turn's fd 1 / fd 2.
+    let relay_active = Arc::new(AtomicBool::new(true));
+
     // Relay `$ANIX_OUT` raw bytes -> external `fd 1` (stdout) untouched, zero newline injection.
     let (out_done_tx, out_done_rx) = mpsc::channel::<()>();
+    let out_active = Arc::clone(&relay_active);
     thread::spawn(move || {
-        let mut stdout = io::stdout();
-        let _ = io::copy(&mut out_reader, &mut stdout);
-        let _ = stdout.flush();
+        let mut buf = [0u8; 8192];
+        loop {
+            match out_reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    if out_active.load(Ordering::Acquire) {
+                        let mut stdout = io::stdout().lock();
+                        let _ = stdout.write_all(&buf[..n]);
+                        let _ = stdout.flush();
+                    }
+                }
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+            }
+        }
         let _ = out_done_tx.send(());
     });
 
     // Relay `$ANIX_ERR` raw bytes -> external `fd 2` (stderr) while tracking trailing newline.
     let (err_done_tx, err_done_rx) = mpsc::channel::<()>();
     let err_tracker = stderr_tracker.clone();
+    let err_active = Arc::clone(&relay_active);
     thread::spawn(move || {
         let mut buf = [0u8; 8192];
         let mut wrote_any = false;
@@ -221,14 +241,16 @@ pub fn run_msh_command(
             match err_reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    if !wrote_any {
-                        err_tracker.ensure_newline();
-                        wrote_any = true;
+                    if err_active.load(Ordering::Acquire) {
+                        if !wrote_any {
+                            err_tracker.ensure_newline();
+                            wrote_any = true;
+                        }
+                        let mut stderr = io::stderr().lock();
+                        let _ = stderr.write_all(&buf[..n]);
+                        let _ = stderr.flush();
+                        err_tracker.note_bytes(&buf[..n]);
                     }
-                    let mut stderr = io::stderr().lock();
-                    let _ = stderr.write_all(&buf[..n]);
-                    let _ = stderr.flush();
-                    err_tracker.note_bytes(&buf[..n]);
                 }
                 Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
                 Err(_) => break,
@@ -283,7 +305,12 @@ pub fn run_msh_command(
         .env("ANIX_OUT", "/dev/fd/4")
         .env("ANIX_ERR", "/dev/fd/5")
         .env("ANIX_CTL", "/dev/fd/6")
-        .env("MSH_TIMEOUT_SEC", msh_timeout_sec.to_string());
+        .env("MSH_TIMEOUT_SEC", msh_timeout_sec.to_string())
+        .env(
+            "MSH_KILL_ON_TIMEOUT",
+            if msh_kill_on_timeout { "1" } else { "0" },
+        )
+        .env("MSH_JOBS_DIR", jobs_dir);
 
     // SAFETY: `pre_exec` uses only async-signal-safe syscalls to isolate PGID, bind FDs 4/5/6,
     // set Linux `PR_SET_PDEATHSIG`, and apply pre-built Landlock rules.
@@ -393,6 +420,7 @@ pub fn run_msh_command(
     drain_channel_until(&ctl_rx, &mut ctl_bytes, drain_deadline);
     let _ = out_done_rx.recv_timeout(drain_deadline.saturating_duration_since(Instant::now()));
     let _ = err_done_rx.recv_timeout(drain_deadline.saturating_duration_since(Instant::now()));
+    relay_active.store(false, Ordering::SeqCst);
 
     let mut combined = String::from_utf8_lossy(&stdout_bytes).into_owned();
     if !stderr_bytes.is_empty() {

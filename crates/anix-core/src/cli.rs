@@ -114,7 +114,7 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Option<SubCommand>,
 
-    /// Path to the `*.anix` script to execute.
+    /// Path to the `*.agent` script to execute.
     pub script: Option<PathBuf>,
 
     /// Positional script arguments (passed directly or after `--`).
@@ -158,7 +158,7 @@ pub fn run() -> ExitCode {
     }
 
     let Some(ref script_path) = cli.script else {
-        eprintln!("anix: missing <SCRIPT.anix> (try `anix --help`)");
+        eprintln!("anix: missing <SCRIPT.agent> (try `anix --help`)");
         return ExitCode::UsageError;
     };
 
@@ -207,40 +207,41 @@ mod tests {
     // RFC v1.1 §3.1
     #[test]
     fn parses_script_and_args_with_double_dash() {
-        let cli = Cli::try_parse_from(["anix", "-y", "-q", "audit.anix", "--", "HEAD~1"])
+        let cli = Cli::try_parse_from(["anix", "-y", "-q", "audit.agent", "--", "HEAD~1"])
             .expect("parse cli");
         assert!(cli.yes);
         assert!(cli.quiet);
-        assert_eq!(cli.script, Some(PathBuf::from("audit.anix")));
+        assert_eq!(cli.script, Some(PathBuf::from("audit.agent")));
         assert_eq!(cli.script_args, vec!["HEAD~1"]);
 
-        let cli = Cli::try_parse_from(["anix", "bash.anix", "-y", "--", "-q", "-n", "5"])
+        let cli = Cli::try_parse_from(["anix", "bash.agent", "-y", "--", "-q", "-n", "5"])
             .expect("parse hyphenated args after --");
         assert!(cli.yes);
         assert!(!cli.quiet);
-        assert_eq!(cli.script, Some(PathBuf::from("bash.anix")));
+        assert_eq!(cli.script, Some(PathBuf::from("bash.agent")));
         assert_eq!(cli.script_args, vec!["-q", "-n", "5"]);
     }
 
     // RFC v1.1 §3.1
     #[test]
     fn parses_direct_and_quoted_script_args_without_double_dash() {
-        let cli = Cli::try_parse_from(["anix", "bash.anix", "git log -n 5"])
+        let cli = Cli::try_parse_from(["anix", "bash.agent", "git log -n 5"])
             .expect("parse quoted string with embedded flags");
-        assert_eq!(cli.script, Some(PathBuf::from("bash.anix")));
+        assert_eq!(cli.script, Some(PathBuf::from("bash.agent")));
         assert_eq!(cli.script_args, vec!["git log -n 5"]);
 
-        let cli = Cli::try_parse_from(["anix", "bash.anix", "-y", "-c", "", "check", "disk", "-q"])
-            .expect("parse mixed flags and direct positional args");
+        let cli =
+            Cli::try_parse_from(["anix", "bash.agent", "-y", "-c", "", "check", "disk", "-q"])
+                .expect("parse mixed flags and direct positional args");
         assert!(cli.yes);
         assert!(cli.quiet);
         assert_eq!(cli.context.as_deref(), Some(""));
-        assert_eq!(cli.script, Some(PathBuf::from("bash.anix")));
+        assert_eq!(cli.script, Some(PathBuf::from("bash.agent")));
         assert_eq!(cli.script_args, vec!["check", "disk"]);
 
         let cli =
-            Cli::try_parse_from(["anix", "bash.anix", ""]).expect("parse empty quoted script arg");
-        assert_eq!(cli.script, Some(PathBuf::from("bash.anix")));
+            Cli::try_parse_from(["anix", "bash.agent", ""]).expect("parse empty quoted script arg");
+        assert_eq!(cli.script, Some(PathBuf::from("bash.agent")));
         assert_eq!(cli.script_args, vec![""]);
     }
 
@@ -254,10 +255,10 @@ mod tests {
         assert_eq!(cli.script, None);
         assert!(cli.script_args.is_empty());
 
-        let cli = Cli::try_parse_from(["anix", "./bash.anix", "trust", "me"])
+        let cli = Cli::try_parse_from(["anix", "./bash.agent", "trust", "me"])
             .expect("parse script arg literally named trust");
         assert!(cli.command.is_none());
-        assert_eq!(cli.script, Some(PathBuf::from("./bash.anix")));
+        assert_eq!(cli.script, Some(PathBuf::from("./bash.agent")));
         assert_eq!(cli.script_args, vec!["trust", "me"]);
     }
 }

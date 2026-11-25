@@ -3,8 +3,10 @@
 //! `cycle_start`/`cycle_end`/`idle` Trace observability, and `--inbox` daemon loop (v1.1 §§4–9).
 
 use std::collections::BTreeMap;
-use std::path::Path;
-use std::time::Duration;
+use std::fs::{self, File};
+use std::io::{self, Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use anix_proto::IR_VERSION;
 use anix_proto::ctl::CtlFrame;
@@ -62,7 +64,7 @@ struct CycleOutcome {
     turns: u32,
 }
 
-/// Entry point for executing a resolved `*.anix` session (one-shot or `--inbox`).
+/// Entry point for executing a resolved `*.agent` session (one-shot or `--inbox`).
 pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String]) -> ExitCode {
     // CRITICAL POSIX FD HYGIENE (v1.1 §4.1):
     // 1. NEVER probe `fd 3` implicitly. Only claim an explicitly configured `--trace-fd=<N>` /
@@ -348,6 +350,18 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
     exit_code
 }
 
+#[derive(Debug, Clone)]
+struct TrackedBgJob {
+    job_id: String,
+    pid: u32,
+    pgid: u32,
+    cmd: String,
+    log_path: PathBuf,
+    exit_file: PathBuf,
+    started_at: Instant,
+    notified: bool,
+}
+
 struct SessionState {
     session_id: String,
     messages: Vec<IrMessage>,
@@ -362,6 +376,8 @@ struct SessionState {
     /// Cross-compaction cumulative 5-field usage across the WAL session.
     session_usage: TokenUsage,
     pending_compact: bool,
+    /// Background `msh` jobs yielded during this process run (v1.1.2 §§7.1.5 & 7.2).
+    bg_jobs: Vec<TrackedBgJob>,
 }
 
 impl SessionState {
@@ -427,6 +443,7 @@ impl SessionState {
                 run_usage: TokenUsage::default(),
                 session_usage: TokenUsage::default(),
                 pending_compact: false,
+                bg_jobs: Vec::new(),
             });
         }
 
@@ -489,6 +506,7 @@ impl SessionState {
             run_usage: TokenUsage::default(),
             session_usage: replayed.session_usage,
             pending_compact: false,
+            bg_jobs: Vec::new(),
         })
     }
 
@@ -530,6 +548,173 @@ impl SessionState {
             messages: self.messages.clone(),
         }
     }
+
+    /// Inspect tracked background `msh` jobs and emit `<runtime_update>` + `bg_job_finished`
+    /// notifications for any jobs that exited since the last turn (v1.1.2 §§7.1.5 & 7.2).
+    fn poll_completed_bg_jobs(
+        &mut self,
+        cfg: &ResolvedConfig,
+        wal: &mut WalStore,
+        stderr_tracker: &StderrTracker,
+        tracer: &mut Tracer,
+    ) -> Result<(), ExitCode> {
+        let mut newly_finished: Vec<(usize, Option<i32>, u64)> = Vec::new();
+        for (idx, job) in self.bg_jobs.iter().enumerate() {
+            if job.notified {
+                continue;
+            }
+            if let Some(code) = read_exit_code_file(&job.exit_file) {
+                newly_finished.push((idx, Some(code), job.started_at.elapsed().as_millis() as u64));
+                continue;
+            }
+            if !process_group_exists(job.pgid) {
+                // Re-check exit_file once to close any exit/rename race.
+                let code = read_exit_code_file(&job.exit_file);
+                newly_finished.push((idx, code, job.started_at.elapsed().as_millis() as u64));
+            }
+        }
+
+        for (idx, exit_code, elapsed_ms) in newly_finished {
+            self.bg_jobs[idx].notified = true;
+            let job = self.bg_jobs[idx].clone();
+
+            let status_desc = match exit_code {
+                Some(code) => format!("exit_code={code}"),
+                None => "terminated externally".to_owned(),
+            };
+            let elapsed_sec = elapsed_ms / 1000;
+            let tail = read_bg_log_tail(&job.log_path, 20, 2048);
+
+            let mut content = format!(
+                "Background job {} finished ({}, elapsed={}s, cmd=`{}`).\nFull log: {}",
+                job.job_id,
+                status_desc,
+                elapsed_sec,
+                job.cmd,
+                job.log_path.display()
+            );
+            if !tail.is_empty() {
+                content.push_str("\n--- tail ---\n");
+                content.push_str(&tail);
+            }
+
+            let turn_id = self.alloc_turn_id();
+            let ts = posix::timestamp_rfc3339_utc();
+            if let Err(err) = wal.append(&WalEvent::RuntimeUpdate {
+                turn_id,
+                ts,
+                content: content.clone(),
+                config: WalConfigSnapshot {
+                    stderr: Some(cfg.stderr),
+                    approval: Some(cfg.approval),
+                    vision: Some(cfg.vision),
+                },
+            }) {
+                stderr_tracker.writeln_line(&format!("anix: {err}"));
+                return Err(err.exit_code());
+            }
+            self.messages.push(IrMessage::system(
+                turn_id,
+                format!("<runtime_update>{content}</runtime_update>"),
+            ));
+
+            let mut fin_fields = Map::new();
+            fin_fields.insert("job_id".into(), Value::String(job.job_id));
+            fin_fields.insert("pid".into(), Value::from(job.pid));
+            fin_fields.insert("pgid".into(), Value::from(job.pgid));
+            fin_fields.insert(
+                "exit_code".into(),
+                exit_code.map_or(Value::Null, Value::from),
+            );
+            fin_fields.insert(
+                "log_path".into(),
+                Value::String(job.log_path.display().to_string()),
+            );
+            fin_fields.insert("elapsed_ms".into(), Value::from(elapsed_ms));
+            tracer.emit_event("bg_job_finished", fin_fields);
+        }
+
+        Ok(())
+    }
+}
+
+fn read_exit_code_file(path: &Path) -> Option<i32> {
+    let raw = fs::read_to_string(path).ok()?;
+    raw.trim().parse::<i32>().ok()
+}
+
+fn process_group_exists(pgid: u32) -> bool {
+    if pgid == 0 {
+        return false;
+    }
+    // SAFETY: `kill(-pgid, 0)` only probes process group existence without delivering a signal.
+    let rc = unsafe { libc::kill(-(pgid as libc::pid_t), 0) };
+    if rc == 0 {
+        return true;
+    }
+    io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+}
+
+fn read_bg_log_tail(path: &Path, max_lines: usize, max_bytes: usize) -> String {
+    let Ok(mut file) = File::open(path) else {
+        return String::new();
+    };
+    let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    if len == 0 {
+        return String::new();
+    }
+    let read_cap = (max_bytes as u64).saturating_mul(4).max(8192);
+    if len > read_cap {
+        let _ = file.seek(SeekFrom::Start(len - read_cap));
+    }
+    let mut raw = Vec::new();
+    if file.read_to_end(&mut raw).is_err() || raw.is_empty() {
+        return String::new();
+    }
+    let probe = &raw[..raw.len().min(8192)];
+    if probe.contains(&0) {
+        return "[binary output; inspect log file directly]".to_owned();
+    }
+    let text = String::from_utf8_lossy(&raw);
+    let cleaned = strip_basic_ansi(&text);
+    let lines: Vec<&str> = cleaned.lines().collect();
+    let tail_slice = if lines.len() > max_lines {
+        &lines[lines.len() - max_lines..]
+    } else {
+        &lines[..]
+    };
+    let joined = tail_slice.join("\n");
+    if joined.len() <= max_bytes {
+        return joined;
+    }
+    let mut start = joined.len() - max_bytes;
+    while start < joined.len() && !joined.is_char_boundary(start) {
+        start += 1;
+    }
+    joined[start..].to_owned()
+}
+
+fn strip_basic_ansi(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
+            i += 2;
+            while i < bytes.len() && !(0x40..=0x7e).contains(&bytes[i]) {
+                i += 1;
+            }
+            if i < bytes.len() {
+                i += 1;
+            }
+        } else if bytes[i] != b'\r' {
+            out.push(bytes[i]);
+            i += 1;
+        } else {
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Bracket a single inference cycle with `cycle_start` and commit-barrier `cycle_end` Trace events
@@ -794,6 +979,15 @@ fn run_inference_cycle(
             };
         }
 
+        // Notify model via trailing `<runtime_update>` if any background `msh` jobs finished (v1.1.2).
+        if let Err(code) = state.poll_completed_bg_jobs(cfg, wal, stderr_tracker, tracer) {
+            return CycleOutcome {
+                exit_code: code,
+                reason: CycleEndReason::Error,
+                turns: cycle_turns,
+            };
+        }
+
         // Check `SIGUSR1` / `aclr -s` / auto-compact threshold before calling Provider (Section 6.1.2).
         let sigusr1_compact = signals.take_compact_request();
         let est_tokens = state.current_context_tokens();
@@ -1015,6 +1209,17 @@ fn run_inference_cycle(
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_owned();
+            let requested_timeout = tc.arguments.get("timeout_sec").and_then(Value::as_u64);
+            let kill_on_timeout = tc
+                .arguments
+                .get("kill_on_timeout")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let mut effective_timeout_sec =
+                requested_timeout.map_or(cfg.msh_timeout_sec, |t| t.min(cfg.max_msh_timeout_sec));
+            if kill_on_timeout && effective_timeout_sec == 0 {
+                effective_timeout_sec = 1;
+            }
 
             let decision = approval.check(&cmd_str, signals);
             let mut app_fields = Map::new();
@@ -1111,14 +1316,19 @@ fn run_inference_cycle(
             let mut start_fields = Map::new();
             start_fields.insert("tool_call_id".into(), Value::String(tc.id.clone()));
             start_fields.insert("cmd".into(), Value::String(effective_cmd.clone()));
+            start_fields.insert("timeout_sec".into(), Value::from(effective_timeout_sec));
+            start_fields.insert("kill_on_timeout".into(), Value::Bool(kill_on_timeout));
             tracer.emit_event("tool_start", start_fields);
 
+            let jobs_dir = cfg.paths.jobs_dir();
             let msh_out = match fd::run_msh_command(
                 &shell_bin,
                 &tools_dir,
                 &effective_cmd,
                 &cfg.paths.cwd,
-                cfg.msh_timeout_sec,
+                effective_timeout_sec,
+                kill_on_timeout,
+                &jobs_dir,
                 cfg.approval,
                 sandbox,
                 signals,
@@ -1187,12 +1397,13 @@ fn run_inference_cycle(
                 }
             };
 
-            // Process `$ANIX_CTL` frames (v1.1 §§5.5, 6.1, 7.2).
+            // Process `$ANIX_CTL` frames (v1.1.2 §§5.5, 6.1, 7.1.5, 7.2).
             let mut media: Vec<MediaAttachment> = Vec::new();
             let mut extra_text_blocks: Vec<String> = Vec::new();
             let mut vision_error = false;
             let mut fold_request: Option<(u64, Option<String>)> = None;
             let mut fold_validation_error: Option<String> = None;
+            let mut started_bg_job_id: Option<String> = None;
 
             for frame in msh_out.ctl_frames {
                 match frame {
@@ -1249,6 +1460,35 @@ fn run_inference_cycle(
                             fold_request = Some((from_turn, summary));
                         }
                     }
+                    CtlFrame::BgJob {
+                        job_id,
+                        pid,
+                        pgid,
+                        cmd,
+                        log_path,
+                        exit_file,
+                    } => {
+                        let mut bg_fields = Map::new();
+                        bg_fields.insert("job_id".into(), Value::String(job_id.clone()));
+                        bg_fields.insert("pid".into(), Value::from(pid));
+                        bg_fields.insert("pgid".into(), Value::from(pgid));
+                        bg_fields.insert("cmd".into(), Value::String(cmd.clone()));
+                        bg_fields.insert("log_path".into(), Value::String(log_path.clone()));
+                        bg_fields.insert("exit_file".into(), Value::String(exit_file.clone()));
+                        tracer.emit_event("bg_job_started", bg_fields);
+
+                        started_bg_job_id = Some(job_id.clone());
+                        state.bg_jobs.push(TrackedBgJob {
+                            job_id,
+                            pid,
+                            pgid,
+                            cmd,
+                            log_path: PathBuf::from(log_path),
+                            exit_file: PathBuf::from(exit_file),
+                            started_at: Instant::now(),
+                            notified: false,
+                        });
+                    }
                 }
             }
 
@@ -1257,6 +1497,10 @@ fn run_inference_cycle(
             end_fields.insert("tool_call_id".into(), Value::String(tc.id.clone()));
             end_fields.insert("exit_code".into(), Value::from(post_payload.exit_code));
             end_fields.insert("media_count".into(), Value::from(media.len() as u64));
+            if let Some(ref bg_id) = started_bg_job_id {
+                end_fields.insert("backgrounded".into(), Value::Bool(true));
+                end_fields.insert("job_id".into(), Value::String(bg_id.clone()));
+            }
             tracer.emit_event("tool_end", end_fields);
 
             let mut output_body = post_payload.output;

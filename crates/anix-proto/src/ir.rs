@@ -331,15 +331,27 @@ impl IrStream {
         Ok(())
     }
 
-    /// Return the default `msh` tool definition (Section 9.1).
+    /// Return the default `msh` tool definition (v1.1.2 §§7.1.5 & 9.1).
     pub fn msh_tool_def() -> ToolDef {
         ToolDef {
             name: "msh".into(),
-            description: "Execute a non-interactive shell command. Redirect final deliverables to $ANIX_OUT and human-facing messages to $ANIX_ERR.".into(),
+            description: "Execute a non-interactive shell command. If it exceeds timeout_sec, it automatically yields to background (unless kill_on_timeout=true) and returns pid/pgid/log path; set timeout_sec=0 to start in background immediately. Redirect final deliverables to $ANIX_OUT and human-facing messages to $ANIX_ERR.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "cmd": { "type": "string" }
+                    "cmd": {
+                        "type": "string",
+                        "description": "POSIX shell command to execute."
+                    },
+                    "timeout_sec": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Max seconds to wait in foreground before yielding to background (0 = start in background immediately; omitted = default)."
+                    },
+                    "kill_on_timeout": {
+                        "type": "boolean",
+                        "description": "If true, terminate the process group instead of yielding to background when timeout_sec expires (default: false)."
+                    }
                 },
                 "required": ["cmd"]
             }),

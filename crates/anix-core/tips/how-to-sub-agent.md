@@ -1,20 +1,20 @@
 # How to Orchestrate Sub-Agents via POSIX Pipes
 
-Invoke child `*.anix` scripts directly inside `msh` as ordinary executables using `-q` (`--stderr explicit`) so `fd 1` returns pure machine-consumable output.
+Invoke child `*.agent` scripts directly inside `msh` as ordinary executables using `-q` (`--stderr explicit`) so `fd 1` returns pure machine-consumable output.
 
 ## Pattern
 - **Single sub-agent (clean stdout capture)**:
   ```sh
-  result=$(./reviewer.anix -q 4< diff.patch -- "Return JSON findings to ANIX_OUT")
+  result=$(./reviewer.agent -q 4< diff.patch -- "Return JSON findings to ANIX_OUT")
   ```
 - **Pipeline composition**:
   ```sh
-  git diff HEAD~1 | ./reviewer.anix -q | ./fixer.anix -q > fixed.patch
+  git diff HEAD~1 | ./reviewer.agent -q | ./fixer.agent -q > fixed.patch
   ```
 - **Parallel fan-out & join**:
   ```sh
-  ./audit.anix -q -- "Audit auth/" > /tmp/a.out & p1=$!
-  ./audit.anix -q -- "Audit net/"  > /tmp/b.out & p2=$!
+  ./audit.agent -q -- "Audit auth/" > /tmp/a.out & p1=$!
+  ./audit.agent -q -- "Audit net/"  > /tmp/b.out & p2=$!
   wait "$p1" "$p2"
   ```
 

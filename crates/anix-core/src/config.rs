@@ -25,6 +25,7 @@ const DEFAULT_MAX_TOKENS: u32 = 128_000;
 const DEFAULT_COMPACT_THRESHOLD: CompactThreshold = CompactThreshold::Ratio(0.8);
 const DEFAULT_PROVIDER_TIMEOUT_SEC: u64 = 120;
 const DEFAULT_MSH_TIMEOUT_SEC: u64 = 120;
+const DEFAULT_MAX_MSH_TIMEOUT_SEC: u64 = 600;
 const DEFAULT_IDLE_TIMEOUT_SEC: u64 = 300;
 const DEFAULT_APPROVAL_DECIDER_TIMEOUT_SEC: u64 = 30;
 const DEFAULT_VISION_BRIDGE_TIMEOUT_SEC: u64 = 60;
@@ -129,6 +130,10 @@ impl AgentPaths {
 
     pub fn journal_socket_path(&self) -> PathBuf {
         self.runtime_dir.join("journal.sock")
+    }
+
+    pub fn jobs_dir(&self) -> PathBuf {
+        self.runtime_dir.join("jobs")
     }
 
     /// Resolve a component binary (`shell` or provider `bin`) per Section 2:
@@ -242,6 +247,7 @@ pub struct RawDefaults {
     pub approval: Option<String>,
     pub stderr: Option<String>,
     pub msh_timeout_sec: Option<u64>,
+    pub max_msh_timeout_sec: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -434,6 +440,7 @@ pub struct ResolvedConfig {
     pub idle_timeout_sec: u64,
     pub params: BTreeMap<String, serde_json::Value>,
     pub msh_timeout_sec: u64,
+    pub max_msh_timeout_sec: u64,
     pub sandbox: SandboxPolicy,
     pub safe_commands: Vec<String>,
     pub providers: BTreeMap<String, ProviderConfig>,
@@ -671,6 +678,14 @@ impl ResolvedConfig {
             .or(global.defaults.msh_timeout_sec)
             .unwrap_or(DEFAULT_MSH_TIMEOUT_SEC);
 
+        let max_msh_timeout_sec = env_non_empty("MSH_MAX_TIMEOUT_SEC")
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|&v| v > 0)
+            .or(project.defaults.max_msh_timeout_sec)
+            .or(global.defaults.max_msh_timeout_sec)
+            .unwrap_or(DEFAULT_MAX_MSH_TIMEOUT_SEC)
+            .max(msh_timeout_sec);
+
         let sandbox = resolve_sandbox(cli.sandbox.as_deref(), &project.sandbox, &global.sandbox)?;
 
         Ok(Self {
@@ -696,6 +711,7 @@ impl ResolvedConfig {
             idle_timeout_sec,
             params,
             msh_timeout_sec,
+            max_msh_timeout_sec,
             sandbox,
             safe_commands,
             providers,

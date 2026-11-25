@@ -5,7 +5,7 @@ Use a Maildir-style `--inbox` daemon plus atomic `tmp/ -> new/` delivery instead
 ## Pattern
 1. Start a persistent worker holding a WAL context:
    ```sh
-   ./worker.anix -c /tmp/loop.ctx.jsonl --inbox /tmp/loop-inbox --idle-timeout 0
+   ./worker.agent -c /tmp/loop.ctx.jsonl --inbox /tmp/loop-inbox --idle-timeout 0
    ```
 2. Deliver a message atomically (NEVER write directly into `new/`):
    ```sh
