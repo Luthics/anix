@@ -10,8 +10,8 @@ import time
 
 
 @contextmanager
-def interactive_shell(argv, cwd, env):
-    """Give job control and keyboard signals to a disposable shell."""
+def controlling_terminal(argv, cwd, env):
+    """Start a process on its own controlling terminal and yield its PTY and handle."""
     master, slave = pty.openpty()
 
     def acquire_terminal():
@@ -19,19 +19,19 @@ def interactive_shell(argv, cwd, env):
         fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
     try:
-        shell = subprocess.Popen(argv, cwd=cwd, env=env, stdin=slave, stdout=slave,
-                                 stderr=slave, preexec_fn=acquire_terminal)
+        process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=slave, stdout=slave,
+                                   stderr=slave, preexec_fn=acquire_terminal)
         try:
-            yield master
+            yield master, process
         finally:
             # Closing the master also releases a shell exiting on Darwin.
             os.close(master)
             master = -1
             try:
-                shell.wait(timeout=2)
+                process.wait(timeout=2)
             except subprocess.TimeoutExpired:
-                shell.kill()
-                shell.wait(timeout=2)
+                process.kill()
+                process.wait(timeout=2)
     finally:
         os.close(slave)
         if master >= 0:

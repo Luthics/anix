@@ -12,7 +12,7 @@ import time
 import unittest
 import uuid
 
-from terminal_fixture import interactive_shell, read_until, read_until_any
+from terminal_fixture import controlling_terminal, read_until, read_until_any
 
 
 BUILD = Path(os.environ.get("ANIX_TEST_BIN_DIR", Path(__file__).resolve().parents[1] / "target/debug")).resolve()
@@ -77,12 +77,12 @@ printf '%s\\n' "$n" > count
     def detached(self, *options):
         return subprocess.run(["/bin/sh", "-c", 'exec "$@" 7>trace', "fixture", *self.argv(options)],
                               cwd=self.root, env=self.env, input=PIPE_INPUT.encode(),
-                              capture_output=True, start_new_session=True, timeout=12)
+                              capture_output=True, start_new_session=True, timeout=25)
 
     def terminal(self, exchanges, options=(), reissued_command=None):
         (self.root / "pipe-input").write_bytes(PIPE_INPUT.encode())
         shell = ["/bin/bash", "--noprofile", "--norc", "-i"]
-        with interactive_shell(shell, self.root, self.env) as master:
+        with controlling_terminal(shell, self.root, self.env) as (master, _):
             os.write(master, b"stty -g > tty-before; PS1=$FIXTURE_PROMPT\n")
             read_until(master, PROMPT)
             command = f"/bin/cat pipe-input | {shlex.join(self.argv(options))}"
@@ -285,9 +285,13 @@ p.write_text("printf edited > edited-receipt")
     def test_external_error_and_timeout_surface_stderr_and_end_the_cycle_with_75(self):
         for code in (3, 75, 127, None):
             with self.subTest(code=code):
-                fx = self.fixture(settings="safe_commands=[]\nbin='decide'\ntimeout_sec=1\n")
-                body = "exec /bin/sleep 8" if code is None else f"exit {code}"
-                fx.decider("printf '判定器详情\\n' >&2\n" + body)
+                # Fast exits need no short deadline. For the timeout case the shell
+                # emits its diagnostic before blocking, without spawning setup tools.
+                limit = 4 if code is None else 15
+                fx = self.fixture(settings=f"safe_commands=[]\nbin='decide'\ntimeout_sec={limit}\n")
+                body = "exec /bin/sleep 60" if code is None else f"exit {code}"
+                executable(fx.root / "decide", "#!/bin/sh\nIFS= read -r frame || exit 99\n"
+                           "printf '判定器详情\\n' >&2\n" + body + "\n")
                 result = fx.detached()
                 self.assertEqual(result.returncode, 75, result.stderr)
                 self.assertIn("判定器详情", result.stderr.decode())
@@ -337,12 +341,35 @@ p.write_text("printf edited > edited-receipt")
                 else:
                     self.assertFalse((fx.root / "request-2").exists())
 
-    # RFC v1.1.1 §5.2, §5.3, §6.4, §6.5, §9.5
-    def test_ctrl_c_at_the_approval_prompt_returns_to_shell_and_identifies_the_decider(self):
+    # RFC v1.1.1 §5.3, §6.4, §6.5, §9.5
+    def test_ctrl_c_at_the_approval_prompt_returns_to_the_same_shell(self):
         fx = self.fixture()
         self.assertEqual(fx.terminal([(COMMAND, b"\x03")]), 130)
         self.assertFalse((fx.root / "receipt").exists())
         self.assertFalse((fx.root / "request-2").exists())
+        self.assert_cycle(fx, 130, "interrupted")
+
+    # RFC v1.1.1 §5.2, §6.4, §6.5, §9.5
+    def test_interrupt_during_builtin_decision_identifies_the_decider_in_trace(self):
+        fx = self.fixture()
+        argv = ["/bin/sh", "-c", 'exec "$@" </dev/null >payload 2>diagnostic 7>trace',
+                "fixture", *fx.argv(()), "--", "input"]
+        with controlling_terminal(argv, fx.root, fx.env) as (master, process):
+            read_until(master, COMMAND.encode())
+            process.send_signal(signal.SIGINT)
+            # Wake a reader already sleeping in /dev/tty (#49). This case
+            # checks the audit record even when a single signal cannot unblock it.
+            os.write(master, b"\n")
+            deadline = time.monotonic() + 8
+            while True:
+                # Ignore an in-flight partial JSONL record. A Darwin session
+                # leader may still be exiting until the PTY master is closed.
+                complete = (fx.root / "trace").read_bytes().split(b"\n")[:-1]
+                if any(json.loads(line)["type"] == "run_end" for line in complete):
+                    break
+                self.assertLess(time.monotonic(), deadline, "missing final trace record")
+                time.sleep(.01)
+        self.assertFalse((fx.root / "receipt").exists())
         self.assert_cycle(fx, 130, "interrupted")
         event, = fx.trace("tool_approval")
         self.assertEqual(event.get("decider"), "builtin", event)

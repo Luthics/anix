@@ -12,7 +12,7 @@ import unittest
 from http.server import HTTPServer
 
 from http_fixture import JsonRequest
-from terminal_fixture import interactive_shell, read_until
+from terminal_fixture import controlling_terminal, read_until
 
 
 def accept_request(http, master):
@@ -510,7 +510,7 @@ printf '%s\\n' '{"type":"text_delta","text":"fixture reply"}' '{"type":"done","f
                 f"base_url='http://127.0.0.1:{http.server_port}/v1'\n"
                 "api_key_env=''\napi_key='fixture'\ntimeout_sec=20\n")
             for argv in shells:
-                with self.subTest(shell=argv[0]), interactive_shell(argv, self.root, env) as master:
+                with self.subTest(shell=argv[0]), controlling_terminal(argv, self.root, env) as (master, _):
                     os.write(master, b"stty -g > before; PS1=$RFC_PROMPT\n")
                     read_until(master, prompt)
                     for pipeline in (False, True):
@@ -567,7 +567,7 @@ printf finished > natural-exit
         prompt = b"RFC-ready> "
         env = {"HOME": str(self.root), "PATH": f"{self.root}:{self.bin_dir}:/usr/bin:/bin",
                "TERM": "dumb", "RFC_PROMPT": prompt.decode(), "XDG_RUNTIME_DIR": str(self.root / "run")}
-        with interactive_shell(["/bin/bash", "--noprofile", "--norc", "-i"], self.root, env) as master:
+        with controlling_terminal(["/bin/bash", "--noprofile", "--norc", "-i"], self.root, env) as (master, _):
             os.write(master, b"PS1=$RFC_PROMPT\n")
             read_until(master, prompt)
             os.write(master, b'./bash.anix --trace-fd=7 "xxx" 7>trace\n')
