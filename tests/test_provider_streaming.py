@@ -38,6 +38,19 @@ class StreamingResponse(JsonRequest):
         self.event({"type": "response.completed", "response": {"usage": {"input_tokens": 8, "output_tokens": 3}}})
         self.wfile.write(b"0\r\n\r\n")
 
+    def msh_call(self, cmd, fragment_delay=0):
+        arguments = json.dumps({"cmd": cmd})
+        item = {"type": "function_call", "id": "item1", "call_id": "call1", "name": "msh"}
+        self.event({"type": "response.output_item.added", "output_index": 0,
+                    "item": {**item, "arguments": ""}})
+        for start in range(0, len(arguments), 1024):
+            if start and fragment_delay:
+                time.sleep(fragment_delay)
+            self.event({"type": "response.function_call_arguments.delta", "item_id": "item1",
+                        "output_index": 0, "delta": arguments[start:start + 1024]})
+        self.event({"type": "response.output_item.done", "output_index": 0,
+                    "item": {**item, "arguments": arguments}})
+
 
 class ProviderStreaming(unittest.TestCase):
     def setUp(self):
@@ -52,7 +65,7 @@ class ProviderStreaming(unittest.TestCase):
         # A concurrently written line is observable only once its LF arrives.
         return [json.loads(line) for line in (self.root / name).read_bytes().split(b"\n")[:-1]]
 
-    def run_agent(self, level, replies, options=()):
+    def run_agent(self, level, replies, options=(), provider_timeout=20):
         config = self.root / ".config/agent"
         config.mkdir(parents=True)
         with HTTPServer(("127.0.0.1", 0), StreamingResponse) as http:
@@ -61,7 +74,7 @@ class ProviderStreaming(unittest.TestCase):
             (config / "config.toml").write_text(
                 "[defaults]\nmodel='local'\n[providers.openai-responses]\n"
                 f"base_url='http://127.0.0.1:{http.server_port}/v1'\n"
-                "api_key_env=''\napi_key='fixture'\ntimeout_sec=20\n")
+                f"api_key_env=''\napi_key='fixture'\ntimeout_sec={provider_timeout}\n")
             args = ["/bin/sh", "-c", 'exec "$@" 3>trace', "fixture", self.bin_dir / "agent",
                     "-q", "-c", "history", *options, "case.agent", "--", "input"]
             with subprocess.Popen(args, cwd=self.root, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -83,6 +96,64 @@ class ProviderStreaming(unittest.TestCase):
                         child.communicate()
             self.assertEqual((child.returncode, out, err), (0, b"", b""))
             return http.requests
+
+    # RFC §6.4, §7.1, §9.2, §9.5
+    def test_long_msh_can_outlive_the_provider_timeout_between_two_requests(self):
+        prefix = "printf started > marker\n#"
+        suffix = "\n/bin/sleep 4\nprintf finished"
+        cmd = prefix.ljust(32768 - len(suffix), "x") + suffix
+
+        def call(peer):
+            peer.begin_stream()
+            peer.msh_call(cmd)
+            peer.finish_stream()
+
+        def finish(peer):
+            self.assertEqual((self.root / "marker").read_text(), "started")
+            peer.begin_stream()
+            peer.event({"type": "response.output_text.delta", "delta": "done"})
+            peer.finish_stream()
+
+        requests = self.run_agent("events", [call, finish], options=("-y",), provider_timeout=2)
+        self.assertEqual(len(requests), 2)
+        calls = [i for i in requests[1]["input"] if i["type"] == "function_call"]
+        self.assertEqual([json.loads(i["arguments"]) for i in calls], [{"cmd": cmd}])
+        results = [i for i in requests[1]["input"] if i["type"] == "function_call_output"]
+        tools = [r for r in self.rows("history") if r.get("role") == "tool"]
+        self.assertEqual(len(tools), 1)
+        self.assertFalse(tools[0].get("is_error", False))
+        expected = f"[t{tools[0]['turn_id']}] exit=0\nfinished"
+        self.assertEqual(tools[0]["text"], expected)
+        self.assertEqual([(i["call_id"], i["output"]) for i in results], [("call1", expected)])
+        observed = {"llm_request_start", "tool_start", "tool_end", "provider_error"}
+        self.assertEqual([e["type"] for e in self.rows("trace") if e["type"] in observed],
+                         ["llm_request_start", "tool_start", "tool_end", "llm_request_start"])
+
+    # RFC §7.1, §9.2, §9.5
+    def test_paced_msh_arguments_finish_before_the_shell_runs(self):
+        suffix = "\nprintf ok"
+        cmd = "printf x >> marker\n#".ljust(32768 - len(suffix), "a") + suffix
+
+        def call(peer):
+            peer.begin_stream()
+            peer.msh_call(cmd, fragment_delay=.15)
+            # A complete function_call has arrived, but the Provider turn is still open.
+            self.assertFalse((self.root / "marker").exists())
+            self.assertNotIn("tool_start", [e["type"] for e in self.rows("trace")])
+            peer.finish_stream()
+
+        def finish(peer):
+            self.assertEqual((self.root / "marker").read_text(), "x")
+            peer.begin_stream()
+            peer.event({"type": "response.output_text.delta", "delta": "done"})
+            peer.finish_stream()
+
+        requests = self.run_agent("events", [call, finish], options=("-y",), provider_timeout=12)
+        outputs = [i for i in requests[1]["input"] if i["type"] == "function_call_output"]
+        self.assertEqual(len(outputs), 1)
+        self.assertEqual(outputs[0]["call_id"], "call1")
+        self.assertTrue(outputs[0]["output"].endswith("exit=0\nok"))
+        self.assertFalse(any(e["type"] == "provider_error" for e in self.rows("trace")))
 
     # RFC §4.1, §6.2, §9.2, §9.5
     def test_each_delta_reaches_trace_before_the_upstream_sends_its_next_frame(self):

@@ -116,3 +116,4 @@ python3 tests/test_linux_fallback.py  # Linux
 - §7.1 允许通过 TOML 配置单条 msh 命令超时，§8.2 尚需明确键名与单位。临时 HOME 中已核实当前实现读取 `[defaults].msh_timeout_sec`。[#29](https://github.com/Luthics/os-agent/issues/29)
 - §10.3 在缺少 msh 且 TOML 损坏时，Linux 先观测到配置错误诊断，之后才探测 msh。§3.1 所说的 Provider 连通性也需与自检清单对齐。[#30](https://github.com/Luthics/os-agent/issues/30) · [#31](https://github.com/Luthics/os-agent/issues/31)
 - §9.5 的通用 error 事件尚需定义触发条件。在 post-tool 钩子失败时，已检查 run_end 与进程退出码一致。[#32](https://github.com/Luthics/os-agent/issues/32)
+- §§7.1、9.2、9.5 的超时用例分别核对慢速接收 32 KiB 工具参数和真实 msh 执行 4 秒时的请求、Trace 与 WAL。默认 120 秒的 Provider 总时限可在参数持续流入时耗尽，最近工具参数活动的可见性与超时语义待明确。[#33](https://github.com/Luthics/os-agent/issues/33)

@@ -343,9 +343,11 @@
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`test_each_delta_reaches_trace_before_the_upstream_sends_its_next_frame`](../tests/test_provider_streaming.py#L88) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
-| [`test_interleaved_calls_and_opaque_state_round_trip_through_the_real_tool_results`](../tests/test_provider_streaming.py#L121) | [§4.3](../docs/v1.0.0-RFC.md?plain=1#L156) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
-| [`test_http_429_and_503_are_traced_by_the_core_before_replaying_the_request`](../tests/test_provider_streaming.py#L180) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`test_long_msh_can_outlive_the_provider_timeout_between_two_requests`](../tests/test_provider_streaming.py#L101) | [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) · [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`test_paced_msh_arguments_finish_before_the_shell_runs`](../tests/test_provider_streaming.py#L133) | [§7.1](../docs/v1.0.0-RFC.md?plain=1#L292) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`test_each_delta_reaches_trace_before_the_upstream_sends_its_next_frame`](../tests/test_provider_streaming.py#L159) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
+| [`test_interleaved_calls_and_opaque_state_round_trip_through_the_real_tool_results`](../tests/test_provider_streaming.py#L192) | [§4.3](../docs/v1.0.0-RFC.md?plain=1#L156) · [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.1](../docs/v1.0.0-RFC.md?plain=1#L388) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) |
+| [`test_http_429_and_503_are_traced_by_the_core_before_replaying_the_request`](../tests/test_provider_streaming.py#L251) | [§6.2](../docs/v1.0.0-RFC.md?plain=1#L226) · [§9.2](../docs/v1.0.0-RFC.md?plain=1#L427) · [§9.5](../docs/v1.0.0-RFC.md?plain=1#L476) |
 
 ## `tests/test_shell_pipeline.py`
 
