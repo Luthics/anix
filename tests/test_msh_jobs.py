@@ -278,12 +278,25 @@ printf '%s|%s|%s|%s|%s\\n' "$1" "$2" "$MSH_TIMEOUT_SEC" "$MSH_KILL_ON_TIMEOUT" "
 
     # RFC v1.1.2 §6.2, §7.1, §7.2, §9.1, §9.5
     def test_background_completion_is_reported_once_before_inference_and_replays_from_wal(self):
+        self.check_completion(0, b"\x1b[31mnotice-body\x1b[0m\n")
+
+    # RFC v1.1.2 §7.1, §7.2, §9.2, §9.5
+    def test_positive_timeout_dispatches_the_next_request_while_the_job_is_alive(self):
+        self.check_completion(1, b"notice-body\n")
+
+    # RFC v1.1.2 §6.2, §7.1, §7.2, §9.1
+    def test_terminal_title_and_overwritten_progress_are_cleaned_from_the_completion_notice(self):
+        self.check_completion(0, b"\x1b]0;job title\x07old-progress\rnotice-body\n")
+
+    def check_completion(self, timeout, raw):
         self.configure()
-        cmd = self.worker(b"\x1b[31mnotice-body\x1b[0m\n", 7)
+        cmd = self.worker(raw, 7)
         (self.root / "finish.py").write_text("""import json, time
 from pathlib import Path
 job, = [json.loads(line) for line in Path('trace').read_bytes().splitlines()
         if json.loads(line)['type'] == 'bg_job_started']
+if Path(job['exit_file']).exists():
+    raise SystemExit('job finished before the next Provider turn')
 Path('release').touch()
 deadline = time.monotonic() + 8
 while not Path(job['exit_file']).is_file():
@@ -291,7 +304,7 @@ while not Path(job['exit_file']).is_file():
         raise SystemExit(2)
     time.sleep(0.02)
 """)
-        self.reply(1, [("launch", {"cmd": cmd, "timeout_sec": 0})])
+        self.reply(1, [("launch", {"cmd": cmd, "timeout_sec": timeout})])
         self.reply(2, [("release", {"cmd": 'exec "$PYTHON" finish.py'})])
         self.reply(3, [("after", {"cmd": "printf next"})])
         self.reply(4)
@@ -313,7 +326,6 @@ while not Path(job['exit_file']).is_file():
         update, = [r for r in records if r["type"] == "runtime_update"]
         for token in (start["job_id"], "7", "notice-body", "WORKER-DONE"):
             self.assertIn(token, update["content"])
-        self.assertNotIn("\x1b", update["content"])
         frozen = rows(self.root / "request-1")[1]
         for n in range(1, 6):
             request = rows(self.root / f"request-{n}")
@@ -323,6 +335,8 @@ while not Path(job['exit_file']).is_file():
             if updates:
                 self.assertEqual(updates[0]["turn_id"], update["turn_id"])
                 self.assertEqual(updates[0]["text"], "<runtime_update>" + update["content"] + "</runtime_update>")
+        self.assertNotIn("\x1b", update["content"])
+        self.assertNotIn("old-progress", update["content"])
 
     # RFC v1.1.2 §7.2, §9.5
     def test_finished_group_without_an_exit_file_reports_null_exactly_once(self):

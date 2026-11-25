@@ -157,6 +157,7 @@
 7.1	事件驱动等待与日志落盘	运行时目录下 jobs 为 0700、日志为 0600，后台退出前不存在最终状态文件，随后读到真实的非零退出码	test_immediate_handoff_closes_side_channels_and_publishes_the_real_exit
 7.1	裁剪为 `1` 秒	显式强杀且指定 0 秒时先等待一秒，输出已有文本与超时标记，清理任务文件	test_zero_with_explicit_kill_waits_one_second_and_leaves_no_job
 7.1	信号中断	前台等待中分别发送 INT、TERM，两种超时策略都清理整组并返回 130、143	test_foreground_int_and_term_clean_up_in_both_timeout_modes
+7.1	模型可直接继续执行其他任务	正数等待到期后，后一轮推理可以在任务仍存活时运行，随后报告一次完成结果	test_positive_timeout_dispatches_the_next_request_while_the_job_is_alive
 7.2	省略 `summary` 时触发	省略字段时工具发出无 summary 的 fold 帧，运行时生成摘要	aclr_without_a_summary_omits_the_field_at_each_valid_turn_id_boundary external_auto_fold_receives_the_aligned_tail_and_replays_only_its_summary #41
 7.2	单帧上限 64 KB	按含 LF 的实际序列化长度逐个比较 aclr 发送端和内核接收端的判定	test_aclr_and_anix_agree_on_the_serialized_fold_frame_size_limit #14
 7.2	PDF 指定页渲染为 PNG	四页文档的 15 种非空页集合，从文件、显式和隐式 stdin 输入，逐页核对 PNG 尺寸及色块	aview_selects_pdf_pages_with_their_actual_geometry_and_colors
@@ -169,6 +170,7 @@
 7.2	后台任务移交帧	511 至 66,000 字节的命令都执行到末尾，fd 6 只产生一条有效且有界的 JSONL 帧	test_long_commands_execute_their_suffix_and_handoff_with_a_single_bounded_frame
 7.2	后台任务移交帧	长命令在移交帧和 Trace 的 cmd 字段中是否可以缩短、如何标识预览	#58
 7.2	在后续每轮发起 Provider 推理前	后台任务结束后仅在下一次请求前通知一次，冻结前缀、WAL 和重启恢复结果可核对	test_background_completion_is_reported_once_before_inference_and_replays_from_wal
+7.2	读取经清洗的尾部日志摘要	终端标题和已覆盖的进度文本应从后台通知中清除，在 WAL 及后续 Provider 请求中使用清洗后的文本	test_terminal_title_and_overwritten_progress_are_cleaned_from_the_completion_notice #60
 8.1	全局配置目录	XDG_CONFIG_HOME 与 HOME 回退	each_xdg_directory_resolves_independently_when_other_overrides_are_absent
 8.1	状态目录	XDG_STATE_HOME 与 HOME 回退	each_xdg_directory_resolves_independently_when_other_overrides_are_absent
 8.1	运行时目录	XDG_RUNTIME_DIR、按 UID 回退及权限	each_xdg_directory_resolves_independently_when_other_overrides_are_absent invalid_global_or_project_toml_and_unusable_runtime_directory_report_failure each_missing_or_non_executable_private_binary_is_identified

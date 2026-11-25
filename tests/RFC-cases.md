@@ -431,8 +431,10 @@
 | [`test_single_call_never_exceeds_a_configured_maximum_below_the_default_wait`](../tests/test_msh_jobs.py#L267) | [§7.1](../docs/v1.1.2-RFC.md?plain=1#L418) · [§8.2](../docs/v1.1.2-RFC.md?plain=1#L478) |
 | [`test_environment_maximum_overrides_toml_for_each_explicit_request`](../tests/test_msh_jobs.py#L273) | [§7.1](../docs/v1.1.2-RFC.md?plain=1#L418) · [§8.2](../docs/v1.1.2-RFC.md?plain=1#L478) |
 | [`test_background_completion_is_reported_once_before_inference_and_replays_from_wal`](../tests/test_msh_jobs.py#L280) | [§6.2](../docs/v1.1.2-RFC.md?plain=1#L344) · [§7.1](../docs/v1.1.2-RFC.md?plain=1#L418) · [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) · [§9.1](../docs/v1.1.2-RFC.md?plain=1#L553) · [§9.5](../docs/v1.1.2-RFC.md?plain=1#L666) |
-| [`test_finished_group_without_an_exit_file_reports_null_exactly_once`](../tests/test_msh_jobs.py#L328) | [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) · [§9.5](../docs/v1.1.2-RFC.md?plain=1#L666) |
-| [`test_hard_kill_grace_waits_for_a_living_descendant_without_repeated_polling`](../tests/test_msh_jobs.py#L372) | [§6.3](../docs/v1.1.2-RFC.md?plain=1#L383) · [§7.1](../docs/v1.1.2-RFC.md?plain=1#L418) |
+| [`test_positive_timeout_dispatches_the_next_request_while_the_job_is_alive`](../tests/test_msh_jobs.py#L284) | [§7.1](../docs/v1.1.2-RFC.md?plain=1#L418) · [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) · [§9.2](../docs/v1.1.2-RFC.md?plain=1#L591) · [§9.5](../docs/v1.1.2-RFC.md?plain=1#L666) |
+| [`test_terminal_title_and_overwritten_progress_are_cleaned_from_the_completion_notice`](../tests/test_msh_jobs.py#L288) | [§6.2](../docs/v1.1.2-RFC.md?plain=1#L344) · [§7.1](../docs/v1.1.2-RFC.md?plain=1#L418) · [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) · [§9.1](../docs/v1.1.2-RFC.md?plain=1#L553) |
+| [`test_finished_group_without_an_exit_file_reports_null_exactly_once`](../tests/test_msh_jobs.py#L342) | [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) · [§9.5](../docs/v1.1.2-RFC.md?plain=1#L666) |
+| [`test_hard_kill_grace_waits_for_a_living_descendant_without_repeated_polling`](../tests/test_msh_jobs.py#L386) | [§6.3](../docs/v1.1.2-RFC.md?plain=1#L383) · [§7.1](../docs/v1.1.2-RFC.md?plain=1#L418) |
 
 ## `tests/test_provider_dialects.py`
 

@@ -224,7 +224,7 @@
 | --- | --- |
 | [无截止时间的 Linux 空闲循环持续睡眠，发布消息可以唤醒](../docs/v1.1.2-RFC.md?plain=1#L385) | [`an_idle_inbox_sleeps_without_periodic_wakeups_then_consumes_a_publication`](../crates/anix-core/tests/rfc_runtime/inbox.rs#L336) |
 | [子进程清理与退出钩子的截止时间在正常和缺少 pidfd 的 Linux 上可检查](../docs/v1.1.2-RFC.md?plain=1#L389) | [`sigint_bounds_cleanup_of_a_provider_that_acknowledges_term`](../crates/anix-core/tests/rfc_runtime/signals.rs#L176) · [`on_exit_timeout_is_local_to_one_hook_and_preserves_the_primary_exit_code`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L155) · [#48](https://github.com/Luthics/anix/issues/48) |
-| [强杀时组长退出、有限子进程仍在，Linux 宽限期的等待不应持续空转](../docs/v1.1.2-RFC.md?plain=1#L385) | [`test_hard_kill_grace_waits_for_a_living_descendant_without_repeated_polling`](../tests/test_msh_jobs.py#L372) · [#57](https://github.com/Luthics/anix/issues/57) |
+| [强杀时组长退出、有限子进程仍在，Linux 宽限期的等待不应持续空转](../docs/v1.1.2-RFC.md?plain=1#L385) | [`test_hard_kill_grace_waits_for_a_living_descendant_without_repeated_polling`](../tests/test_msh_jobs.py#L386) · [#57](https://github.com/Luthics/anix/issues/57) |
 
 ## §6.4
 
@@ -271,6 +271,7 @@
 | [运行时目录下 jobs 为 0700、日志为 0600，后台退出前不存在最终状态文件，随后读到真实的非零退出码](../docs/v1.1.2-RFC.md?plain=1#L431) | [`test_immediate_handoff_closes_side_channels_and_publishes_the_real_exit`](../tests/test_msh_jobs.py#L87) |
 | [显式强杀且指定 0 秒时先等待一秒，输出已有文本与超时标记，清理任务文件](../docs/v1.1.2-RFC.md?plain=1#L441) | [`test_zero_with_explicit_kill_waits_one_second_and_leaves_no_job`](../tests/test_msh_jobs.py#L180) |
 | [前台等待中分别发送 INT、TERM，两种超时策略都清理整组并返回 130、143](../docs/v1.1.2-RFC.md?plain=1#L442) | [`test_foreground_int_and_term_clean_up_in_both_timeout_modes`](../tests/test_msh_jobs.py#L149) |
+| [正数等待到期后，后一轮推理可以在任务仍存活时运行，随后报告一次完成结果](../docs/v1.1.2-RFC.md?plain=1#L440) | [`test_positive_timeout_dispatches_the_next_request_while_the_job_is_alive`](../tests/test_msh_jobs.py#L284) |
 
 ## §7.2
 
@@ -288,6 +289,7 @@
 | [511 至 66,000 字节的命令都执行到末尾，fd 6 只产生一条有效且有界的 JSONL 帧](../docs/v1.1.2-RFC.md?plain=1#L461) | [`test_long_commands_execute_their_suffix_and_handoff_with_a_single_bounded_frame`](../tests/test_msh_jobs.py#L191) |
 | [长命令在移交帧和 Trace 的 cmd 字段中是否可以缩短、如何标识预览](../docs/v1.1.2-RFC.md?plain=1#L461) | [#58](https://github.com/Luthics/anix/issues/58) |
 | [后台任务结束后仅在下一次请求前通知一次，冻结前缀、WAL 和重启恢复结果可核对](../docs/v1.1.2-RFC.md?plain=1#L465) | [`test_background_completion_is_reported_once_before_inference_and_replays_from_wal`](../tests/test_msh_jobs.py#L280) |
+| [终端标题和已覆盖的进度文本应从后台通知中清除，在 WAL 及后续 Provider 请求中使用清洗后的文本](../docs/v1.1.2-RFC.md?plain=1#L465) | [`test_terminal_title_and_overwritten_progress_are_cleaned_from_the_completion_notice`](../tests/test_msh_jobs.py#L288) · [#60](https://github.com/Luthics/anix/issues/60) |
 
 ## §8.1
 
@@ -386,7 +388,7 @@
 | [模型只看清洗后文本，私有 wire 文件保留命令实际输出的 ANSI 字节](../docs/v1.1.2-RFC.md?plain=1#L689) | [`test_wire_trace_keeps_raw_msh_output_while_the_model_receives_cleaned_text`](../tests/test_provider_streaming.py#L198) · [#52](https://github.com/Luthics/anix/issues/52) |
 | [协进程的 error 帧和 stderr 异步抵达时，诊断文本如何划分到对应请求](../docs/v1.1.2-RFC.md?plain=1#L687) | [#38](https://github.com/Luthics/anix/issues/38) |
 | [Trace 通用 error 事件的适用故障范围待明确](../docs/v1.1.2-RFC.md?plain=1#L677) | [#32](https://github.com/Luthics/anix/issues/32) |
-| [检查已终止的任务组且没有退出码文件时，完成事件含显式 null，后续推理不重复通知](../docs/v1.1.2-RFC.md?plain=1#L684) | [`test_finished_group_without_an_exit_file_reports_null_exactly_once`](../tests/test_msh_jobs.py#L328) |
+| [检查已终止的任务组且没有退出码文件时，完成事件含显式 null，后续推理不重复通知](../docs/v1.1.2-RFC.md?plain=1#L684) | [`test_finished_group_without_an_exit_file_reports_null_exactly_once`](../tests/test_msh_jobs.py#L342) |
 | [started 和 finished 通过相同任务标识、PID、进程组和日志路径关联，并报告真实状态及经过的毫秒数](../docs/v1.1.2-RFC.md?plain=1#L684) | [`test_background_completion_is_reported_once_before_inference_and_replays_from_wal`](../tests/test_msh_jobs.py#L280) |
 
 ## §9.6
