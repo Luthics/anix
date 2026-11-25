@@ -1,23 +1,23 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/os-agent-proto",
-    "crates/os-agent-core",
+    "crates/anix-proto",
+    "crates/anix-core",
     "crates/msh",
-    "crates/agent-providers",
-    "crates/agent-tools",
+    "crates/anix-providers",
+    "crates/anix-tools",
 ]
 
 [workspace.package]
-version = "0.0.2"
+version = "0.0.3"
 edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0"
-repository = "https://github.com/Luthics/os-agent"
+repository = "https://github.com/Luthics/anix"
 authors = ["Luthics <27689212+Luthics@users.noreply.github.com>"]
 
 [workspace.dependencies]
-os-agent-proto = { path = "crates/os-agent-proto" }
+anix-proto = { path = "crates/anix-proto" }
 base64 = "0.22"
 clap = { version = "4", features = ["derive", "env"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }

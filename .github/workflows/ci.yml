@@ -48,8 +48,8 @@ jobs:
           cargo xtest
       - name: Smoke test binaries
         run: |
-          ./target/debug/agent --version
-          ./target/debug/agent-provider --version
+          ./target/debug/anix --version
+          ./target/debug/anix-provider --version
           test "$(./target/debug/msh -c 'echo ok')" = "ok"
 
   linux-musl-static:
@@ -72,13 +72,13 @@ jobs:
       - name: Verify static linkage and smoke test
         run: |
           BIN_DIR="target/x86_64-unknown-linux-musl/release"
-          for bin in agent msh agent-provider aview aclr; do
+          for bin in anix msh anix-provider aview aclr; do
             file "${BIN_DIR}/${bin}"
             if ldd "${BIN_DIR}/${bin}" 2>&1 | grep -q '=>'; then
               echo "ERROR: ${bin} is dynamically linked" >&2
               exit 1
             fi
           done
-          "${BIN_DIR}/agent" --version
-          "${BIN_DIR}/agent-provider" --version
+          "${BIN_DIR}/anix" --version
+          "${BIN_DIR}/anix-provider" --version
           test "$("${BIN_DIR}/msh" -c 'echo static-ok')" = "static-ok"

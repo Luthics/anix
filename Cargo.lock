@@ -9,23 +9,50 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "agent-providers"
-version = "0.0.2"
+name = "anix-core"
+version = "0.0.3"
 dependencies = [
+ "anix-proto",
+ "clap",
+ "libc",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "sha2",
+ "signal-hook",
+ "thiserror",
+ "time",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "anix-proto"
+version = "0.0.3"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "anix-providers"
+version = "0.0.3"
+dependencies = [
+ "anix-proto",
  "base64 0.22.1",
- "os-agent-proto",
  "serde_json",
  "thiserror",
  "ureq",
 ]
 
 [[package]]
-name = "agent-tools"
-version = "0.0.2"
+name = "anix-tools"
+version = "0.0.3"
 dependencies = [
+ "anix-proto",
  "clap",
  "image",
- "os-agent-proto",
  "serde_json",
  "thiserror",
  "uuid",
@@ -500,10 +527,10 @@ dependencies = [
 
 [[package]]
 name = "msh"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
+ "anix-proto",
  "libc",
- "os-agent-proto",
  "signal-hook",
  "thiserror",
  "uuid",
@@ -535,33 +562,6 @@ name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
-
-[[package]]
-name = "os-agent-core"
-version = "0.0.2"
-dependencies = [
- "clap",
- "libc",
- "os-agent-proto",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "sha2",
- "signal-hook",
- "thiserror",
- "time",
- "toml",
- "uuid",
-]
-
-[[package]]
-name = "os-agent-proto"
-version = "0.0.2"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror",
-]
 
 [[package]]
 name = "percent-encoding"

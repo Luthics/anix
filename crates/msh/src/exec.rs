@@ -12,12 +12,12 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use os_agent_proto::exit_code::ExitCode;
+use anix_proto::exit_code::ExitCode;
 use thiserror::Error;
 
 pub const DEFAULT_TIMEOUT_SEC: u64 = 120;
-// Shorter than `agent`'s 3s child grace so `msh` always escalates SIGKILL to `/bin/sh`
-// cleanly before `agent` ever escalates SIGKILL to `msh`.
+// Shorter than `anix`'s 3s child grace so `msh` always escalates SIGKILL to `/bin/sh`
+// cleanly before `anix` ever escalates SIGKILL to `msh`.
 const KILL_GRACE_PERIOD: Duration = Duration::from_secs(2);
 const PIPE_DRAIN_AFTER_EXIT: Duration = Duration::from_millis(200);
 

@@ -9,7 +9,7 @@
 .vscode/
 *.swp
 
-# OS Agent runtime artifacts
+# Anix runtime artifacts
 *.ctx.jsonl
 *.trace.jsonl
 .env

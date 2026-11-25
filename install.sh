@@ -1,23 +1,23 @@
 #!/usr/bin/env sh
-# One-line installer for OS Agent (https://github.com/Luthics/os-agent)
+# One-line installer for Anix (https://github.com/Luthics/anix)
 # Usage (public repo):
-#   curl -fsSL https://raw.githubusercontent.com/Luthics/os-agent/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/Luthics/anix/main/install.sh | sh
 #
 # Usage (private repo, using GitHub CLI or GITHUB_TOKEN/GH_TOKEN):
-#   gh api repos/Luthics/os-agent/contents/install.sh -H "Accept: application/vnd.github.raw" | sh
+#   gh api repos/Luthics/anix/contents/install.sh -H "Accept: application/vnd.github.raw" | sh
 #
 # Environment overrides:
-#   OS_AGENT_VERSION=v0.0.2       Pin a specific release tag (default: latest release)
-#   OS_AGENT_PREFIX=$HOME/.local  Install prefix (default: ~/.local)
-#   OS_AGENT_REPO=Luthics/os-agent
+#   ANIX_VERSION=v0.0.3           Pin a specific release tag (default: latest release)
+#   ANIX_PREFIX=$HOME/.local      Install prefix (default: ~/.local)
+#   ANIX_REPO=Luthics/anix
 #   GITHUB_TOKEN / GH_TOKEN       Optional GitHub token (needed if repo is private and `gh` is absent)
 set -eu
 
-REPO="${OS_AGENT_REPO:-Luthics/os-agent}"
-PREFIX="${OS_AGENT_PREFIX:-$HOME/.local}"
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/agent"
+REPO="${ANIX_REPO:-Luthics/anix}"
+PREFIX="${ANIX_PREFIX:-$HOME/.local}"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/anix"
 AGENTS_DIR="${CONFIG_DIR}/agents"
-VERSION="${OS_AGENT_VERSION:-}"
+VERSION="${ANIX_VERSION:-}"
 TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
 
 while [ "$#" -gt 0 ]; do
@@ -119,7 +119,7 @@ resolve_latest_version() {
       v*) printf '%s' "$tag"; return 0 ;;
     esac
   fi
-  printf '%s' "v0.0.2"
+  printf '%s' "v0.0.3"
 }
 
 download_release_assets() {
@@ -216,11 +216,11 @@ if [ -z "$VERSION" ]; then
   VERSION="$(resolve_latest_version)"
 fi
 
-ARCHIVE="os-agent-${VERSION}-${TARGET}.tar.gz"
-TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/os-agent-install.XXXXXX")"
+ARCHIVE="anix-${VERSION}-${TARGET}.tar.gz"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/anix-install.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 
-say "==> Installing OS Agent ${VERSION} (${TARGET})"
+say "==> Installing Anix ${VERSION} (${TARGET})"
 download_release_assets "${TMP_DIR}" "${ARCHIVE}"
 
 say "==> Verifying SHA-256 checksum ..."
@@ -228,28 +228,28 @@ verify_sha256 "${TMP_DIR}/${ARCHIVE}" "${TMP_DIR}/SHA256SUMS.txt"
 
 say "==> Extracting and installing into ${PREFIX} ..."
 tar -xzf "${TMP_DIR}/${ARCHIVE}" -C "${TMP_DIR}"
-STAGE="${TMP_DIR}/os-agent-${VERSION}-${TARGET}"
+STAGE="${TMP_DIR}/anix-${VERSION}-${TARGET}"
 [ -d "$STAGE" ] || die "unexpected archive layout: missing ${STAGE}"
 
-mkdir -p "${PREFIX}/bin" "${PREFIX}/libexec/agent/tools"
-install -m 0755 "${STAGE}/bin/agent" "${PREFIX}/bin/agent"
-install -m 0755 "${STAGE}/libexec/agent/msh" "${PREFIX}/libexec/agent/msh"
-if [ -f "${STAGE}/libexec/agent/agent-provider" ]; then
-  install -m 0755 "${STAGE}/libexec/agent/agent-provider" "${PREFIX}/libexec/agent/agent-provider"
-  for alias_name in agent-provider-openai-responses agent-provider-openai-compat agent-provider-anthropic; do
-    if [ -e "${STAGE}/libexec/agent/${alias_name}" ] || [ -L "${STAGE}/libexec/agent/${alias_name}" ]; then
-      ln -sf agent-provider "${PREFIX}/libexec/agent/${alias_name}"
+mkdir -p "${PREFIX}/bin" "${PREFIX}/libexec/anix/tools"
+install -m 0755 "${STAGE}/bin/anix" "${PREFIX}/bin/anix"
+install -m 0755 "${STAGE}/libexec/anix/msh" "${PREFIX}/libexec/anix/msh"
+if [ -f "${STAGE}/libexec/anix/anix-provider" ]; then
+  install -m 0755 "${STAGE}/libexec/anix/anix-provider" "${PREFIX}/libexec/anix/anix-provider"
+  for alias_name in anix-provider-openai-responses anix-provider-openai-compat anix-provider-anthropic; do
+    if [ -e "${STAGE}/libexec/anix/${alias_name}" ] || [ -L "${STAGE}/libexec/anix/${alias_name}" ]; then
+      ln -sf anix-provider "${PREFIX}/libexec/anix/${alias_name}"
     fi
   done
 else
-  for prov_bin in "${STAGE}"/libexec/agent/agent-provider-*; do
+  for prov_bin in "${STAGE}"/libexec/anix/anix-provider-*; do
     if [ -f "$prov_bin" ]; then
-      install -m 0755 "$prov_bin" "${PREFIX}/libexec/agent/$(basename "$prov_bin")"
+      install -m 0755 "$prov_bin" "${PREFIX}/libexec/anix/$(basename "$prov_bin")"
     fi
   done
 fi
-install -m 0755 "${STAGE}/libexec/agent/tools/aview" "${PREFIX}/libexec/agent/tools/aview"
-install -m 0755 "${STAGE}/libexec/agent/tools/aclr" "${PREFIX}/libexec/agent/tools/aclr"
+install -m 0755 "${STAGE}/libexec/anix/tools/aview" "${PREFIX}/libexec/anix/tools/aview"
+install -m 0755 "${STAGE}/libexec/anix/tools/aclr" "${PREFIX}/libexec/anix/tools/aclr"
 
 mkdir -p "${CONFIG_DIR}" "${AGENTS_DIR}"
 if [ ! -f "${CONFIG_DIR}/config.toml" ]; then
@@ -265,7 +265,7 @@ approval = "auto"
 stderr = "auto"
 
 [providers.openai-responses]
-bin = "agent-provider-openai-responses"
+bin = "anix-provider-openai-responses"
 base_url = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
 # api_key = "sk-..."   # Optional static key (api_key_env takes precedence when set)
@@ -277,15 +277,15 @@ else
   say "==> Kept existing config at ${CONFIG_DIR}/config.toml"
 fi
 
-if [ ! -f "${AGENTS_DIR}/bash.agent" ]; then
-  if [ -f "${STAGE}/examples/bash.agent" ]; then
-    install -m 0755 "${STAGE}/examples/bash.agent" "${AGENTS_DIR}/bash.agent"
-  elif download_repo_file "examples/bash.agent" "${TMP_DIR}/bash.agent" "${VERSION}" \
-       || download_repo_file "examples/bash.agent" "${TMP_DIR}/bash.agent" "main"; then
-    install -m 0755 "${TMP_DIR}/bash.agent" "${AGENTS_DIR}/bash.agent"
+if [ ! -f "${AGENTS_DIR}/bash.anix" ]; then
+  if [ -f "${STAGE}/examples/bash.anix" ]; then
+    install -m 0755 "${STAGE}/examples/bash.anix" "${AGENTS_DIR}/bash.anix"
+  elif download_repo_file "examples/bash.anix" "${TMP_DIR}/bash.anix" "${VERSION}" \
+       || download_repo_file "examples/bash.anix" "${TMP_DIR}/bash.anix" "main"; then
+    install -m 0755 "${TMP_DIR}/bash.anix" "${AGENTS_DIR}/bash.anix"
   else
-    cat > "${AGENTS_DIR}/bash.agent" <<'EOF'
-#!/usr/bin/env agent
+    cat > "${AGENTS_DIR}/bash.anix" <<'EOF'
+#!/usr/bin/env anix
 ---
 name: bash-agent
 provider: openai-responses
@@ -299,19 +299,19 @@ stderr: auto
 ---
 你是 Bash 专家，响应用户的指令
 EOF
-    chmod 0755 "${AGENTS_DIR}/bash.agent"
+    chmod 0755 "${AGENTS_DIR}/bash.anix"
   fi
-  say "==> Installed default agent script at ${AGENTS_DIR}/bash.agent"
+  say "==> Installed default agent script at ${AGENTS_DIR}/bash.anix"
 else
-  say "==> Kept existing ${AGENTS_DIR}/bash.agent"
+  say "==> Kept existing ${AGENTS_DIR}/bash.anix"
 fi
 
 say ""
-say "Installed OS Agent successfully:"
-say "  $("${PREFIX}/bin/agent" --version)"
-say "  Binaries: ${PREFIX}/bin/agent, ${PREFIX}/libexec/agent/{msh,agent-provider{,-openai-responses,-openai-compat,-anthropic},tools/{aview,aclr}}"
+say "Installed Anix successfully:"
+say "  $("${PREFIX}/bin/anix" --version)"
+say "  Binaries: ${PREFIX}/bin/anix, ${PREFIX}/libexec/anix/{msh,anix-provider{,-openai-responses,-openai-compat,-anthropic},tools/{aview,aclr}}"
 say "  Config:   ${CONFIG_DIR}/config.toml"
-say "  Agents:   ${AGENTS_DIR}/bash.agent"
+say "  Agents:   ${AGENTS_DIR}/bash.anix"
 
 case ":${PATH}:" in
   *":${PREFIX}/bin:"*) ;;
@@ -325,5 +325,5 @@ esac
 say ""
 say "Next steps:"
 say "  1. Set your provider base_url and API key in ${CONFIG_DIR}/config.toml (or export OPENAI_API_KEY=...)"
-say "  2. Run: ${PREFIX}/bin/agent --doctor"
-say "  3. Try: ${AGENTS_DIR}/bash.agent \"show disk usage\""
+say "  2. Run: ${PREFIX}/bin/anix --doctor"
+say "  3. Try: ${AGENTS_DIR}/bash.anix \"show disk usage\""

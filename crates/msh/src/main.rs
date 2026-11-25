@@ -1,8 +1,8 @@
 use std::io::{self, Write};
 use std::process::ExitCode as StdExitCode;
 
+use anix_proto::exit_code::ExitCode;
 use msh::{ansi, binary, exec, fold};
-use os_agent_proto::exit_code::ExitCode;
 
 fn main() -> StdExitCode {
     let args: Vec<String> = std::env::args().collect();

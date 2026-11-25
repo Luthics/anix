@@ -57,7 +57,7 @@ jobs:
         if: matrix.musl
         run: |
           BIN_DIR="target/${{ matrix.target }}/release"
-          for bin in agent msh agent-provider aview aclr; do
+          for bin in anix msh anix-provider aview aclr; do
             file "${BIN_DIR}/${bin}"
             if ldd "${BIN_DIR}/${bin}" 2>&1 | grep -q '=>'; then
               echo "ERROR: ${bin} is dynamically linked" >&2
@@ -72,23 +72,23 @@ jobs:
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             TAG="dev-${GITHUB_SHA::7}"
           fi
-          STAGE="dist/os-agent-${TAG}-${{ matrix.target }}"
+          STAGE="dist/anix-${TAG}-${{ matrix.target }}"
           BIN_DIR="target/${{ matrix.target }}/release"
 
-          install -d -m 0755 "${STAGE}/bin" "${STAGE}/libexec/agent/tools" "${STAGE}/examples"
-          install -m 0755 "${BIN_DIR}/agent" "${STAGE}/bin/agent"
-          install -m 0755 "${BIN_DIR}/msh" "${STAGE}/libexec/agent/msh"
-          install -m 0755 "${BIN_DIR}/agent-provider" "${STAGE}/libexec/agent/agent-provider"
-          ln -sf agent-provider "${STAGE}/libexec/agent/agent-provider-openai-responses"
-          ln -sf agent-provider "${STAGE}/libexec/agent/agent-provider-openai-compat"
-          ln -sf agent-provider "${STAGE}/libexec/agent/agent-provider-anthropic"
-          install -m 0755 "${BIN_DIR}/aview" "${STAGE}/libexec/agent/tools/aview"
-          install -m 0755 "${BIN_DIR}/aclr" "${STAGE}/libexec/agent/tools/aclr"
-          install -m 0755 examples/bash.agent "${STAGE}/examples/bash.agent"
+          install -d -m 0755 "${STAGE}/bin" "${STAGE}/libexec/anix/tools" "${STAGE}/examples"
+          install -m 0755 "${BIN_DIR}/anix" "${STAGE}/bin/anix"
+          install -m 0755 "${BIN_DIR}/msh" "${STAGE}/libexec/anix/msh"
+          install -m 0755 "${BIN_DIR}/anix-provider" "${STAGE}/libexec/anix/anix-provider"
+          ln -sf anix-provider "${STAGE}/libexec/anix/anix-provider-openai-responses"
+          ln -sf anix-provider "${STAGE}/libexec/anix/anix-provider-openai-compat"
+          ln -sf anix-provider "${STAGE}/libexec/anix/anix-provider-anthropic"
+          install -m 0755 "${BIN_DIR}/aview" "${STAGE}/libexec/anix/tools/aview"
+          install -m 0755 "${BIN_DIR}/aclr" "${STAGE}/libexec/anix/tools/aclr"
+          install -m 0755 examples/bash.anix "${STAGE}/examples/bash.anix"
           install -m 0644 LICENSE README.md "${STAGE}/"
 
           mkdir -p artifacts
-          tar -C dist -czf "artifacts/os-agent-${TAG}-${{ matrix.target }}.tar.gz" "os-agent-${TAG}-${{ matrix.target }}"
+          tar -C dist -czf "artifacts/anix-${TAG}-${{ matrix.target }}.tar.gz" "anix-${TAG}-${{ matrix.target }}"
 
       - uses: actions/upload-artifact@v4
         with:

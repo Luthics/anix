@@ -1,0 +1,28 @@
+[package]
+name = "anix-tools"
+description = "Explicit model-facing a* tools (`aview`, `aclr`) communicating via $ANIX_CTL"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "aview"
+path = "src/bin/aview.rs"
+
+[[bin]]
+name = "aclr"
+path = "src/bin/aclr.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+clap.workspace = true
+image.workspace = true
+anix-proto.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true

@@ -17,7 +17,7 @@ workspace = true
 
 [dependencies]
 libc.workspace = true
-os-agent-proto.workspace = true
+anix-proto.workspace = true
 signal-hook.workspace = true
 thiserror.workspace = true
 uuid.workspace = true

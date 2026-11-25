@@ -1,0 +1,23 @@
+[package]
+name = "anix-providers"
+description = "Unified multi-call Provider adapter (`anix-provider` + BusyBox symlinks for OpenAI Responses, OpenAI Compat, and Anthropic Messages)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "anix-provider"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+base64.workspace = true
+anix-proto.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ureq.workspace = true
