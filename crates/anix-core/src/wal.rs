@@ -857,6 +857,7 @@ mod tests {
             .expect("replayed stream must satisfy invariants");
     }
 
+    // RFC v1.1.1 §6.2
     #[test]
     fn replay_restores_session_id_across_checkpoint_and_derives_stable_legacy_fallback() {
         let tmp = std::env::temp_dir().join(format!("anix-wal-sid-{}.jsonl", uuid::Uuid::new_v4()));

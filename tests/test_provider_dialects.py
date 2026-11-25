@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+import uuid
 from http.server import HTTPServer
 
 from http_fixture import JsonRequest
@@ -49,6 +50,7 @@ def user(text, **fields):
 class AdapterHTTP(JsonRequest):
     def do_POST(self):
         self.server.requests.append(json.loads(self.body()))
+        self.server.request_headers.append(self.headers)
         if self.server.replies:
             status, body, after_read = self.server.replies.popleft()
             if after_read:
@@ -96,6 +98,7 @@ class ProviderDialects(unittest.TestCase):
         self.binary = Path(os.environ.get("ANIX_TEST_BIN_DIR", HERE.parent / "target/debug")).resolve() / "anix-provider"
         self.http = HTTPServer(("127.0.0.1", 0), AdapterHTTP)
         self.http.requests = []
+        self.http.request_headers = []
         self.http.replies = deque()
         worker = threading.Thread(target=self.http.serve_forever, kwargs={"poll_interval": 0.01})
         worker.start()
@@ -103,12 +106,15 @@ class ProviderDialects(unittest.TestCase):
         self.addCleanup(worker.join)
         self.addCleanup(self.http.shutdown)
 
-    def run_provider(self, dialect, mode, rows, replies):
+    def run_provider(self, dialect, mode, rows, replies, session_env=None):
         self.http.requests.clear()
+        self.http.request_headers.clear()
         self.http.replies = deque(replies)
         env = {"HOME": str(self.root), "ANIX_PROVIDER_MODE": mode, "ANIX_MODEL": "default-model",
                "ANIX_PROVIDER_BASE_URL": f"http://127.0.0.1:{self.http.server_port}/v1",
                "ANIX_PROVIDER_TIMEOUT_SEC": "5", "ANIX_PROVIDER_API_KEY": "fixture-only"}
+        if session_env is not None:
+            env["ANIX_SESSION_ID"] = session_env
         payload = b"".join(json.dumps(row, ensure_ascii=False).encode() + b"\n" for row in rows)
         result = subprocess.run([self.binary, dialect], env=env, cwd=self.root, input=payload,
                                 capture_output=True, timeout=15)
@@ -370,6 +376,152 @@ class ProviderDialects(unittest.TestCase):
                 self.assertEqual(usage["cached_tokens"], 70)
                 self.assertEqual(usage.get("cache_write_tokens", 0), 3 if dialect == "anthropic" else 0)
                 self.assertEqual(usage.get("reasoning_tokens", 0), 0 if dialect == "anthropic" else 11)
+
+    # RFC v1.1.1 §6.2, §9.2, §9.5
+    def test_wal_session_reaches_http_across_cli_restarts_and_provider_switches(self):
+        config = self.root / ".config/anix"
+        config.mkdir(parents=True)
+        settings = ["[defaults]", "model='fixture'"]
+        for dialect in DIALECTS:
+            name = f"anix-provider-{dialect}"
+            (self.root / name).symlink_to(self.binary)
+            settings.extend([f"[providers.{dialect}]", f"bin='{name}'",
+                             f"base_url='http://127.0.0.1:{self.http.server_port}/v1'",
+                             "api_key='fixture'", "api_key_env=''", "timeout_sec=5"])
+        (config / "config.toml").write_text("\n".join(settings))
+        (self.root / "case.anix").write_text("routing fixture")
+        env = {"HOME": str(self.root), "PATH": f"{self.root}:/usr/bin:/bin",
+               "XDG_RUNTIME_DIR": str(self.root / "run")}
+        text = {
+            "openai-responses": {"type": "response.output_text.delta", "delta": "observed"},
+            "openai-compat": {"choices": [{"index": 0, "delta": {"content": "observed"}}]},
+            "anthropic": {"type": "content_block_delta", "index": 0,
+                          "delta": {"type": "text_delta", "text": "observed"}},
+        }
+        ids = []
+        runs = [("shared", dialect) for dialect in DIALECTS] + [("independent", DIALECTS[0])]
+        for wal, dialect in runs:
+            with self.subTest(wal=wal, dialect=dialect):
+                self.http.replies.append((200, sse(text[dialect]) + completion(dialect), None))
+                proc = subprocess.run(
+                    ["/bin/sh", "-c", 'exec "$@" 7>trace', "fixture", self.binary.with_name("anix"),
+                     "-q", "--trace-fd=7", "--provider", dialect, "-c", wal, "case.anix", "--", dialect],
+                    env=env, cwd=self.root, stdin=subprocess.DEVNULL, capture_output=True, timeout=12)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertFalse(self.http.replies)
+                self.assertEqual(len(self.http.requests), len(ids) + 1)
+                records = [json.loads(line) for line in (self.root / wal).read_bytes().splitlines()]
+                trace = [json.loads(line) for line in (self.root / "trace").read_bytes().splitlines()]
+                start, = [e for e in trace if e["type"] == "run_start"]
+                self.assertEqual(records[-1].get("text"), "observed")
+                self.assertEqual(records[0]["type"], "session_init")
+                sid = records[0]["session_id"]
+                self.assertEqual(uuid.UUID(sid).version, 4)
+                self.assertEqual((start["provider"], start["session_id"]), (dialect, sid))
+                self.assertEqual(self.http.request_headers[-1].get_all("x-session-id"), [sid])
+                body = self.http.requests[-1]
+                if dialect == "openai-responses":
+                    self.assertEqual(body["prompt_cache_key"], sid)
+                else:
+                    self.assertNotIn("prompt_cache_key", body)
+                self.assertNotIn("session_id", body)
+                ids.append(sid)
+        self.assertEqual(ids[:3], [ids[0]] * 3)
+        self.assertNotEqual(ids[3], ids[0])
+
+    # RFC v1.1.1 §1.4, §9.2
+    def test_session_routing_works_in_oneshot_and_per_envelope_in_coprocess(self):
+        for dialect in DIALECTS:
+            for mode in ("oneshot", "coprocess"):
+                for default in (None, "env-session"):
+                    with self.subTest(dialect=dialect, mode=mode, default=default):
+                        if mode == "oneshot":
+                            rows = [{"type": "header", "ir_version": 1, **header()}, user("legacy")]
+                            expected = [default]
+                        else:
+                            rows = [envelope(1, [user("fallback")]),
+                                    envelope(2, [user("override")], session_id="per-request"),
+                                    envelope(3, [user("fallback again")])]
+                            expected = [default, "per-request", default]
+                        replies = [(200, completion(dialect), None)] * len(expected)
+                        proc, events, bodies = self.run_provider(dialect, mode, rows, replies, default)
+                        self.assertEqual(proc.returncode, 0, proc.stderr)
+                        self.assert_terminals(events, ["done"] * len(expected))
+                        for sid, body, headers in zip(expected, bodies, self.http.request_headers):
+                            self.assertEqual(headers.get_all("x-session-id", []), [sid] if sid else [])
+                            self.assertNotIn("session_id", body)
+                            if dialect == "openai-responses" and sid:
+                                self.assertEqual(body["prompt_cache_key"], sid)
+                            else:
+                                self.assertNotIn("prompt_cache_key", body)
+
+    # RFC v1.1.1 §9.2
+    def test_header_rename_and_disable_apply_only_to_the_current_request(self):
+        cases = [({}, "x-session-id"), ({"session_header": "X-Fixture-Route"}, "x-fixture-route"),
+                 ({"session_header": False}, None), ({"session_header": None}, None),
+                 ({}, "x-session-id")]
+        for dialect in DIALECTS:
+            with self.subTest(dialect=dialect):
+                rows = [envelope(i, [user("route")], header=header(params=params), session_id=f"route-{i}")
+                        for i, (params, _) in enumerate(cases)]
+                proc, events, bodies = self.run_provider(dialect, "coprocess", rows,
+                    [(200, completion(dialect), None)] * len(rows))
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assert_terminals(events, ["done"] * len(rows))
+                for i, ((_, key), headers, body) in enumerate(zip(cases, self.http.request_headers, bodies)):
+                    for name in ("x-session-id", "x-fixture-route"):
+                        self.assertEqual(headers.get_all(name, []), [f"route-{i}"] if name == key else [])
+                    self.assertNotIn("session_header", body)
+                    self.assertNotIn("session_id", body)
+                    if dialect == "openai-responses":
+                        self.assertEqual(body["prompt_cache_key"], f"route-{i}")
+                    else:
+                        self.assertNotIn("prompt_cache_key", body)
+
+    # RFC v1.1.1 §9.2
+    def test_responses_cache_key_has_native_string_boolean_and_null_semantics(self):
+        cases = [({}, "session"), ({"prompt_cache_key": True}, "session"),
+                 ({"prompt_cache_key": "explicit"}, "explicit"),
+                 ({"prompt_cache_key": False}, None), ({"prompt_cache_key": None}, None)]
+        dialect = "openai-responses"
+        rows = [envelope(i, [user("cache")], header=header(params=params)) for i, (params, _) in enumerate(cases)]
+        proc, events, bodies = self.run_provider(dialect, "coprocess", rows,
+            [(200, completion(dialect), None)] * len(rows), "session")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assert_terminals(events, ["done"] * len(rows))
+        for (_, expected), body, headers in zip(cases, bodies, self.http.request_headers):
+            self.assertEqual(headers.get_all("x-session-id"), ["session"])
+            if expected is None:
+                self.assertNotIn("prompt_cache_key", body)
+            else:
+                self.assertEqual(body["prompt_cache_key"], expected)
+
+    # RFC v1.1.1 §9.2
+    def test_chat_cache_fields_are_independent_opt_ins_and_anthropic_keeps_them_out_of_the_body(self):
+        # Absence and explicit null are separate inputs to the provider.
+        omitted = object()
+        values = [omitted, True, "literal", False, None]
+        combinations = [(cache, sid) for cache in values for sid in values]
+        for dialect in ("openai-compat", "anthropic"):
+            with self.subTest(dialect=dialect):
+                rows, expected = [], []
+                for i, pair in enumerate(combinations):
+                    params = {key: val for key, val in zip(("prompt_cache_key", "session_id"), pair)
+                              if val is not omitted}
+                    route = f"turn-{i}"
+                    rows.append(envelope(i, [user("opt in")], header=header(params=params), session_id=route))
+                    fields = {key: route if val is True else val for key, val in params.items()
+                              if val is True or isinstance(val, str)}
+                    expected.append(fields if dialect == "openai-compat" else {})
+                proc, events, bodies = self.run_provider(dialect, "coprocess", rows,
+                    [(200, completion(dialect), None)] * len(rows))
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assert_terminals(events, ["done"] * len(rows))
+                for i, (want, body, headers) in enumerate(zip(expected, bodies, self.http.request_headers)):
+                    with self.subTest(params=rows[i]["header"]["params"]):
+                        self.assertEqual(headers.get_all("x-session-id"), [f"turn-{i}"])
+                        self.assertEqual({key: body[key] for key in ("prompt_cache_key", "session_id")
+                                          if key in body}, want)
 
 
 if __name__ == "__main__":

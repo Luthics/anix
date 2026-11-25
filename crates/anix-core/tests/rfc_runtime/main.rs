@@ -11,6 +11,7 @@ mod hooks;
 mod inbox;
 mod io;
 mod provider;
+mod session;
 mod signals;
 #[path = "../common/tempdir.rs"]
 mod tempdir;

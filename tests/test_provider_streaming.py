@@ -1,4 +1,4 @@
-"""Black-box conformance to docs/v1.1.0-RFC.md using the real runtime and loopback HTTP."""
+"""Black-box conformance to docs/v1.1.1-RFC.md using the real runtime and loopback HTTP."""
 from contextlib import contextmanager
 import fcntl
 import json

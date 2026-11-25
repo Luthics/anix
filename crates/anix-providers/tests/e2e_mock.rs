@@ -667,6 +667,7 @@ fn http_400_image_rejection_maps_to_unsupported_media_non_retryable() {
     ));
 }
 
+// RFC v1.1.1 §9.2
 #[test]
 fn session_affinity_headers_and_body_mapping_across_all_dialects() {
     let make_ir = |params: BTreeMap<String, Value>| -> String {

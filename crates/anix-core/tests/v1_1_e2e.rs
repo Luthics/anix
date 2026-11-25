@@ -800,6 +800,7 @@ done
     let _ = fs::remove_dir_all(&root);
 }
 
+// RFC v1.1.1 §3.4, §6.1, §6.2, §9.2, §9.5
 #[test]
 fn test_v1_1_1_session_id_persists_across_wal_resume_checkpoint_and_isolates_msh() {
     let root = make_temp_env("session-id");
