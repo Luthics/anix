@@ -1228,6 +1228,7 @@ done
     let _ = fs::remove_dir_all(&root);
 }
 
+// RFC v1.2.0 §3.1, §3.3, §3.4, §4.1, §4.3, §4.4, §6.2, §9.1, §9.5
 #[test]
 fn test_v1_2_0_orthogonal_output_contracts_and_shell_none() {
     let root = make_temp_env("v120-output");

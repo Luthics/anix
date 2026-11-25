@@ -470,11 +470,17 @@ fn runtime_contract_depends_on_stderr_and_only_changes_at_the_tail_on_resume() {
     fs::remove_file(root.join("config/anix/hooks/pre-context.d/00-posix-runtime")).unwrap();
     fs::write(root.join("case.agent"), "keep this prompt").unwrap();
     let request = |mode: &str, context: &str| {
-        let out =
-            fx.run(
-                fx.anix()
-                    .args(["--stderr", mode, "-c", context, "case.agent", "--", "input"]),
-            );
+        let out = fx.run(fx.anix().args([
+            "--output",
+            "explicit",
+            "--stderr",
+            mode,
+            "-c",
+            context,
+            "case.agent",
+            "--",
+            "input",
+        ]));
         expect_code(&out, 0);
         assert!(out.stdout.is_empty());
         if mode == "explicit" {
@@ -610,6 +616,8 @@ fn post_tool_filters_chain_in_order_and_only_the_final_text_reaches_wal_and_prov
             ],
         );
         let args = [
+            "--output",
+            "explicit",
             "-q",
             "-y",
             "--shell",

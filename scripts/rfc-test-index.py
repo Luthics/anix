@@ -1,4 +1,4 @@
-"""Link v1.1.2 RFC requirements to their conformance tests in both directions."""
+"""Link current RFC requirements to their conformance tests in both directions."""
 import argparse
 import ast
 from pathlib import Path
@@ -7,7 +7,7 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RFC = Path("docs/v1.1.2-RFC.md")
+RFC = Path("docs/RFC.md")
 INDEX = ROOT / "tests/RFC-cases.md"
 REQUIREMENTS = ROOT / "tests/rfc-requirements.tsv"
 REVERSE_INDEX = ROOT / "tests/RFC-requirements.md"
@@ -44,14 +44,19 @@ def build_index():
     sections = {}
     # GitHub line anchors count LF bytes, including in Markdown tables.
     rfc_lines = (ROOT / RFC).read_bytes().decode("utf-8").split("\n")
+    version_line = next((line for line in rfc_lines if line.startswith("**版本**")), "")
+    version = re.search(r"v\d+\.\d+\.\d+", version_line)
+    if not version:
+        raise ValueError(f"{RFC} is missing its version")
+    version = version.group()
     for line, heading in enumerate(rfc_lines, 1):
         match = re.match(r"^#{2,3} (\d+(?:\.\d+)?)\.?\s", heading)
         if match:
             sections[match[1]] = line
-    doc = ["# v1.1.2 RFC 逐测试索引", "",
+    doc = [f"# {version} RFC 逐测试索引", "",
            "每行对应一个测试函数，链接分别指向测试声明和规范原文。参数化用例共用所在函数的条款。", "",
            "按规范原句查找断言或相关 issue，见[条款验收表](RFC-requirements.md)。", "",
-           "[v1.1.1 的 262 个用例](https://github.com/Luthics/anix/blob/0b11a3c60218b9313f9e81a806c9a471906766eb/tests/RFC-cases.md)。v1.0 的 198 个用例保存在[v1.0 测试索引](https://github.com/Luthics/anix/blob/45e55a9f16f6bead6a933c67051b94b0acb753a0/tests/RFC-cases.md)。", "",
+           "历史快照见 [v1.1.2 的 277 个用例](https://github.com/Luthics/anix/blob/e4fb614f314625ae282bd2fcb9b7e80312514946/tests/RFC-cases.md)、[v1.1.1 的 262 个用例](https://github.com/Luthics/anix/blob/0b11a3c60218b9313f9e81a806c9a471906766eb/tests/RFC-cases.md)。v1.0 的 198 个用例保存在[v1.0 测试索引](https://github.com/Luthics/anix/blob/45e55a9f16f6bead6a933c67051b94b0acb753a0/tests/RFC-cases.md)。", "",
            "运行 `python3 scripts/rfc-test-index.py` 更新此文件。CI 使用 `--check` 校验。", ""]
     files = sorted([*(ROOT / "crates").rglob("*.rs"), *(ROOT / "tests").rglob("*.py")])
     cases = {}
@@ -66,7 +71,7 @@ def build_index():
         doc.extend([f"## `{rel}`", "", "| 测试 | RFC 条款 |", "| --- | --- |"])
         for start, line, name in tests:
             annotation = lines[start-1].strip() if start else ""
-            match = re.fullmatch(r"(?:#|//) RFC v1\.1(?:\.[12])? (§\d+(?:\.\d+)?(?:, §\d+(?:\.\d+)?)*)", annotation)
+            match = re.fullmatch(r"(?:#|//) RFC v\d+\.\d+(?:\.\d+)? (§\d+(?:\.\d+)?(?:, §\d+(?:\.\d+)?)*)", annotation)
             if not match:
                 raise ValueError(f"{rel}:{line} {name} needs a per-test RFC annotation")
             links = []
@@ -83,11 +88,11 @@ def build_index():
         doc.append("")
     if not count:
         raise ValueError("no tests discovered")
-    return "\n".join(doc), build_requirements(sections, rfc_lines, cases), count
+    return "\n".join(doc), build_requirements(sections, rfc_lines, cases, version), count, version
 
 
-def build_requirements(sections, rfc_lines, cases):
-    doc = ["# v1.1.2 RFC 条款验收表", "",
+def build_requirements(sections, rfc_lines, cases, version):
+    doc = [f"# {version} RFC 条款验收表", "",
            "每行给出一项可观察行为。第一列链接到 RFC 原文，第二列链接到执行断言或待裁决的 issue。通过与失败见对应提交的 CI。", "",
            "本表按条款逐步补录。[逐测试索引](RFC-cases.md)列出当前套件的全部测试函数。编辑 `tests/rfc-requirements.tsv` 后运行 `python3 scripts/rfc-test-index.py` 更新两份索引。"]
     tables = {}
@@ -135,7 +140,7 @@ if __name__ == "__main__":
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     try:
-        content, reverse, count = build_index()
+        content, reverse, count, version = build_index()
     except ValueError as err:
         sys.exit(str(err))
     for path, rendered in ((INDEX, content), (REVERSE_INDEX, reverse)):
@@ -144,4 +149,4 @@ if __name__ == "__main__":
                 sys.exit(f"{path.name} is stale. Run python3 scripts/rfc-test-index.py")
         else:
             path.write_text(rendered)
-    print(f"{count} tests linked to v1.1.2 RFC clauses")
+    print(f"{count} tests linked to {version} RFC clauses")

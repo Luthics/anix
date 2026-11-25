@@ -5,6 +5,8 @@ use std::fs;
 
 fn run(fx: &Fixture) {
     let out = fx.run(fx.anix().args([
+        "--output",
+        "none",
         "-q",
         "-y",
         "--shell",

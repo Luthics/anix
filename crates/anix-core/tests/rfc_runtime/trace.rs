@@ -257,7 +257,7 @@ fn disconnected_trace_recipient_does_not_change_payload_stderr_or_exit_status() 
         let mut cmd = fx.command_for("/bin/sh");
         cmd.stdin(Stdio::from(OwnedFd::from(writer))).args([
             "-c",
-            r#"exec 3<&0; exec "$1" -q -y --shell /bin/sh --trace-fd=3 case.agent -- go </dev/null"#,
+            r#"exec 3<&0; exec "$1" -q -y --output explicit --shell /bin/sh --trace-fd=3 case.agent -- go </dev/null"#,
             "fixture",
             env!("CARGO_BIN_EXE_anix"),
         ]);

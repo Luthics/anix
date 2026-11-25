@@ -176,7 +176,7 @@ printf '%s\\n' '{"type":"text_delta","text":"ok"}' '{"type":"done","finish_reaso
         session = "fea02ce0-3fc2-486c-9273-bae1aec6c662"
         ts = "2026-01-02T03:04:05Z"
         header = {"ir_version": 1, "session_id": session, "ts": ts,
-                  "config": {"stderr": "explicit", "approval": "ask", "vision": True}}
+                  "config": {"stderr": "explicit", "approval": "ask", "vision": True, "output": "reply", "shell": "msh"}}
 
         def message(role, turn_id, text):
             return {"type": "message", "role": role, "turn_id": turn_id, "text": text, "ts": ts}
@@ -305,7 +305,7 @@ else:
                     writer.write(b"\xb8\xad-last")
                     writer.close()
                     out, err = child.communicate(timeout=10)
-                self.assertEqual((child.returncode, out, err), (0, b"", b""))
+                self.assertEqual((child.returncode, out, err), (0, b"ok", b""))
                 rows = [json.loads(line) for line in request.read_bytes().split(b"\n") if line]
                 text, = [r["text"] for r in rows if r.get("role") == "user"]
                 if args:
@@ -445,7 +445,7 @@ for name, channel in (("output","ANIX_OUT"), ("diagnostic","ANIX_ERR")):
         events = [{"type":"tool_call", "id":"relay", "name":"msh", "arguments":{"cmd":cmd}},
                   {"type":"done", "finish_reason":"tool_calls"}]
         (self.root / "first.reply").write_text("".join(json.dumps(e) + "\n" for e in events))
-        out = subprocess.run([self.anix, "-y", "-q", "case.agent", "--", "go"], cwd=self.root,
+        out = subprocess.run([self.anix, "-y", "-q", "--output", "explicit", "case.agent", "--", "go"], cwd=self.root,
                              stdin=subprocess.DEVNULL, capture_output=True, timeout=20,
                              env={**self.env, "FIXTURE_PYTHON": sys.executable})
         self.assertEqual(out.returncode, 0, out.stderr[-160:])
@@ -502,7 +502,7 @@ for name, channel in (("output","ANIX_OUT"), ("diagnostic","ANIX_ERR")):
                         (self.root / "first.ir").unlink(missing_ok=True)
                         out, read_out = channel(stack, out_tty)
                         err, read_err = channel(stack, err_tty)
-                        result = subprocess.run([self.anix, "-y", "--stderr", mode, "case.agent", "--", "go"],
+                        result = subprocess.run([self.anix, "-y", "--output", "explicit", "--stderr", mode, "case.agent", "--", "go"],
                                                 cwd=self.root, env=self.env, stdout=out, stderr=err,
                                                 stdin=subprocess.DEVNULL, timeout=20)
                         payload, diagnostic = read_out(), read_err()
@@ -575,7 +575,7 @@ while [ -f "child-$n.ir" ]; do n=$((n+1)); done
             "start-child", {"PATH": f"{launcher_dir}:/bin:/usr/bin",
                             "TEST_ANIX_BINARY": str(self.anix), "ANIX_MODEL": "outer-model",
                             "ANIX_PROVIDER": "fixture", "ANIX_CONTEXT": "parent.wal",
-                            "ANIX_MAX_TURNS": "2"}, approval_opts=approval_opts)
+                            "ANIX_OUTPUT": "none", "ANIX_MAX_TURNS": "2"}, approval_opts=approval_opts)
         self.assertIn("exit=0\n", parent_tool["text"], parent_tool)
         self.assertEqual(result.stdout, b"")
         self.assertEqual((self.root / "child-model").read_text(), "child-model")

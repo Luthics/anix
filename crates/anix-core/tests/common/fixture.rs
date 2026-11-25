@@ -15,6 +15,12 @@ pub struct Fixture {
 impl Fixture {
     pub fn new() -> Self {
         let dir = TempDir::new();
+        // v1.2 validates the configured shell even for requests with no tool calls.
+        let private = dir.0.join(".local/libexec/anix");
+        fs::create_dir_all(&private).unwrap();
+        let msh = private.join("msh");
+        fs::write(&msh, "#!/bin/sh\nexec /bin/sh \"$@\"\n").unwrap();
+        fs::set_permissions(msh, Permissions::from_mode(0o700)).unwrap();
         let config = dir.0.join("config/anix");
         let hooks = config.join("hooks/pre-context.d");
         fs::create_dir_all(&hooks).unwrap();

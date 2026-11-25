@@ -212,6 +212,10 @@ fn scalar_settings_resolve_for_every_subset_of_the_five_override_layers() {
     let Some(child_mode) = std::env::var_os(CHILD) else {
         for has_env in [false, true] {
             let fx = Fixture::new();
+            for layer in 1..=5 {
+                std::os::unix::fs::symlink("/bin/sh", fx.dir.0.join(format!("shell-{layer}")))
+                    .unwrap();
+            }
             let exe = std::env::current_exe().unwrap();
             let mut child = fx.command_for(exe.to_str().unwrap());
             child.env(CHILD, if has_env {"present"} else {"absent"})
@@ -593,7 +597,8 @@ fn environment_approval_aliases_and_cli_override_produce_the_expected_tool_effec
         );
         let mut cmd = fx.anix();
         cmd.env("ANIX_SHELL", "/bin/sh")
-            .env("ANIX_STDERR", "explicit");
+            .env("ANIX_STDERR", "explicit")
+            .env("ANIX_OUTPUT", "none");
         if let Some(y) = yes {
             cmd.env("ANIX_YES", y);
         }
@@ -705,7 +710,10 @@ fn absolute_frontmatter_threshold_must_fit_uint32_before_the_disable_rule_applie
             format!("---\nmax_tokens: 1024\ncompact_threshold: {value}\n---\nbody"),
         )
         .unwrap();
-        let out = fx.run(fx.anix().args(["-q", "case.agent", "--", "go"]));
+        let out = fx.run(
+            fx.anix()
+                .args(["-q", "--output", "none", "case.agent", "--", "go"]),
+        );
         if out.status.code() != Some(expected) || fx.capture.exists() != (expected == 0) {
             unexpected.push((value, out.status.code(), fx.capture.exists()));
         } else if expected == 2 {

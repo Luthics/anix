@@ -107,6 +107,8 @@ fn media_fixture(bridge: Option<(&str, u64)>) -> Fixture {
 fn run_media(fx: &Fixture, vision: bool, arg: &str) {
     let flag = if vision { "--vision" } else { "--no-vision" };
     let result = fx.run(fx.anix().args([
+        "--output",
+        "none",
         "-q",
         "-y",
         "--shell",

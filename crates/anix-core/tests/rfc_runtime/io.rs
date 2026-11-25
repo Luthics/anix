@@ -48,7 +48,7 @@ fn args_stdin_and_sparse_extra_descriptors_are_ordered_and_trace_is_separate() {
         r#"exec "$1" --trace-fd=3 case.agent -- "two words" end <input 9<nine 4<four 6<six 7>write-only 3>trace"#,
         "fixture",env!("CARGO_BIN_EXE_anix")]));
     expect_code(&result, 0);
-    assert!(result.stdout.is_empty());
+    assert_eq!(result.stdout, b"ok");
     let ir = jsonl(&fx.capture);
     let user = ir.iter().find(|m| m["role"] == "user").unwrap()["text"]
         .as_str()
@@ -107,7 +107,7 @@ fn repeated_payload_redirection_appends_raw_bytes_in_both_stderr_modes() {
         );
         let result = fx.run(fx.command_for("/bin/sh").args([
             "-c",
-            r#"exec "$1" --trace-fd=3 --shell /bin/sh -y --stderr "$2" case.agent -- go >payload 3>trace"#,
+            r#"exec "$1" --trace-fd=3 --output explicit --shell /bin/sh -y --stderr "$2" case.agent -- go >payload 3>trace"#,
             "fixture",
             env!("CARGO_BIN_EXE_anix"),
             mode,
@@ -159,7 +159,16 @@ fn tool_receives_control_channels_tools_path_and_no_parent_model_or_wal() {
         fx.anix()
             .env("ANIX_CONTEXT", "session.wal")
             .env("ANIX_MODEL", "parent-only")
-            .args(["--shell", "/bin/sh", "-y", "case.agent", "--", "go"]),
+            .args([
+                "--output",
+                "explicit",
+                "--shell",
+                "/bin/sh",
+                "-y",
+                "case.agent",
+                "--",
+                "go",
+            ]),
     );
     expect_code(&result, 0);
     assert!(root.join("session.wal").is_file());
@@ -372,7 +381,6 @@ fn shell_environment_contains_only_observability_effective_approval_and_routed_f
             .filter(|(k, _)| k.starts_with("ANIX_"))
             .collect();
         let mut allowed = BTreeMap::from([
-            ("ANIX_OUT", "/dev/fd/4"),
             ("ANIX_ERR", "/dev/fd/5"),
             ("ANIX_CTL", "/dev/fd/6"),
             ("ANIX_APPROVAL", expected),
@@ -406,6 +414,8 @@ fn unterminated_deltas_are_separated_from_tool_status_diagnostics_and_usage() {
             )]));
             scripted_provider(&fx, &[first, success_text("final-fragment")]);
             let output = fx.run(fx.anix().args([
+                "--output",
+                "explicit",
                 "--stderr",
                 mode,
                 "--shell",

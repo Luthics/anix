@@ -170,7 +170,7 @@ class ProviderStreaming(unittest.TestCase):
                 f"base_url='http://127.0.0.1:{http.server_port}/v1'\n"
                 f"api_key_env=''\napi_key='fixture'\ntimeout_sec={provider_timeout}\n")
             args = ["/bin/sh", "-c", 'exec "$@" 7>trace', "fixture", self.bin_dir / "anix",
-                    "--trace-fd=7", "-q", "-c", "history", *options, "case.agent", "--", "input"]
+                    "--trace-fd=7", "-q", "--output", "explicit", "-c", "history", *options, "case.agent", "--", "input"]
             env = {"HOME": str(self.root), "PATH": f"{self.bin_dir}:/bin:/usr/bin",
                    "XDG_RUNTIME_DIR": str(self.root / "run"), "ANIX_TRACE_LEVEL": level}
             if msh_timeout is not None:
@@ -484,7 +484,7 @@ printf '%s\\n' '{"type":"text_delta","text":"fixture reply"}' '{"type":"done","f
                         os.close(slave)
                         os.close(master)
                     self.assertEqual(child.returncode, 0, stderr)
-                    self.assertEqual(stdout, b"")
+                    self.assertEqual(stdout, b"fixture reply")
                     users = [r["text"] for r in self.rows("request") if r.get("role") == "user"]
                     self.assertEqual(users, [expected])
 
@@ -570,7 +570,6 @@ printf finished > natural-exit
             os.write(master, b"PS1=$RFC_PROMPT\n")
             read_until(master, prompt)
             os.write(master, b'./bash.agent --trace-fd=7 "xxx" 7>trace\n')
-            read_until(master, b"fixture-final")
             # Interrupt during child cleanup regardless of how anix formats
             # the final delta. Allow its pipe reader time to observe EOF.
             deadline = time.monotonic() + 4
@@ -643,7 +642,7 @@ printf '%s\\n' '{"type":"text_delta","text":"unfinished reply"}'
                 if child.poll() is None:
                     child.kill()
                     child.wait(timeout=3)
-        self.assertEqual((child.returncode, out), (130, b""))
+        self.assertEqual((child.returncode, out), (130, b"first reply"))
         self.assertTrue((self.root / "stopped").exists())
         self.assertEqual(len((self.root / "starts").read_text().splitlines()), 1)
         requests = [self.rows(name)[0] for name in ("request-1", "request-2")]

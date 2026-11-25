@@ -8,7 +8,7 @@ use std::path::Path;
 
 const TS: &str = "2026-01-01T00:00:00Z";
 fn section(kind: &str, turn: u64, version: u32) -> Value {
-    let mut row = json!({"type":kind,"ts":TS,"ir_version":version,"config":{"stderr":"auto","approval":"ask","vision":true}});
+    let mut row = json!({"type":kind,"ts":TS,"ir_version":version,"config":{"stderr":"auto","approval":"ask","vision":true,"output":"reply","shell":"msh"}});
     if kind == "checkpoint" {
         row["turn_id"] = json!(turn);
     }
@@ -640,7 +640,7 @@ fn each_combination_of_stderr_approval_and_vision_drift_creates_one_tail_update(
             fs::write(root.join("case.agent"), "different script on disk").unwrap();
             let wal = root.join("history");
             let frozen = "  不变\r\nsystem 🦀  ";
-            let previous = json!({"stderr":"explicit", "approval":"deny", "vision":false});
+            let previous = json!({"stderr":"explicit", "approval":"deny", "vision":false, "output":"reply", "shell":"msh"});
             let user = if kind == "checkpoint" {
                 "<checkpoint>\nprior\n</checkpoint>"
             } else {

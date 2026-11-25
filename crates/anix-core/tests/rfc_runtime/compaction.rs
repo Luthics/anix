@@ -737,6 +737,8 @@ fn two_checkpoints_carry_folded_usage_once_and_refresh_the_prefix_across_process
 
 fn run_tail_turn(fx: &Fixture, input: &str) {
     let out = fx.run(fx.anix().args([
+        "--output",
+        "none",
         "-q",
         "-y",
         "--shell",

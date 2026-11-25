@@ -239,10 +239,10 @@ timeout_sec=3
                 os.close(slave)
                 os.close(master)
             self.assertEqual(result.returncode, 0, bytes(output))
-            self.assertEqual(result.stdout, b"")
-            self.assertIn(b"fixture reply", output)
+            self.assertEqual(result.stdout, b"fixture reply")
+            self.assertNotIn(b"fixture reply", output)
             self.assertEqual(output.count(b"[usage]"), 1)
-            self.assertRegex(bytes(output), rb"\n\x1b\[2m\[usage\] [^\r\n]+\x1b\[0m\n\Z")
+            self.assertRegex(bytes(output), rb"(?:^|\n)\x1b\[2m\[usage\] [^\r\n]+\x1b\[0m\n\Z")
 
     # RFC v1.1.1 §2, §3.1, §4.1, §9.2, §10.3
     def test_installed_bash_script_accepts_args_on_path_and_by_relative_name_without_tty_eof(self):
@@ -262,8 +262,8 @@ timeout_sec=3
                         os.close(slave)
                         os.close(master)
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(result.stdout, b"")
-                    self.assertIn(b"fixture reply", result.stderr)
+                    self.assertEqual(result.stdout, b"fixture reply")
+                    self.assertNotIn(b"fixture reply", result.stderr)
                     self.assertIn(b"[usage]", result.stderr)
                     frames = [json.loads(line) for line in (root / "request").read_bytes().splitlines()]
                     self.assertEqual([f["text"] for f in frames if f.get("role") == "user"], ["<args>xxx</args>"])
@@ -308,7 +308,7 @@ timeout_sec=3
             "api_key_env=''\napi_key='loopback-fixture'\ntimeout_sec=10\n")
         (root / "pixel.png").write_bytes(PNG)
         script = root / "demo.agent"
-        script.write_text("#!/usr/bin/env anix\n---\napproval: auto\nstderr: explicit\n"
+        script.write_text("#!/usr/bin/env anix\n---\napproval: auto\noutput: explicit\nstderr: explicit\n"
                           "context: session.jsonl\n---\ninspect fixture")
         script.chmod(0o700)
         env = {"HOME": str(root), "PATH": f"{root}/.local/bin:/usr/bin:/bin",

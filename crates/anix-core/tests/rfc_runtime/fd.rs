@@ -25,7 +25,7 @@ fn assert_success(output: &Output) {
         "{:?}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, b"ok");
     assert!(
         output.stderr.is_empty(),
         "{:?}",

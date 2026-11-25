@@ -47,7 +47,7 @@ fn crlf_script_reaches_the_provider_as_the_intended_system_message() {
     let result = run_script(&fixture, source.as_bytes());
     let (code, stdout, stderr) = (result.status.code(), result.stdout, result.stderr);
     assert_eq!(code, Some(0), "{}", String::from_utf8_lossy(&stderr));
-    assert!(stdout.is_empty());
+    assert_eq!(stdout, b"ok");
     let ir = fs::read_to_string(fixture.capture).unwrap();
     let rows: Vec<Value> = ir
         .lines()
