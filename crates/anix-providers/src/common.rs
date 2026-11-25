@@ -1,6 +1,7 @@
 //! Shared HTTP/SSE transport, environment loading, lazy media Base64 encoding,
 //! and JSONL event emission used across all built-in Provider dialects (Sections 9.1 & 9.2).
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::time::Duration;
@@ -35,6 +36,7 @@ pub struct ProviderEnv {
     pub api_key: String,
     pub timeout_sec: u64,
     pub model: String,
+    pub session_id: Option<String>,
 }
 
 impl ProviderEnv {
@@ -65,17 +67,27 @@ impl ProviderEnv {
             .and_then(|s| s.parse::<u64>().ok())
             .filter(|&v| v > 0)
             .unwrap_or(120);
+        let session_id = std::env::var("ANIX_SESSION_ID")
+            .ok()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty());
 
         Ok(Self {
             base_url: base_url.trim_end_matches('/').to_owned(),
             api_key,
             timeout_sec,
             model,
+            session_id,
         })
     }
 
-    /// Derive per-request effective env (allowing coprocess requests to override model/timeout).
-    pub fn with_overrides(&self, model: Option<&str>, timeout_sec: Option<u64>) -> Self {
+    /// Derive per-request effective env (allowing coprocess requests to override model/timeout/session_id).
+    pub fn with_overrides(
+        &self,
+        model: Option<&str>,
+        timeout_sec: Option<u64>,
+        session_id: Option<&str>,
+    ) -> Self {
         Self {
             base_url: self.base_url.clone(),
             api_key: self.api_key.clone(),
@@ -84,8 +96,71 @@ impl ProviderEnv {
                 .filter(|s| !s.trim().is_empty())
                 .map(ToOwned::to_owned)
                 .unwrap_or_else(|| self.model.clone()),
+            session_id: session_id
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(ToOwned::to_owned)
+                .or_else(|| self.session_id.clone()),
         }
     }
+}
+
+/// Default HTTP header name used to propagate session routing affinity (v1.1.1 §9.2).
+pub const DEFAULT_SESSION_HEADER: &str = "x-session-id";
+
+/// Resolve the optional `(header_name, session_id)` pair from `params.session_header` and
+/// the effective `session_id` (v1.1.1 §9.2).
+///
+/// - Absent or `true` -> `("x-session-id", sid)`
+/// - `false` or `null` -> disabled (`None`)
+/// - Non-empty valid HTTP token string -> `(custom_name, sid)`
+pub fn resolve_session_header(
+    params: &BTreeMap<String, Value>,
+    session_id: Option<&str>,
+    tag: &str,
+) -> Option<(String, String)> {
+    let sid = session_id.map(str::trim).filter(|s| !s.is_empty())?;
+    match params.get("session_header") {
+        None | Some(Value::Bool(true)) => Some((DEFAULT_SESSION_HEADER.to_owned(), sid.to_owned())),
+        Some(Value::Bool(false)) | Some(Value::Null) => None,
+        Some(Value::String(name)) => {
+            let trimmed = name.trim();
+            if is_valid_http_header_name(trimmed) {
+                Some((trimmed.to_owned(), sid.to_owned()))
+            } else {
+                eprintln!("{tag}: warning: ignoring invalid `session_header` name `{name}`");
+                None
+            }
+        }
+        Some(_) => {
+            eprintln!("{tag}: warning: ignoring invalid `session_header` param");
+            None
+        }
+    }
+}
+
+fn is_valid_http_header_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.bytes().all(|b| {
+            b.is_ascii_alphanumeric()
+                || matches!(
+                    b,
+                    b'!' | b'#'
+                        | b'$'
+                        | b'%'
+                        | b'&'
+                        | b'\''
+                        | b'*'
+                        | b'+'
+                        | b'-'
+                        | b'.'
+                        | b'^'
+                        | b'_'
+                        | b'`'
+                        | b'|'
+                        | b'~'
+                )
+        })
 }
 
 /// Construct a reusable `ureq::Agent` for HTTP keep-alive & TLS session pooling across turns.
@@ -168,7 +243,7 @@ pub fn send_single_shot_post<F>(
     tag: &str,
     url: &str,
     timeout_sec: u64,
-    extra_headers: &[(&str, String)],
+    extra_headers: &[(String, String)],
     body: &Value,
     sink: &mut F,
 ) -> Result<ureq::http::Response<ureq::Body>, ExitCode>
@@ -196,7 +271,7 @@ pub fn send_post_with_agent<F>(
     tag: &str,
     url: &str,
     timeout_sec: u64,
-    extra_headers: &[(&str, String)],
+    extra_headers: &[(String, String)],
     body: &Value,
     request_has_media: bool,
     sink: &mut F,
@@ -227,7 +302,7 @@ where
         .header("Content-Type", "application/json")
         .header("Accept", "text/event-stream");
     for (k, v) in extra_headers {
-        req = req.header(*k, v.as_str());
+        req = req.header(k.as_str(), v.as_str());
     }
 
     let response = match req.send(json_body.as_bytes()) {

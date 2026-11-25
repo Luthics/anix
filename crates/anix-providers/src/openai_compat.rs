@@ -10,7 +10,7 @@ use serde_json::{Map, Value, json};
 
 use crate::common::{
     ProviderEnv, TranslateError, build_http_agent, drive_sse_reader, emit_event,
-    parse_tool_arguments, read_media_base64, send_post_with_agent,
+    parse_tool_arguments, read_media_base64, resolve_session_header, send_post_with_agent,
 };
 
 const TAG: &str = "anix-provider-openai-compat";
@@ -29,6 +29,20 @@ pub fn endpoint_url(base_url: &str) -> String {
 
 /// Build an OpenAI-compatible `/v1/chat/completions` JSON request payload from a Canonical IR v1 stream.
 pub fn build_request(stream: &IrStream, model: &str) -> Result<Value, TranslateError> {
+    build_request_with_session(stream, model, None)
+}
+
+/// Build an OpenAI-compatible `/v1/chat/completions` JSON request payload with optional
+/// session routing affinity ID (v1.1.1 §9.2).
+///
+/// To avoid HTTP 400 errors on strict OpenAI-compatible endpoints, `session_id` is NOT
+/// written into the JSON body by default; it is injected only when opted in via
+/// `params.prompt_cache_key = true` or `params.session_id = true` (or explicit strings).
+pub fn build_request_with_session(
+    stream: &IrStream,
+    model: &str,
+    session_id: Option<&str>,
+) -> Result<Value, TranslateError> {
     let mut messages: Vec<Value> = Vec::new();
     let mut saw_first_system = false;
     let mut pending_tool_media: Vec<(String, MediaAttachment)> = Vec::new();
@@ -211,8 +225,28 @@ pub fn build_request(stream: &IrStream, model: &str) -> Result<Value, TranslateE
         body.insert("max_tokens".into(), Value::from(max_out));
     }
 
+    let trimmed_sid = session_id.map(str::trim).filter(|s| !s.is_empty());
+
     for (key, val) in &stream.header.params {
         match key.as_str() {
+            // Handled at the HTTP header layer, not in the JSON request body.
+            "session_header" => {}
+            "prompt_cache_key" | "session_id" => match val {
+                Value::Bool(true) => {
+                    if let Some(sid) = trimmed_sid {
+                        body.insert(key.clone(), Value::String(sid.to_owned()));
+                    }
+                }
+                Value::Bool(false) | Value::Null => {
+                    body.remove(key);
+                }
+                Value::String(s) if !s.trim().is_empty() => {
+                    body.insert(key.clone(), Value::String(s.clone()));
+                }
+                _ => {
+                    eprintln!("{TAG}: warning: ignoring invalid `{key}` param");
+                }
+            },
             "stream_options" => {
                 if val.is_null() || *val == Value::Bool(false) {
                     body.remove("stream_options");
@@ -256,7 +290,6 @@ pub fn build_request(stream: &IrStream, model: &str) -> Result<Value, TranslateE
             | "store"
             | "metadata"
             | "user"
-            | "prompt_cache_key"
             | "thinking"
             | "enable_thinking"
             | "reasoning"
@@ -309,25 +342,30 @@ struct StreamState {
 }
 
 /// Execute a single-shot streaming POST to `{base_url}/chat/completions`.
-pub fn execute_streaming(env: &ProviderEnv, body: &Value) -> ExitCode {
+pub fn execute_streaming(env: &ProviderEnv, stream: &IrStream, body: &Value) -> ExitCode {
     let agent = build_http_agent(env.timeout_sec);
-    execute_streaming_with_agent(&agent, env, false, body, emit_event)
+    execute_streaming_with_agent(&agent, env, stream, body, emit_event)
 }
 
 /// Testable streaming executor with custom event sink.
-pub fn execute_streaming_with_sink<F>(env: &ProviderEnv, body: &Value, sink: F) -> ExitCode
+pub fn execute_streaming_with_sink<F>(
+    env: &ProviderEnv,
+    stream: &IrStream,
+    body: &Value,
+    sink: F,
+) -> ExitCode
 where
     F: FnMut(&ProviderEvent),
 {
     let agent = build_http_agent(env.timeout_sec);
-    execute_streaming_with_agent(&agent, env, false, body, sink)
+    execute_streaming_with_agent(&agent, env, stream, body, sink)
 }
 
 /// Pooled streaming executor reusing an HTTP `ureq::Agent` across coprocess turns.
 pub fn execute_streaming_with_agent<F>(
     agent: &ureq::Agent,
     env: &ProviderEnv,
-    request_has_media: bool,
+    stream: &IrStream,
     body: &Value,
     mut sink: F,
 ) -> ExitCode
@@ -335,9 +373,12 @@ where
     F: FnMut(&ProviderEvent),
 {
     let url = endpoint_url(&env.base_url);
-    let mut headers = Vec::new();
+    let mut headers: Vec<(String, String)> = Vec::new();
     if !env.api_key.trim().is_empty() {
-        headers.push(("Authorization", format!("Bearer {}", env.api_key)));
+        headers.push(("Authorization".into(), format!("Bearer {}", env.api_key)));
+    }
+    if let Some(h) = resolve_session_header(&stream.header.params, env.session_id.as_deref(), TAG) {
+        headers.push(h);
     }
 
     let response = match send_post_with_agent(
@@ -347,7 +388,7 @@ where
         env.timeout_sec,
         &headers,
         body,
-        request_has_media,
+        stream.has_media(),
         &mut sink,
     ) {
         Ok(resp) => resp,

@@ -82,9 +82,23 @@ impl Dialect {
         stream: &IrStream,
         model: &str,
     ) -> Result<serde_json::Value, TranslateError> {
+        self.build_request_with_session(stream, model, None)
+    }
+
+    /// Build the upstream HTTP request body with optional session routing affinity ID (v1.1.1 §9.2).
+    pub fn build_request_with_session(
+        self,
+        stream: &IrStream,
+        model: &str,
+        session_id: Option<&str>,
+    ) -> Result<serde_json::Value, TranslateError> {
         match self {
-            Self::OpenAiResponses => openai_responses::build_request(stream, model),
-            Self::OpenAiCompat => openai_compat::build_request(stream, model),
+            Self::OpenAiResponses => {
+                openai_responses::build_request_with_session(stream, model, session_id)
+            }
+            Self::OpenAiCompat => {
+                openai_compat::build_request_with_session(stream, model, session_id)
+            }
             Self::Anthropic => anthropic::build_request(stream, model),
         }
     }
@@ -112,14 +126,14 @@ impl Dialect {
             Self::OpenAiResponses => openai_responses::execute_streaming_with_agent(
                 agent,
                 env,
-                stream.has_media(),
+                stream,
                 body,
                 common::emit_event,
             ),
             Self::OpenAiCompat => openai_compat::execute_streaming_with_agent(
                 agent,
                 env,
-                stream.has_media(),
+                stream,
                 body,
                 common::emit_event,
             ),

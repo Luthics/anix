@@ -13,6 +13,7 @@ use anix_proto::exit_code::ExitCode;
 use anix_proto::ir::{IrMessage, ToolCall};
 use anix_proto::provider::TokenUsage;
 use anix_proto::wal::{WalConfigSnapshot, WalEvent, WalRole};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::platform::posix;
@@ -55,10 +56,31 @@ pub struct ReplayedSession {
     /// Exact cross-compaction 5-field cumulative usage (`checkpoint.cumulative_usage` + all
     /// `assistant.usage` in this active window including turns pruned by `fold`).
     pub session_usage: TokenUsage,
+    /// Stable routing affinity identifier persisted on `session_init` / `checkpoint` (v1.1.1).
+    pub session_id: Option<String>,
     pub latest_config: Option<WalConfigSnapshot>,
     pub last_checkpoint_turn: u64,
     pub next_turn_id: u64,
     pub is_fresh: bool,
+}
+
+/// Derive a deterministic UUID-formatted fallback `session_id` for legacy WAL files
+/// created before v1.1.1 (when `session_init` / `checkpoint` omitted `session_id`).
+pub fn derive_legacy_session_id(wal_path: Option<&Path>) -> String {
+    let Some(path) = wal_path else {
+        return uuid::Uuid::new_v4().to_string();
+    };
+    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut hasher = Sha256::new();
+    hasher.update(b"anix-wal-session:");
+    hasher.update(canonical.to_string_lossy().as_bytes());
+    let digest = hasher.finalize();
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    // Set RFC 4122 version 5 & variant bits so strict UUID validators accept it uniformly.
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    uuid::Uuid::from_bytes(bytes).to_string()
 }
 
 /// Append-only WAL file handle protected by an exclusive `flock`.
@@ -130,6 +152,7 @@ impl WalStore {
                 messages: Vec::new(),
                 assistant_usages: BTreeMap::new(),
                 session_usage: TokenUsage::default(),
+                session_id: None,
                 latest_config: None,
                 last_checkpoint_turn: 0,
                 next_turn_id: 1,
@@ -151,6 +174,7 @@ impl WalStore {
                 messages: Vec::new(),
                 assistant_usages: BTreeMap::new(),
                 session_usage: TokenUsage::default(),
+                session_id: None,
                 latest_config: None,
                 last_checkpoint_turn: 0,
                 next_turn_id: 1,
@@ -165,6 +189,7 @@ impl WalStore {
         let mut surviving_assistant_usages: BTreeMap<u64, TokenUsage> = BTreeMap::new();
         let mut window_usage = TokenUsage::default();
         let mut checkpoint_base_usage = TokenUsage::default();
+        let mut session_id: Option<String> = None;
         let mut latest_config: Option<WalConfigSnapshot> = None;
         let mut last_checkpoint_turn: u64 = 0;
         let mut max_turn_id: u64 = 0;
@@ -219,11 +244,15 @@ impl WalStore {
 
             match event {
                 WalEvent::SessionInit {
-                    ir_version, config, ..
+                    ir_version,
+                    session_id: sid,
+                    config,
+                    ..
                 } => {
                     if ir_version != IR_VERSION {
                         return Err(WalError::IncompatibleVersion(ir_version));
                     }
+                    session_id = sid.filter(|s| !s.trim().is_empty());
                     if latest_config.is_none() {
                         latest_config = Some(config);
                     }
@@ -234,6 +263,7 @@ impl WalStore {
                 WalEvent::Checkpoint {
                     ir_version,
                     turn_id,
+                    session_id: sid,
                     config,
                     cumulative_usage,
                     ..
@@ -241,6 +271,7 @@ impl WalStore {
                     if ir_version != IR_VERSION {
                         return Err(WalError::IncompatibleVersion(ir_version));
                     }
+                    session_id = sid.filter(|s| !s.trim().is_empty());
                     if latest_config.is_none() {
                         latest_config = Some(config);
                     }
@@ -415,6 +446,7 @@ impl WalStore {
             messages,
             assistant_usages: surviving_assistant_usages,
             session_usage,
+            session_id,
             latest_config,
             last_checkpoint_turn,
             next_turn_id: max_turn_id.saturating_add(1).max(1),
@@ -720,6 +752,7 @@ mod tests {
                 .append(&WalEvent::SessionInit {
                     ir_version: IR_VERSION,
                     ts: "2026-11-25T00:00:00Z".into(),
+                    session_id: None,
                     config: WalConfigSnapshot {
                         stderr: None,
                         approval: None,
@@ -821,5 +854,55 @@ mod tests {
         stream
             .validate_invariants()
             .expect("replayed stream must satisfy invariants");
+    }
+
+    #[test]
+    fn replay_restores_session_id_across_checkpoint_and_derives_stable_legacy_fallback() {
+        let tmp = std::env::temp_dir().join(format!("anix-wal-sid-{}.jsonl", uuid::Uuid::new_v4()));
+        {
+            let mut store = WalStore::open(&tmp).expect("open wal");
+            store
+                .append(&WalEvent::SessionInit {
+                    ir_version: IR_VERSION,
+                    ts: "2026-11-26T00:00:00Z".into(),
+                    session_id: Some("sid-persisted-001".into()),
+                    config: WalConfigSnapshot {
+                        stderr: None,
+                        approval: None,
+                        vision: None,
+                    },
+                })
+                .unwrap();
+            store.append_message(&IrMessage::system(0, "sys")).unwrap();
+            store
+                .append(&WalEvent::Checkpoint {
+                    ir_version: IR_VERSION,
+                    turn_id: 5,
+                    ts: "2026-11-26T00:05:00Z".into(),
+                    session_id: Some("sid-persisted-001".into()),
+                    config: WalConfigSnapshot {
+                        stderr: None,
+                        approval: None,
+                        vision: None,
+                    },
+                    compact_usage: None,
+                    cumulative_usage: None,
+                })
+                .unwrap();
+            store.append_message(&IrMessage::system(5, "sys2")).unwrap();
+            store
+                .append_message(&IrMessage::user(6, "<checkpoint>\nok\n</checkpoint>"))
+                .unwrap();
+        }
+
+        let mut store = WalStore::open(&tmp).expect("reopen wal");
+        let replayed = store.load_active_window().expect("replay wal");
+        assert_eq!(replayed.session_id.as_deref(), Some("sid-persisted-001"));
+
+        let legacy1 = derive_legacy_session_id(Some(&tmp));
+        let legacy2 = derive_legacy_session_id(Some(&tmp));
+        assert_eq!(legacy1, legacy2);
+        assert_eq!(legacy1.len(), 36);
+        let _ = std::fs::remove_file(&tmp);
     }
 }

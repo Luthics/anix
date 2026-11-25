@@ -183,6 +183,7 @@ impl CoprocessHandle {
         provider_cfg: &ProviderConfig,
         model: &str,
         api_key: &str,
+        session_id: &str,
         cwd: &Path,
     ) -> io::Result<Self> {
         let parent_pid = unsafe { libc::getpid() };
@@ -198,7 +199,8 @@ impl CoprocessHandle {
                 provider_cfg.timeout_sec.to_string(),
             )
             .env("ANIX_MODEL", model)
-            .env("ANIX_PROVIDER_MODE", ProviderMode::Coprocess.as_str());
+            .env("ANIX_PROVIDER_MODE", ProviderMode::Coprocess.as_str())
+            .env("ANIX_SESSION_ID", session_id);
 
         // SAFETY: `pre_exec` invokes only async-signal-safe syscalls to isolate PGID and set PDEATHSIG.
         unsafe {
@@ -367,6 +369,7 @@ struct SingleAttemptFailure {
 pub fn invoke_provider(
     provider_cfg: &ProviderConfig,
     model: &str,
+    session_id: &str,
     stream: &IrStream,
     paths: &AgentPaths,
     stderr_mode: StderrMode,
@@ -433,6 +436,7 @@ pub fn invoke_provider(
                 provider_cfg,
                 model,
                 &api_key,
+                session_id,
                 stream,
                 &paths.cwd,
                 stderr_mode,
@@ -446,6 +450,7 @@ pub fn invoke_provider(
                 provider_cfg,
                 model,
                 &api_key,
+                session_id,
                 &ir_jsonl,
                 &paths.cwd,
                 stderr_mode,
@@ -779,6 +784,7 @@ fn run_coprocess_attempt(
     provider_cfg: &ProviderConfig,
     model: &str,
     api_key: &str,
+    session_id: &str,
     stream: &IrStream,
     cwd: &Path,
     stderr_mode: StderrMode,
@@ -796,7 +802,8 @@ fn run_coprocess_attempt(
 
     let req_id = pool.alloc_request_id();
     let envelope =
-        ProviderRequestEnvelope::from_stream(stream, req_id, model, provider_cfg.timeout_sec);
+        ProviderRequestEnvelope::from_stream(stream, req_id, model, provider_cfg.timeout_sec)
+            .with_session_id(session_id);
     let mut req_line = serde_json::to_string(&envelope).map_err(|e| {
         Box::new(SingleAttemptFailure {
             code: "serialize_error".into(),
@@ -840,11 +847,11 @@ fn run_coprocess_attempt(
                 h
             } else {
                 h.terminate_now();
-                CoprocessHandle::spawn(bin_path, provider_cfg, model, api_key, cwd)
+                CoprocessHandle::spawn(bin_path, provider_cfg, model, api_key, session_id, cwd)
                     .map_err(spawn_err)?
             }
         }
-        None => CoprocessHandle::spawn(bin_path, provider_cfg, model, api_key, cwd)
+        None => CoprocessHandle::spawn(bin_path, provider_cfg, model, api_key, session_id, cwd)
             .map_err(spawn_err)?,
     };
 
@@ -855,8 +862,8 @@ fn run_coprocess_attempt(
     });
     if !write_ok {
         handle.terminate_now();
-        handle =
-            CoprocessHandle::spawn(bin_path, provider_cfg, model, api_key, cwd).map_err(|err| {
+        handle = CoprocessHandle::spawn(bin_path, provider_cfg, model, api_key, session_id, cwd)
+            .map_err(|err| {
                 Box::new(SingleAttemptFailure {
                     code: "spawn_error".into(),
                     message: format!("failed to respawn `{}`: {err}", bin_path.display()),
@@ -1073,6 +1080,7 @@ fn run_oneshot_attempt(
     provider_cfg: &ProviderConfig,
     model: &str,
     api_key: &str,
+    session_id: &str,
     ir_jsonl: &str,
     cwd: &Path,
     stderr_mode: StderrMode,
@@ -1096,7 +1104,8 @@ fn run_oneshot_attempt(
             provider_cfg.timeout_sec.to_string(),
         )
         .env("ANIX_MODEL", model)
-        .env("ANIX_PROVIDER_MODE", ProviderMode::Oneshot.as_str());
+        .env("ANIX_PROVIDER_MODE", ProviderMode::Oneshot.as_str())
+        .env("ANIX_SESSION_ID", session_id);
 
     // SAFETY: `pre_exec` invokes only async-signal-safe syscalls to isolate PGID and set PDEATHSIG.
     unsafe {

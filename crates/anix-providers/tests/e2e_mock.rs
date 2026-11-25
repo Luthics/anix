@@ -658,3 +658,167 @@ fn http_400_image_rejection_maps_to_unsupported_media_non_retryable() {
         [ProviderEvent::Error { code, retryable: false, .. }] if code == ERROR_CODE_UNSUPPORTED_MEDIA
     ));
 }
+
+#[test]
+fn session_affinity_headers_and_body_mapping_across_all_dialects() {
+    let make_ir = |params: BTreeMap<String, Value>| -> String {
+        let stream = IrStream {
+            header: IrHeader {
+                ir_version: IR_VERSION,
+                record_type: HeaderTag::Header,
+                tools: Vec::new(),
+                max_output_tokens: Some(128),
+                params,
+                meta: IrMeta {
+                    stderr_mode: StderrMode::Auto,
+                    cwd: "/tmp".into(),
+                    turn_budget: None,
+                    extra: BTreeMap::new(),
+                },
+                extra: BTreeMap::new(),
+            },
+            messages: vec![IrMessage::system(0, "sys"), IrMessage::user(1, "hello")],
+        };
+        stream.to_jsonl().expect("ir jsonl")
+    };
+
+    let run_with_session = |dialect: &str, base_url: &str, sid: &str, ir: &str| {
+        let mut child = Command::new(provider_bin())
+            .arg(dialect)
+            .env("ANIX_PROVIDER_MODE", "oneshot")
+            .env("ANIX_PROVIDER_BASE_URL", base_url)
+            .env("ANIX_PROVIDER_API_KEY", "sk-sid")
+            .env("ANIX_PROVIDER_TIMEOUT_SEC", "10")
+            .env("ANIX_MODEL", "m-sid")
+            .env("ANIX_SESSION_ID", sid)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn");
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(ir.as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().expect("wait");
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "stderr={}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+
+    let resp_sse = concat!(
+        "event: response.output_text.delta\n",
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n",
+        "event: response.completed\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n"
+    )
+    .to_owned();
+    let compat_sse = concat!(
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_owned();
+    let anth_sse = concat!(
+        "event: content_block_start\n",
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"ok\"}}\n\n",
+        "event: message_delta\n",
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n",
+        "event: message_stop\n",
+        "data: {\"type\":\"message_stop\"}\n\n"
+    )
+    .to_owned();
+
+    // 1. openai-responses default: `x-session-id` header + `prompt_cache_key` in body.
+    let (o1, cap1, h1) = spawn_mock_server("200 OK", "text/event-stream", resp_sse.clone());
+    run_with_session(
+        "openai-responses",
+        &format!("{o1}/v1"),
+        "sid-resp-1",
+        &make_ir(BTreeMap::new()),
+    );
+    h1.join().unwrap();
+    let r1 = cap1.lock().unwrap().clone().unwrap();
+    assert_eq!(
+        r1.headers.get("x-session-id").map(String::as_str),
+        Some("sid-resp-1")
+    );
+    assert_eq!(r1.body["prompt_cache_key"], "sid-resp-1");
+
+    // 2. openai-responses with opt-out `prompt_cache_key=false` + custom `session_header`.
+    let (o2, cap2, h2) = spawn_mock_server("200 OK", "text/event-stream", resp_sse);
+    let mut p2 = BTreeMap::new();
+    p2.insert("prompt_cache_key".into(), json!(false));
+    p2.insert("session_header".into(), json!("X-Conversation-Id"));
+    run_with_session(
+        "openai-responses",
+        &format!("{o2}/v1"),
+        "sid-resp-2",
+        &make_ir(p2),
+    );
+    h2.join().unwrap();
+    let r2 = cap2.lock().unwrap().clone().unwrap();
+    assert!(!r2.headers.contains_key("x-session-id"));
+    assert_eq!(
+        r2.headers.get("x-conversation-id").map(String::as_str),
+        Some("sid-resp-2")
+    );
+    assert!(r2.body.get("prompt_cache_key").is_none());
+
+    // 3. openai-compat default: `x-session-id` header ONLY (no body keys to avoid 400).
+    let (o3, cap3, h3) = spawn_mock_server("200 OK", "text/event-stream", compat_sse.clone());
+    run_with_session(
+        "openai-compat",
+        &format!("{o3}/v1"),
+        "sid-compat-1",
+        &make_ir(BTreeMap::new()),
+    );
+    h3.join().unwrap();
+    let r3 = cap3.lock().unwrap().clone().unwrap();
+    assert_eq!(
+        r3.headers.get("x-session-id").map(String::as_str),
+        Some("sid-compat-1")
+    );
+    assert!(r3.body.get("session_id").is_none());
+    assert!(r3.body.get("prompt_cache_key").is_none());
+
+    // 4. openai-compat opt-in: `session_id = true` and `prompt_cache_key = true` bind dynamic sid.
+    let (o4, cap4, h4) = spawn_mock_server("200 OK", "text/event-stream", compat_sse);
+    let mut p4 = BTreeMap::new();
+    p4.insert("session_id".into(), json!(true));
+    p4.insert("prompt_cache_key".into(), json!(true));
+    run_with_session(
+        "openai-compat",
+        &format!("{o4}/v1"),
+        "sid-compat-2",
+        &make_ir(p4),
+    );
+    h4.join().unwrap();
+    let r4 = cap4.lock().unwrap().clone().unwrap();
+    assert_eq!(r4.body["session_id"], "sid-compat-2");
+    assert_eq!(r4.body["prompt_cache_key"], "sid-compat-2");
+
+    // 5. anthropic default: `x-session-id` header only, clean body; `session_header=false` disables.
+    let (o5, cap5, h5) = spawn_mock_server("200 OK", "text/event-stream", anth_sse.clone());
+    run_with_session("anthropic", &o5, "sid-anth-1", &make_ir(BTreeMap::new()));
+    h5.join().unwrap();
+    let r5 = cap5.lock().unwrap().clone().unwrap();
+    assert_eq!(
+        r5.headers.get("x-session-id").map(String::as_str),
+        Some("sid-anth-1")
+    );
+    assert!(r5.body.get("session_id").is_none());
+    assert!(r5.body.get("prompt_cache_key").is_none());
+
+    let (o6, cap6, h6) = spawn_mock_server("200 OK", "text/event-stream", anth_sse);
+    let mut p6 = BTreeMap::new();
+    p6.insert("session_header".into(), json!(false));
+    run_with_session("anthropic", &o6, "sid-anth-2", &make_ir(p6));
+    h6.join().unwrap();
+    let r6 = cap6.lock().unwrap().clone().unwrap();
+    assert!(!r6.headers.contains_key("x-session-id"));
+}
