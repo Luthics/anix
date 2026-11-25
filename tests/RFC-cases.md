@@ -26,6 +26,45 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 | --- | --- |
 | [`replay_skips_empty_assistant_and_prunes_unclosed_tool_calls_preserving_usage`](../crates/anix-core/src/wal.rs#L715) | [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
 
+## `crates/anix-core/tests/rfc_3_2/cli.rs`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`crlf_script_reaches_the_provider_as_the_intended_system_message`](../crates/anix-core/tests/rfc_3_2/cli.rs#L44) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`unknown_top_level_fields_fail_closed_regardless_of_spelling_or_position`](../crates/anix-core/tests/rfc_3_2/cli.rs#L67) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) · [§3.3](../docs/v1.1.0-RFC.md?plain=1#L111) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) |
+| [`invalid_file_bytes_and_yaml_report_usage_errors_to_stderr`](../crates/anix-core/tests/rfc_3_2/cli.rs#L90) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) |
+| [`yaml_block_scalar_chomping_survives_the_frontmatter_boundary`](../crates/anix-core/tests/rfc_3_2/cli.rs#L107) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) · [§3.3](../docs/v1.1.0-RFC.md?plain=1#L111) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`duplicate_yaml_keys_are_invalid_even_inside_open_maps`](../crates/anix-core/tests/rfc_3_2/cli.rs#L150) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) · [§3.3](../docs/v1.1.0-RFC.md?plain=1#L111) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) |
+| [`yaml_aliases_can_supply_typed_provider_params_from_an_extension_field`](../crates/anix-core/tests/rfc_3_2/cli.rs#L163) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) · [§3.3](../docs/v1.1.0-RFC.md?plain=1#L111) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`vision_requires_a_yaml_boolean_and_leaves_provider_params_open`](../crates/anix-core/tests/rfc_3_2/cli.rs#L181) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) · [§3.3](../docs/v1.1.0-RFC.md?plain=1#L111) · [§5.5](../docs/v1.1.0-RFC.md?plain=1#L279) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) |
+
+## `crates/anix-core/tests/rfc_3_2/encoding.rs`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`all_256_single_bytes_inside_a_plain_prompt`](../crates/anix-core/tests/rfc_3_2/encoding.rs#L11) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) |
+| [`valid_multibyte_boundaries_survive_file_decoding`](../crates/anix-core/tests/rfc_3_2/encoding.rs#L37) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) |
+| [`malformed_sequences_are_rejected_in_every_script_region`](../crates/anix-core/tests/rfc_3_2/encoding.rs#L64) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) |
+| [`eof_at_each_interior_byte_of_a_utf8_scalar`](../crates/anix-core/tests/rfc_3_2/encoding.rs#L104) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) |
+
+## `crates/anix-core/tests/rfc_3_2/grammar.rs`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`layout_matrix_for_line_ending_shebang_header_body_and_eof`](../crates/anix-core/tests/rfc_3_2/grammar.rs#L9) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) |
+| [`only_a_first_line_beginning_with_hash_bang_is_removed`](../crates/anix-core/tests/rfc_3_2/grammar.rs#L46) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) |
+| [`opening_delimiter_requires_the_designated_line_and_exact_marker`](../crates/anix-core/tests/rfc_3_2/grammar.rs#L69) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) |
+| [`first_closing_delimiter_ends_yaml_and_only_blank_body_edges_are_removed`](../crates/anix-core/tests/rfc_3_2/grammar.rs#L92) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) |
+| [`yaml_12_scalars_extensions_and_open_params_coexist_with_known_fields`](../crates/anix-core/tests/rfc_3_2/grammar.rs#L115) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) · [§3.3](../docs/v1.1.0-RFC.md?plain=1#L111) |
+| [`incomplete_delimiters_and_malformed_yaml_fail_at_the_header`](../crates/anix-core/tests/rfc_3_2/grammar.rs#L145) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) |
+
+## `crates/anix-core/tests/rfc_runtime/wal.rs`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`legacy_wal_without_vision_or_fold_usage_resumes_without_rewriting_the_prefix`](../crates/anix-core/tests/rfc_runtime/wal.rs#L32) | [§1.4](../docs/v1.1.0-RFC.md?plain=1#L33) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+| [`repeated_resume_appends_one_vision_update_per_change_and_reuses_frozen_text`](../crates/anix-core/tests/rfc_runtime/wal.rs#L68) | [§3.1](../docs/v1.1.0-RFC.md?plain=1#L62) · [§5.5](../docs/v1.1.0-RFC.md?plain=1#L279) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+
 ## `crates/anix-core/tests/v1_1_e2e.rs`
 
 | 测试 | RFC 条款 |
@@ -58,6 +97,28 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 | 测试 | RFC 条款 |
 | --- | --- |
 | [`wal_events_round_trip`](../crates/anix-proto/src/wal.rs#L97) | [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) |
+
+## `crates/anix-proto/tests/rfc_ir.rs`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`required_header_fields_and_types_cannot_be_dropped_or_moved`](../crates/anix-proto/tests/rfc_ir.rs#L36) | [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`meta_and_header_options_have_their_declared_wire_types`](../crates/anix-proto/tests/rfc_ir.rs#L68) | [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`validated_ir_only_serializes_objects_for_arguments_and_provider_opaque`](../crates/anix-proto/tests/rfc_ir.rs#L103) | [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+| [`golden_ir_accepts_extensions_and_keeps_frozen_text_and_attachment_references`](../crates/anix-proto/tests/rfc_ir.rs#L156) | [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`tool_replies_form_a_bijection_and_are_contiguous`](../crates/anix-proto/tests/rfc_ir.rs#L185) | [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`a_single_tool_result_cannot_close_two_calls_with_the_same_id`](../crates/anix-proto/tests/rfc_ir.rs#L213) | [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`required_message_fields_and_turn_id_types_hold_for_all_four_roles`](../crates/anix-proto/tests/rfc_ir.rs#L223) | [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`assistant_requires_text_or_calls_even_with_reasoning_or_opaque_state`](../crates/anix-proto/tests/rfc_ir.rs#L258) | [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`ordinary_turns_increase_strictly_and_checkpoint_anchor_may_be_shared`](../crates/anix-proto/tests/rfc_ir.rs#L277) | [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) |
+| [`coprocess_envelope_wraps_the_same_ir_without_moving_model_into_history`](../crates/anix-proto/tests/rfc_ir.rs#L297) | [§1.4](../docs/v1.1.0-RFC.md?plain=1#L33) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+
+## `crates/anix-proto/tests/rfc_provider.rs`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`each_usage_counter_accepts_the_full_uint64_range_and_requires_integer_values`](../crates/anix-proto/tests/rfc_provider.rs#L7) | [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+| [`usage_requires_both_totals_even_when_all_three_details_are_present`](../crates/anix-proto/tests/rfc_provider.rs#L56) | [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
 
 ## `crates/anix-providers/src/anthropic.rs`
 
@@ -112,11 +173,12 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`test_long_msh_can_outlive_the_provider_timeout_between_two_requests`](../tests/test_provider_streaming.py#L179) | [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) · [§7.1](../docs/v1.1.0-RFC.md?plain=1#L415) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
-| [`test_paced_msh_arguments_finish_before_the_shell_runs`](../tests/test_provider_streaming.py#L211) | [§7.1](../docs/v1.1.0-RFC.md?plain=1#L415) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
-| [`test_each_delta_reaches_trace_before_the_upstream_sends_its_next_frame`](../tests/test_provider_streaming.py#L237) | [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
-| [`test_interleaved_calls_and_opaque_state_round_trip_through_the_real_tool_results`](../tests/test_provider_streaming.py#L270) | [§4.3](../docs/v1.1.0-RFC.md?plain=1#L194) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
-| [`test_http_429_and_503_are_traced_by_the_core_before_replaying_the_request`](../tests/test_provider_streaming.py#L329) | [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
-| [`test_keyboard_interrupt_returns_to_the_same_shell_while_waiting_for_provider`](../tests/test_provider_streaming.py#L363) | [§3.1](../docs/v1.1.0-RFC.md?plain=1#L62) · [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) · [§6.4](../docs/v1.1.0-RFC.md?plain=1#L388) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
-| [`test_keyboard_interrupt_reaches_a_provider_that_closed_stdout_before_exit`](../tests/test_provider_streaming.py#L420) | [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) · [§6.3](../docs/v1.1.0-RFC.md?plain=1#L380) · [§6.4](../docs/v1.1.0-RFC.md?plain=1#L388) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
-| [`test_inbox_commits_one_message_then_interrupts_the_next_in_the_same_coprocess`](../tests/test_provider_streaming.py#L461) | [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) · [§4.2](../docs/v1.1.0-RFC.md?plain=1#L179) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§6.4](../docs/v1.1.0-RFC.md?plain=1#L388) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
+| [`test_coprocess_overrides_apply_to_one_frame_then_environment_defaults_resume`](../tests/test_provider_streaming.py#L147) | [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+| [`test_long_msh_can_outlive_the_provider_timeout_between_two_requests`](../tests/test_provider_streaming.py#L240) | [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) · [§7.1](../docs/v1.1.0-RFC.md?plain=1#L415) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
+| [`test_paced_msh_arguments_finish_before_the_shell_runs`](../tests/test_provider_streaming.py#L272) | [§7.1](../docs/v1.1.0-RFC.md?plain=1#L415) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
+| [`test_each_delta_reaches_trace_before_the_upstream_sends_its_next_frame`](../tests/test_provider_streaming.py#L298) | [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
+| [`test_interleaved_calls_and_opaque_state_round_trip_through_the_real_tool_results`](../tests/test_provider_streaming.py#L331) | [§4.3](../docs/v1.1.0-RFC.md?plain=1#L194) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+| [`test_http_429_and_503_are_traced_by_the_core_before_replaying_the_request`](../tests/test_provider_streaming.py#L390) | [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
+| [`test_keyboard_interrupt_returns_to_the_same_shell_while_waiting_for_provider`](../tests/test_provider_streaming.py#L424) | [§3.1](../docs/v1.1.0-RFC.md?plain=1#L62) · [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) · [§6.4](../docs/v1.1.0-RFC.md?plain=1#L388) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
+| [`test_keyboard_interrupt_reaches_a_provider_that_closed_stdout_before_exit`](../tests/test_provider_streaming.py#L481) | [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) · [§6.3](../docs/v1.1.0-RFC.md?plain=1#L380) · [§6.4](../docs/v1.1.0-RFC.md?plain=1#L388) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
+| [`test_inbox_commits_one_message_then_interrupts_the_next_in_the_same_coprocess`](../tests/test_provider_streaming.py#L522) | [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) · [§4.2](../docs/v1.1.0-RFC.md?plain=1#L179) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§6.4](../docs/v1.1.0-RFC.md?plain=1#L388) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |

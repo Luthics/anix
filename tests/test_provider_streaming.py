@@ -143,6 +143,67 @@ class ProviderStreaming(unittest.TestCase):
         self.assertEqual((events[-1]["type"], events[-1]["exit_code"]), ("run_end", 130))
         self.assertEqual(ends[0]["usage"], events[-1]["usage"])
 
+    # RFC v1.1 §9.1, §9.2
+    def test_coprocess_overrides_apply_to_one_frame_then_environment_defaults_resume(self):
+        provider = self.root / ".local/libexec/anix/anix-provider-openai-responses"
+        messages = [{"role": "system", "turn_id": 0, "text": "frozen\n🦀"},
+                    {"role": "user", "turn_id": 1, "text": '"one"\nline'}]
+        base = {"ir_version": 1, "type": "request", "messages": messages,
+                "header": {"tools": [], "meta": {"stderr_mode": "auto", "cwd": str(self.root)}}}
+        frames = [{**base, "request_id": "first"},
+                  {**base, "request_id": "short", "model": "per-request", "timeout_sec": 1},
+                  {**base, "request_id": "next"}]
+        # Sending EOF after the third frame lets this one process serve all
+        # three requests and then shut down through the public protocol.
+        with HTTPServer(("127.0.0.1", 0), StreamingResponse) as http:
+            http.socket.settimeout(8)
+            http.requests = []
+            env = {"HOME": str(self.root), "ANIX_PROVIDER_MODE": "coprocess", "ANIX_MODEL": "default-model",
+                   "ANIX_PROVIDER_TIMEOUT_SEC": "12", "ANIX_PROVIDER_API_KEY": "fixture",
+                   "ANIX_PROVIDER_BASE_URL": f"http://127.0.0.1:{http.server_port}/v1"}
+            with subprocess.Popen([provider], cwd=self.root, env=env, stdin=subprocess.PIPE,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE) as child:
+                try:
+                    for frame in frames:
+                        child.stdin.write(json.dumps(frame, ensure_ascii=False).encode() + b"\n")
+                    child.stdin.close()
+                    child.stdin = None
+
+                    def reply(peer):
+                        turn = len(http.requests)
+                        if turn == 2:
+                            # Leave the response pending. Only the adapter's
+                            # short deadline should close this connection.
+                            peer.connection.settimeout(7)
+                            self.assertEqual(peer.connection.recv(1), b"")
+                            return
+                        if turn == 3:
+                            # This request must survive beyond the previous
+                            # frame's 1 s deadline, using the environment's 12 s.
+                            peer.connection.settimeout(2)
+                            with self.assertRaises(TimeoutError):
+                                peer.connection.recv(1)
+                        peer.begin_stream()
+                        peer.event({"type": "response.output_text.delta", "delta": f"reply-{turn}"})
+                        peer.finish_stream()
+
+                    http.reply = reply
+                    for _ in frames:
+                        conn, addr = http.get_request()
+                        with conn:
+                            conn.settimeout(8)
+                            StreamingResponse(conn, addr, http)
+                    out, err = child.communicate(timeout=8)
+                finally:
+                    if child.poll() is None:
+                        child.kill()
+                        child.communicate()
+        self.assertEqual(child.returncode, 0, err)
+        self.assertEqual([r["model"] for r in http.requests], ["default-model", "per-request", "default-model"])
+        events = [json.loads(line) for line in out.splitlines()]
+        self.assertEqual([e["type"] for e in events if e["type"] in ("error", "done")], ["done", "error", "done"])
+        self.assertEqual([e["text"] for e in events if e["type"] == "text_delta"], ["reply-1", "reply-3"])
+
     def run_anix(self, level, replies, options=(), provider_timeout=20):
         config = self.root / ".config/anix"
         config.mkdir(parents=True)

@@ -43,17 +43,20 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Clippy (-D warnings)
         run: cargo xclippy
-      - name: Build & test workspace
-        run: |
-          cargo build --workspace
-          cargo xtest
+      - name: Build workspace
+        id: build
+        run: cargo build --workspace
       - name: Smoke test binaries
         run: |
           ./target/debug/anix --version
           ./target/debug/anix-provider --version
           test "$(./target/debug/msh -c 'echo ok')" = "ok"
       - name: RFC v1.1 provider and terminal conformance
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: python3 -B tests/test_provider_streaming.py -v
+      - name: Rust workspace tests
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: cargo xtest --no-fail-fast
 
   linux-musl-static:
     name: Static Linux musl (x86_64)
