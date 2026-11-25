@@ -265,6 +265,20 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 | [`timeout_reports_124_before_a_finite_longer_command_completes`](../crates/msh/tests/rfc_shell.rs#L266) | [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) · [§7.1](../docs/v1.1.0-RFC.md?plain=1#L415) |
 | [`unconfigured_msh_folds_only_above_200_lines_or_8192_bytes`](../crates/msh/tests/rfc_shell.rs#L279) | [§7.1](../docs/v1.1.0-RFC.md?plain=1#L415) |
 
+## `tests/test_provider_dialects.py`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`test_frozen_prefix_and_runtime_update_remain_in_order_on_each_upstream`](../tests/test_provider_dialects.py#L131) | [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+| [`test_user_and_tool_images_reach_upstream_with_declared_mime_and_exact_bytes`](../tests/test_provider_dialects.py#L167) | [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+| [`test_coprocess_reopens_replaced_media_and_recovers_after_unlink`](../tests/test_provider_dialects.py#L194) | [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+| [`test_oneshot_unreadable_and_missing_paths_fail_before_dispatch`](../tests/test_provider_dialects.py#L217) | [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+| [`test_upstream_media_rejection_is_distinct_from_auth_and_transient_failures`](../tests/test_provider_dialects.py#L235) | [§5.5](../docs/v1.1.0-RFC.md?plain=1#L279) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+| [`test_partial_text_then_upstream_eof_yields_error_and_coprocess_accepts_next_request`](../tests/test_provider_dialects.py#L262) | [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+| [`test_unsupported_ir_version_is_diagnosed_before_http_in_both_modes`](../tests/test_provider_dialects.py#L291) | [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+| [`test_fragmented_tool_arguments_produce_one_call_with_the_original_id`](../tests/test_provider_dialects.py#L307) | [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+| [`test_inclusive_usage_preserves_wide_counts_and_available_cache_details`](../tests/test_provider_dialects.py#L349) | [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+
 ## `tests/test_provider_streaming.py`
 
 | 测试 | RFC 条款 |
