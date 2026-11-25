@@ -17,3 +17,6 @@
 
 # Machine-local personal scripts & notes
 .local/
+
+# Python RFC tests
+__pycache__/

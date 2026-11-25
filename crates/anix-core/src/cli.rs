@@ -204,6 +204,7 @@ pub fn run() -> ExitCode {
 mod tests {
     use super::*;
 
+    // RFC v1.1 §3.1
     #[test]
     fn parses_script_and_args_with_double_dash() {
         let cli = Cli::try_parse_from(["anix", "-y", "-q", "audit.anix", "--", "HEAD~1"])
@@ -221,6 +222,7 @@ mod tests {
         assert_eq!(cli.script_args, vec!["-q", "-n", "5"]);
     }
 
+    // RFC v1.1 §3.1
     #[test]
     fn parses_direct_and_quoted_script_args_without_double_dash() {
         let cli = Cli::try_parse_from(["anix", "bash.anix", "git log -n 5"])
@@ -242,6 +244,7 @@ mod tests {
         assert_eq!(cli.script_args, vec![""]);
     }
 
+    // RFC v1.1 §3.1, §8.3
     #[test]
     fn trust_subcommand_does_not_conflict_with_script_args() {
         let cli = Cli::try_parse_from(["anix", "trust", "./proj"]).expect("parse trust");

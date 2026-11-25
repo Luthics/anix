@@ -355,6 +355,7 @@ fn is_false(b: &bool) -> bool {
 mod tests {
     use super::*;
 
+    // RFC v1.1 §9.1
     #[test]
     fn ir_jsonl_header_and_messages_round_trip() {
         let stream = IrStream {

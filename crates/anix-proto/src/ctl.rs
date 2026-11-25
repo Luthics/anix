@@ -31,6 +31,7 @@ pub enum CtlFrame {
 mod tests {
     use super::*;
 
+    // RFC v1.1 §7.2
     #[test]
     fn ctl_frames_round_trip() {
         let frames = [

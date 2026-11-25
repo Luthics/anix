@@ -583,6 +583,7 @@ mod tests {
     use anix_proto::IR_VERSION;
     use anix_proto::ir::{HeaderTag, IrHeader, IrMeta, StderrMode};
 
+    // RFC v1.1 §9.1, §9.2
     #[test]
     fn builds_responses_request_with_frozen_instructions_and_reasoning_effort() {
         let stream = IrStream {
@@ -615,6 +616,7 @@ mod tests {
         assert_eq!(body["input"][1]["role"], "user");
     }
 
+    // RFC v1.1 §9.2
     #[test]
     fn parses_responses_sse_text_tool_and_usage() {
         let sse = concat!(

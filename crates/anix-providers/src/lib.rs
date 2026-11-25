@@ -213,6 +213,7 @@ mod tests {
         items.iter().map(|x| (*x).to_owned()).collect()
     }
 
+    // RFC v1.1 §2, §9.2
     #[test]
     fn resolves_dialect_from_argv0_symlink_and_version() {
         assert_eq!(
@@ -232,6 +233,7 @@ mod tests {
         );
     }
 
+    // RFC v1.1 §2, §9.2
     #[test]
     fn resolves_dialect_from_subcommand_flag_and_env() {
         assert_eq!(

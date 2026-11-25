@@ -933,6 +933,7 @@ mod tests {
         }
     }
 
+    // RFC v1.1 §9.2
     #[test]
     fn resolves_anthropic_endpoint_urls() {
         assert_eq!(
@@ -949,6 +950,7 @@ mod tests {
         );
     }
 
+    // RFC v1.1 §9.1, §9.2
     #[test]
     fn coalesces_adjacent_user_and_tool_results_and_replays_signed_thinking() {
         let tmp_img =
@@ -1052,6 +1054,7 @@ mod tests {
         );
     }
 
+    // RFC v1.1 §9.1, §9.2
     #[test]
     fn sse_normalizes_inclusive_usage_captures_thinking_signature_and_tool_use() {
         let sse = concat!(
@@ -1130,6 +1133,7 @@ mod tests {
         );
     }
 
+    // RFC v1.1 §9.2
     #[test]
     fn sse_overloaded_error_is_retryable() {
         let sse = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n";

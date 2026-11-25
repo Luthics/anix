@@ -114,6 +114,7 @@ pub unsafe fn apply_prepared_sandbox_in_child(sb: &PreparedSandbox) -> io::Resul
 mod tests {
     use super::*;
 
+    // RFC v1.1 §10.2
     #[test]
     fn probes_platform_capabilities() {
         let caps = probe_capabilities();

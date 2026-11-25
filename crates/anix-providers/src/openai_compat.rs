@@ -879,6 +879,7 @@ mod tests {
         (exit, events)
     }
 
+    // RFC v1.1 §9.2
     #[test]
     fn endpoint_url_appends_chat_completions_once() {
         assert_eq!(
@@ -891,6 +892,7 @@ mod tests {
         );
     }
 
+    // RFC v1.1 §9.1, §9.2
     #[test]
     fn translates_frozen_system_degraded_runtime_update_tools_and_params() {
         let mut header = base_header(vec![IrStream::msh_tool_def()]);
@@ -935,6 +937,7 @@ mod tests {
         );
     }
 
+    // RFC v1.1 §9.1, §9.2
     #[test]
     fn omits_tools_when_empty_and_supports_disabling_stream_options() {
         let mut header = base_header(vec![]);
@@ -956,6 +959,7 @@ mod tests {
         assert_eq!(body["max_completion_tokens"], 1024);
     }
 
+    // RFC v1.1 §9.1, §9.2
     #[test]
     fn replays_opaque_reasoning_and_flushes_tool_media_after_batch() {
         let tmp_img =
@@ -1029,6 +1033,7 @@ mod tests {
         assert_eq!(msgs[4]["role"], "user");
     }
 
+    // RFC v1.1 §9.2
     #[test]
     fn sse_streams_reasoning_text_and_trailing_usage_after_finish_reason() {
         let sse = concat!(
@@ -1076,6 +1081,7 @@ mod tests {
         );
     }
 
+    // RFC v1.1 §9.1, §9.2
     #[test]
     fn sse_accumulates_multi_chunk_tool_calls_and_extra_content() {
         let sse = concat!(
@@ -1125,6 +1131,7 @@ mod tests {
         );
     }
 
+    // RFC v1.1 §9.2
     #[test]
     fn sse_clean_eof_after_finish_reason_without_done_and_truncated_error() {
         let sse_ok = concat!(
@@ -1147,6 +1154,7 @@ mod tests {
         ));
     }
 
+    // RFC v1.1 §9.2
     #[test]
     fn non_streaming_json_fallback_parses_message_and_inline_error() {
         let raw = r#"{

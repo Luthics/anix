@@ -196,6 +196,7 @@ fn run_bin(
     (output.status.code().unwrap_or(-1), events, stderr)
 }
 
+// RFC v1.1 §2, §9.2
 #[test]
 fn version_flag_works_for_base_binary_and_busybox_symlinks() {
     let out = Command::new(provider_bin())
@@ -225,6 +226,7 @@ fn version_flag_works_for_base_binary_and_busybox_symlinks() {
     }
 }
 
+// RFC v1.1 §6.5, §9.1, §9.2
 #[test]
 fn unsupported_ir_version_exits_2() {
     let bad_ir = r#"{"ir_version":99,"type":"header","tools":[],"meta":{"stderr_mode":"auto","cwd":"/tmp"}}"#;
@@ -243,6 +245,7 @@ fn unsupported_ir_version_exits_2() {
     ));
 }
 
+// RFC v1.1 §2, §9.2
 #[test]
 fn busybox_symlink_openai_responses_end_to_end() {
     let sse = concat!(
@@ -280,6 +283,7 @@ fn busybox_symlink_openai_responses_end_to_end() {
     }));
 }
 
+// RFC v1.1 §2, §9.2
 #[test]
 fn busybox_symlink_openai_compat_end_to_end_and_unauthenticated_local() {
     let sse = concat!(
@@ -318,6 +322,7 @@ fn busybox_symlink_openai_compat_end_to_end_and_unauthenticated_local() {
     }));
 }
 
+// RFC v1.1 §2, §9.2
 #[test]
 fn busybox_symlink_anthropic_end_to_end_with_inclusive_usage_and_headers() {
     let sse = concat!(
@@ -383,6 +388,7 @@ fn busybox_symlink_anthropic_end_to_end_with_inclusive_usage_and_headers() {
     );
 }
 
+// RFC v1.1 §9.2
 #[test]
 fn http_429_and_529_map_to_retryable_errors_and_400_is_non_retryable() {
     let (o1, _, h1) = spawn_mock_server(
@@ -446,6 +452,7 @@ fn http_429_and_529_map_to_retryable_errors_and_400_is_non_retryable() {
     ));
 }
 
+// RFC v1.1 §9.2
 #[test]
 fn coprocess_mode_serves_multiple_requests_survives_error_and_exits_0_on_eof() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
@@ -602,6 +609,7 @@ fn coprocess_mode_serves_multiple_requests_survives_error_and_exits_0_on_eof() {
     assert_eq!(reqs[2].body["model"], "model-c");
 }
 
+// RFC v1.1 §5.5, §9.2
 #[test]
 fn http_400_image_rejection_maps_to_unsupported_media_non_retryable() {
     let tmp = TempSymlinkDir::new();

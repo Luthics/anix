@@ -226,6 +226,7 @@ pub enum ProviderEvent {
 mod tests {
     use super::*;
 
+    // RFC v1.1 §9.2
     #[test]
     fn provider_events_round_trip() {
         let evt = ProviderEvent::Usage {

@@ -156,6 +156,7 @@ fn configure_child_fds(cmd: &mut Command, attach: Option<(&File, RawFd)>) {
     }
 }
 
+// RFC v1.1 §4.1, §9.5
 #[test]
 fn trace_fd_explicit_only_no_implicit_fd3_and_cycle_events() {
     let root = make_temp_env("trace-fd");
@@ -287,6 +288,7 @@ done
     let _ = fs::remove_dir_all(&root);
 }
 
+// RFC v1.1 §5.2, §6.5, §8.3, §9.5
 #[test]
 fn external_approval_decider_trust_gate_and_exit_75() {
     let root = make_temp_env("approval-decider");
@@ -455,6 +457,7 @@ esac
     let _ = fs::remove_dir_all(&root);
 }
 
+// RFC v1.1 §4.4, §5.5, §6.2, §9.6
 #[test]
 fn vision_false_blocks_wal_pollution_and_vision_bridge_translates_and_mcp_tip_present() {
     let root = make_temp_env("vision");
@@ -588,6 +591,7 @@ done
     let _ = fs::remove_dir_all(&root);
 }
 
+// RFC v1.1 §4.1, §4.2, §6.1, §6.2, §7.2, §9.2, §9.5
 #[test]
 fn aclr_auto_summary_tail_fold_and_coprocess_inbox_lifecycle() {
     let root = make_temp_env("autofold-inbox");
