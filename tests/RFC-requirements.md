@@ -10,6 +10,12 @@
 | --- | --- |
 | [安装后的 .agent 脚本以 shebang 从 PATH 或相对路径直接启动](../docs/v1.1.2-RFC.md?plain=1#L21) | [`test_installed_bash_script_accepts_args_on_path_and_by_relative_name_without_tty_eof`](../tests/test_distribution.py#L248) |
 
+## §1.4
+
+| 可验收行为 | 测试与问题 |
+| --- | --- |
+| [旧命令仍可解析，默认超时已从杀组并返回 124 改为返回 0 并移交后台任务](../docs/v1.1.2-RFC.md?plain=1#L37) | [`test_positive_deadline_returns_a_clean_bounded_tail_and_keeps_the_complete_log`](../tests/test_msh_jobs.py#L116) · [`test_msh_timeout_is_delivered_to_the_next_provider_turn_as_a_tool_error`](../tests/test_provider_streaming.py#L262) · [#59](https://github.com/Luthics/anix/issues/59) |
+
 ## §2
 
 | 可验收行为 | 测试与问题 |
@@ -218,6 +224,7 @@
 | --- | --- |
 | [无截止时间的 Linux 空闲循环持续睡眠，发布消息可以唤醒](../docs/v1.1.2-RFC.md?plain=1#L385) | [`an_idle_inbox_sleeps_without_periodic_wakeups_then_consumes_a_publication`](../crates/anix-core/tests/rfc_runtime/inbox.rs#L336) |
 | [子进程清理与退出钩子的截止时间在正常和缺少 pidfd 的 Linux 上可检查](../docs/v1.1.2-RFC.md?plain=1#L389) | [`sigint_bounds_cleanup_of_a_provider_that_acknowledges_term`](../crates/anix-core/tests/rfc_runtime/signals.rs#L176) · [`on_exit_timeout_is_local_to_one_hook_and_preserves_the_primary_exit_code`](../crates/anix-core/tests/rfc_runtime/hooks.rs#L155) · [#48](https://github.com/Luthics/anix/issues/48) |
+| [强杀时组长退出、有限子进程仍在，Linux 宽限期的等待不应持续空转](../docs/v1.1.2-RFC.md?plain=1#L385) | [`test_hard_kill_grace_waits_for_a_living_descendant_without_repeated_polling`](../tests/test_msh_jobs.py#L372) · [#57](https://github.com/Luthics/anix/issues/57) |
 
 ## §6.4
 
@@ -242,6 +249,7 @@
 | [脚本编码错误、损坏的配置及不支持的 WAL 版本在推理前以 2 结束](../docs/v1.1.2-RFC.md?plain=1#L409) | [`invalid_file_bytes_and_yaml_report_usage_errors_to_stderr`](../crates/anix-core/tests/rfc_3_2/cli.rs#L90) · [`global_and_project_config_reject_unknown_keys_before_any_inference`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L646) · [`cli_rejects_corrupted_tails_and_unknown_section_versions_before_inference`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L173) |
 | [无控制终端需人工审批及未信任的项目裁决器以 75 结束](../docs/v1.1.2-RFC.md?plain=1#L410) | [`test_no_controlling_terminal_exits_75_with_command_and_no_tool_execution`](../tests/test_approval.py#L219) · [`external_approval_decider_trust_gate_and_exit_75`](../crates/anix-core/tests/v1_1_e2e.rs#L293) |
 | [最后一轮结束仍有工作、首轮超过硬上限或 Provider 超时均以 124 结束](../docs/v1.1.2-RFC.md?plain=1#L411) | [`max_turns_allows_completion_on_the_last_request_and_stops_unfinished_work`](../crates/anix-core/tests/rfc_runtime/provider.rs#L234) · [`hard_limit_allows_equality_and_blocks_the_first_provider_request_above_it`](../crates/anix-core/tests/rfc_runtime/compaction.rs#L459) · [`provider_timeout_maps_to_124_without_a_retry`](../crates/anix-core/tests/rfc_runtime/provider.rs#L158) |
+| [默认超时返回后台句柄并继续任务，显式强杀返回工具错误并继续推理](../docs/v1.1.2-RFC.md?plain=1#L411) | [`test_v1_1_2_msh_per_call_timeout_yield_bg_notification_and_kill_on_timeout`](../crates/anix-core/tests/v1_1_e2e.rs#L1029) |
 
 ## §7.1
 
@@ -256,6 +264,13 @@
 | [默认双阈值、环境覆盖、首尾 20 行和完整清洗日志](../docs/v1.1.2-RFC.md?plain=1#L428) | [`unconfigured_msh_folds_only_above_200_lines_or_8192_bytes`](../crates/msh/tests/rfc_shell.rs#L280) · [`cli_applies_environment_limits_to_cleaned_lines_and_bytes_before_saving_output`](../crates/msh/tests/rfc_shell.rs#L177) · [`line_limit_is_inclusive_and_fold_preserves_exact_head_tail_count_and_full_text`](../crates/msh/tests/rfc_shell.rs#L106) · [#15](https://github.com/Luthics/anix/issues/15) · [`byte_limit_independent_from_line_limit_preserves_multibyte_file`](../crates/msh/tests/rfc_shell.rs#L142) |
 | [普通命令退出 7 时，用于 Provider 的 is_error 布尔值是否有规定](../docs/v1.1.2-RFC.md?plain=1#L432) | [#55](https://github.com/Luthics/anix/issues/55) |
 | [独立 msh 的环境变量配置前台等待时长及显式强杀](../docs/v1.1.2-RFC.md?plain=1#L430) | [`timeout_reports_124_before_a_finite_longer_command_completes`](../crates/msh/tests/rfc_shell.rs#L266) |
+| [单次请求依次覆盖缺省、零、正数、上限两侧与回到默认，自定义 shell 收到 -c、原命令、策略变量及任务目录](../docs/v1.1.2-RFC.md?plain=1#L430) | [`test_msh_tool_schema_and_per_call_options_do_not_leak_into_the_next_call`](../tests/test_msh_jobs.py#L252) |
+| [前台成功与普通非零退出保留双流输出、透传真实退出码并清理任务文件](../docs/v1.1.2-RFC.md?plain=1#L432) | [`test_foreground_completion_returns_real_status_and_removes_job_files`](../tests/test_msh_jobs.py#L140) |
+| [立即后台启动时 fd 4–6 和三个侧信道变量均已关闭或清除，进程组和会话隔离](../docs/v1.1.2-RFC.md?plain=1#L434) | [`test_immediate_handoff_closes_side_channels_and_publishes_the_real_exit`](../tests/test_msh_jobs.py#L87) |
+| [真实命令等待到期时仅返回清洗后的有限预览，后台继续执行并保留完整原始日志](../docs/v1.1.2-RFC.md?plain=1#L435) | [`test_positive_deadline_returns_a_clean_bounded_tail_and_keeps_the_complete_log`](../tests/test_msh_jobs.py#L116) |
+| [运行时目录下 jobs 为 0700、日志为 0600，后台退出前不存在最终状态文件，随后读到真实的非零退出码](../docs/v1.1.2-RFC.md?plain=1#L431) | [`test_immediate_handoff_closes_side_channels_and_publishes_the_real_exit`](../tests/test_msh_jobs.py#L87) |
+| [显式强杀且指定 0 秒时先等待一秒，输出已有文本与超时标记，清理任务文件](../docs/v1.1.2-RFC.md?plain=1#L441) | [`test_zero_with_explicit_kill_waits_one_second_and_leaves_no_job`](../tests/test_msh_jobs.py#L180) |
+| [前台等待中分别发送 INT、TERM，两种超时策略都清理整组并返回 130、143](../docs/v1.1.2-RFC.md?plain=1#L442) | [`test_foreground_int_and_term_clean_up_in_both_timeout_modes`](../tests/test_msh_jobs.py#L149) |
 
 ## §7.2
 
@@ -270,6 +285,9 @@
 | [fd 6 的 JSONL 跨读取边界与多帧顺序、64 KB 边界](../docs/v1.1.2-RFC.md?plain=1#L447) | [`concatenated_and_split_media_frames_keep_order_and_tool_identity_after_resume`](../crates/anix-core/tests/rfc_runtime/control.rs#L24) · [`two_valid_fold_frames_from_one_tool_are_appended_in_arrival_order`](../crates/anix-core/tests/rfc_runtime/control.rs#L93) · [`test_aclr_and_anix_agree_on_the_serialized_fold_frame_size_limit`](../tests/test_shell_pipeline.py#L72) · [#14](https://github.com/Luthics/anix/issues/14) · [`fold_control_frames_stay_within_64_kib_even_after_json_escaping`](../crates/anix-tools/tests/rfc_control.rs#L87) · [`ctl_frames_round_trip`](../crates/anix-proto/src/ctl.rs#L46) · [#40](https://github.com/Luthics/anix/issues/40) |
 | [不同方向与宽高比图片的尺寸、内容、路径和权限](../docs/v1.1.2-RFC.md?plain=1#L453) | [`aview_resizes_portrait_landscape_and_square_images_only_when_needed`](../crates/anix-tools/tests/rfc_control.rs#L139) · [`aview_preserves_image_content_and_orientation_in_the_published_png`](../crates/anix-tools/tests/rfc_control.rs#L177) · [`aview_file_input_and_stdin_agree_on_image_dimensions`](../crates/anix-tools/tests/rfc_control.rs#L162) · [`undecodable_input_or_invalid_options_do_not_emit_media`](../crates/anix-tools/tests/rfc_control.rs#L221) |
 | [compact 和 fold 的字段与序列化](../docs/v1.1.2-RFC.md?plain=1#L454) | [`aclr_emits_a_single_compact_or_fold_frame_with_lossless_json_escaping`](../crates/anix-tools/tests/rfc_control.rs#L41) · [`invalid_aclr_argv_never_submits_a_frame`](../crates/anix-tools/tests/rfc_control.rs#L68) |
+| [511 至 66,000 字节的命令都执行到末尾，fd 6 只产生一条有效且有界的 JSONL 帧](../docs/v1.1.2-RFC.md?plain=1#L461) | [`test_long_commands_execute_their_suffix_and_handoff_with_a_single_bounded_frame`](../tests/test_msh_jobs.py#L191) |
+| [长命令在移交帧和 Trace 的 cmd 字段中是否可以缩短、如何标识预览](../docs/v1.1.2-RFC.md?plain=1#L461) | [#58](https://github.com/Luthics/anix/issues/58) |
+| [后台任务结束后仅在下一次请求前通知一次，冻结前缀、WAL 和重启恢复结果可核对](../docs/v1.1.2-RFC.md?plain=1#L465) | [`test_background_completion_is_reported_once_before_inference_and_replays_from_wal`](../tests/test_msh_jobs.py#L280) |
 
 ## §8.1
 
@@ -286,6 +304,8 @@
 | --- | --- |
 | [所选 Provider 的 params 浅合并](../docs/v1.1.2-RFC.md?plain=1#L517) | [`only_the_selected_providers_defaults_feed_the_shallow_params_merge`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L851) |
 | [内置及外部压缩器选取](../docs/v1.1.2-RFC.md?plain=1#L520) | [`builtin_compactor_uses_configured_provider_model_and_literal_or_file_prompt`](../crates/anix-core/tests/rfc_runtime/compaction.rs#L548) · [`external_compactor_receives_tool_free_ir_and_empty_or_failed_summary_is_fatal`](../crates/anix-core/tests/rfc_runtime/compaction.rs#L374) |
+| [只将硬上限配置为 2 时，每个显式请求仍应裁剪到 2，即使默认等待为 120](../docs/v1.1.2-RFC.md?plain=1#L491) | [`test_single_call_never_exceeds_a_configured_maximum_below_the_default_wait`](../tests/test_msh_jobs.py#L267) · [#56](https://github.com/Luthics/anix/issues/56) |
+| [环境覆盖 TOML 的默认等待与单次上限，单次覆盖后恢复默认等待](../docs/v1.1.2-RFC.md?plain=1#L490) | [`test_environment_maximum_overrides_toml_for_each_explicit_request`](../tests/test_msh_jobs.py#L273) |
 
 ## §8.3
 
@@ -317,6 +337,7 @@
 | [fold 对齐后插入 user 摘要](../docs/v1.1.2-RFC.md?plain=1#L577) | [`tail_fold_aligns_to_assistant_and_removes_the_triggering_tool_call`](../crates/anix-core/tests/rfc_runtime/compaction.rs#L321) · [`all_live_anchors_across_three_successive_folds_match_forward_replay_and_usage`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L365) |
 | [尾部 runtime_update 及上游角色映射](../docs/v1.1.2-RFC.md?plain=1#L578) | [`resumed_session_reuses_frozen_prefix_and_appends_configuration_drift_once`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L215) · [`test_frozen_prefix_and_runtime_update_remain_in_order_on_each_upstream`](../tests/test_provider_dialects.py#L111) |
 | [header、工具一一配对且连续、编号顺序与共享锚点](../docs/v1.1.2-RFC.md?plain=1#L579) | [`required_header_fields_and_types_cannot_be_dropped_or_moved`](../crates/anix-proto/tests/rfc_ir.rs#L36) · [`tool_replies_form_a_bijection_and_are_contiguous`](../crates/anix-proto/tests/rfc_ir.rs#L185) · [`a_single_tool_result_cannot_close_two_calls_with_the_same_id`](../crates/anix-proto/tests/rfc_ir.rs#L213) · [`ordinary_turns_increase_strictly_and_checkpoint_anchor_may_be_shared`](../crates/anix-proto/tests/rfc_ir.rs#L277) · [#39](https://github.com/Luthics/anix/issues/39) |
+| [msh 的工具声明仅要求 cmd，timeout_sec 为非负整数，kill_on_timeout 为可选布尔值](../docs/v1.1.2-RFC.md?plain=1#L584) | [`test_msh_tool_schema_and_per_call_options_do_not_leak_into_the_next_call`](../tests/test_msh_jobs.py#L252) |
 
 ## §9.2
 
@@ -365,6 +386,8 @@
 | [模型只看清洗后文本，私有 wire 文件保留命令实际输出的 ANSI 字节](../docs/v1.1.2-RFC.md?plain=1#L689) | [`test_wire_trace_keeps_raw_msh_output_while_the_model_receives_cleaned_text`](../tests/test_provider_streaming.py#L198) · [#52](https://github.com/Luthics/anix/issues/52) |
 | [协进程的 error 帧和 stderr 异步抵达时，诊断文本如何划分到对应请求](../docs/v1.1.2-RFC.md?plain=1#L687) | [#38](https://github.com/Luthics/anix/issues/38) |
 | [Trace 通用 error 事件的适用故障范围待明确](../docs/v1.1.2-RFC.md?plain=1#L677) | [#32](https://github.com/Luthics/anix/issues/32) |
+| [检查已终止的任务组且没有退出码文件时，完成事件含显式 null，后续推理不重复通知](../docs/v1.1.2-RFC.md?plain=1#L684) | [`test_finished_group_without_an_exit_file_reports_null_exactly_once`](../tests/test_msh_jobs.py#L328) |
+| [started 和 finished 通过相同任务标识、PID、进程组和日志路径关联，并报告真实状态及经过的毫秒数](../docs/v1.1.2-RFC.md?plain=1#L684) | [`test_background_completion_is_reported_once_before_inference_and_replays_from_wal`](../tests/test_msh_jobs.py#L280) |
 
 ## §9.6
 

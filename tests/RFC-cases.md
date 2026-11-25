@@ -417,6 +417,23 @@
 | [`test_installed_bash_script_accepts_args_on_path_and_by_relative_name_without_tty_eof`](../tests/test_distribution.py#L248) | [§2](../docs/v1.1.2-RFC.md?plain=1#L46) · [§3.1](../docs/v1.1.2-RFC.md?plain=1#L64) · [§4.1](../docs/v1.1.2-RFC.md?plain=1#L155) · [§9.2](../docs/v1.1.2-RFC.md?plain=1#L591) · [§10.3](../docs/v1.1.2-RFC.md?plain=1#L739) |
 | [`test_installed_pipeline_and_fold`](../tests/test_distribution.py#L272) | [§2](../docs/v1.1.2-RFC.md?plain=1#L46) · [§3.1](../docs/v1.1.2-RFC.md?plain=1#L64) · [§4.1](../docs/v1.1.2-RFC.md?plain=1#L155) · [§4.4](../docs/v1.1.2-RFC.md?plain=1#L210) · [§6.1](../docs/v1.1.2-RFC.md?plain=1#L317) · [§6.2](../docs/v1.1.2-RFC.md?plain=1#L344) · [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) · [§9.2](../docs/v1.1.2-RFC.md?plain=1#L591) · [§9.6](../docs/v1.1.2-RFC.md?plain=1#L691) · [§10.3](../docs/v1.1.2-RFC.md?plain=1#L739) |
 
+## `tests/test_msh_jobs.py`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`test_immediate_handoff_closes_side_channels_and_publishes_the_real_exit`](../tests/test_msh_jobs.py#L87) | [§7.1](../docs/v1.1.2-RFC.md?plain=1#L418) · [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
+| [`test_positive_deadline_returns_a_clean_bounded_tail_and_keeps_the_complete_log`](../tests/test_msh_jobs.py#L116) | [§7.1](../docs/v1.1.2-RFC.md?plain=1#L418) · [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
+| [`test_foreground_completion_returns_real_status_and_removes_job_files`](../tests/test_msh_jobs.py#L140) | [§7.1](../docs/v1.1.2-RFC.md?plain=1#L418) · [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
+| [`test_foreground_int_and_term_clean_up_in_both_timeout_modes`](../tests/test_msh_jobs.py#L149) | [§6.4](../docs/v1.1.2-RFC.md?plain=1#L391) · [§6.5](../docs/v1.1.2-RFC.md?plain=1#L401) · [§7.1](../docs/v1.1.2-RFC.md?plain=1#L418) |
+| [`test_zero_with_explicit_kill_waits_one_second_and_leaves_no_job`](../tests/test_msh_jobs.py#L180) | [§6.5](../docs/v1.1.2-RFC.md?plain=1#L401) · [§7.1](../docs/v1.1.2-RFC.md?plain=1#L418) |
+| [`test_long_commands_execute_their_suffix_and_handoff_with_a_single_bounded_frame`](../tests/test_msh_jobs.py#L191) | [§7.1](../docs/v1.1.2-RFC.md?plain=1#L418) · [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) |
+| [`test_msh_tool_schema_and_per_call_options_do_not_leak_into_the_next_call`](../tests/test_msh_jobs.py#L252) | [§7.1](../docs/v1.1.2-RFC.md?plain=1#L418) · [§8.2](../docs/v1.1.2-RFC.md?plain=1#L478) · [§9.1](../docs/v1.1.2-RFC.md?plain=1#L553) |
+| [`test_single_call_never_exceeds_a_configured_maximum_below_the_default_wait`](../tests/test_msh_jobs.py#L267) | [§7.1](../docs/v1.1.2-RFC.md?plain=1#L418) · [§8.2](../docs/v1.1.2-RFC.md?plain=1#L478) |
+| [`test_environment_maximum_overrides_toml_for_each_explicit_request`](../tests/test_msh_jobs.py#L273) | [§7.1](../docs/v1.1.2-RFC.md?plain=1#L418) · [§8.2](../docs/v1.1.2-RFC.md?plain=1#L478) |
+| [`test_background_completion_is_reported_once_before_inference_and_replays_from_wal`](../tests/test_msh_jobs.py#L280) | [§6.2](../docs/v1.1.2-RFC.md?plain=1#L344) · [§7.1](../docs/v1.1.2-RFC.md?plain=1#L418) · [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) · [§9.1](../docs/v1.1.2-RFC.md?plain=1#L553) · [§9.5](../docs/v1.1.2-RFC.md?plain=1#L666) |
+| [`test_finished_group_without_an_exit_file_reports_null_exactly_once`](../tests/test_msh_jobs.py#L328) | [§7.2](../docs/v1.1.2-RFC.md?plain=1#L444) · [§9.5](../docs/v1.1.2-RFC.md?plain=1#L666) |
+| [`test_hard_kill_grace_waits_for_a_living_descendant_without_repeated_polling`](../tests/test_msh_jobs.py#L372) | [§6.3](../docs/v1.1.2-RFC.md?plain=1#L383) · [§7.1](../docs/v1.1.2-RFC.md?plain=1#L418) |
+
 ## `tests/test_provider_dialects.py`
 
 | 测试 | RFC 条款 |
