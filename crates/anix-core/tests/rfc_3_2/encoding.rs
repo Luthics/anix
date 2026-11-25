@@ -10,7 +10,7 @@ use super::TempDir;
 #[test]
 fn all_256_single_bytes_inside_a_plain_prompt() {
     let dir = TempDir::new();
-    let path = dir.0.join("byte.anix");
+    let path = dir.0.join("byte.agent");
     for byte in 0..=u8::MAX {
         let bytes = [b'L', byte, b'R'];
         fs::write(&path, bytes).unwrap();
@@ -36,7 +36,7 @@ fn all_256_single_bytes_inside_a_plain_prompt() {
 #[test]
 fn valid_multibyte_boundaries_survive_file_decoding() {
     let dir = TempDir::new();
-    let path = dir.0.join("unicode.anix");
+    let path = dir.0.join("unicode.agent");
     // Shortest and longest scalar for each UTF-8 width and both sides of the surrogate gap.
     for scalar in [
         '\u{80}',
@@ -63,7 +63,7 @@ fn valid_multibyte_boundaries_survive_file_decoding() {
 #[test]
 fn malformed_sequences_are_rejected_in_every_script_region() {
     let dir = TempDir::new();
-    let path = dir.0.join("invalid.anix");
+    let path = dir.0.join("invalid.agent");
     let sequences: &[(&str, &[u8])] = &[
         ("lone continuation", &[0x80]),
         ("overlong two-byte", &[0xc0, 0xaf]),
@@ -103,7 +103,7 @@ fn malformed_sequences_are_rejected_in_every_script_region() {
 #[test]
 fn eof_at_each_interior_byte_of_a_utf8_scalar() {
     let dir = TempDir::new();
-    let path = dir.0.join("truncated.anix");
+    let path = dir.0.join("truncated.agent");
     for scalar in ["é", "界", "🦀"] {
         for cut in 0..=scalar.len() {
             let script = [b"body ".as_slice(), &scalar.as_bytes()[..cut]].concat();

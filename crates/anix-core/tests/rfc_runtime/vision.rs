@@ -40,7 +40,7 @@ fn vision_resolves_from_cli_env_script_selected_provider_then_defaults() {
                 Some(value) => format!("---\nvision: {value}\n---\nfixture"),
                 None => "fixture".to_owned(),
             };
-            fs::write(root.join("case.anix"), body).unwrap();
+            fs::write(root.join("case.agent"), body).unwrap();
             let mut cmd = fx.anix();
             if let Some(value) = setting(3) {
                 let flag = match (value, mask % 2 == 0) {
@@ -58,7 +58,7 @@ fn vision_resolves_from_cli_env_script_selected_provider_then_defaults() {
             let out = fx.run(
                 cmd.args(["-q", "-c"])
                     .arg(&wal)
-                    .args(["case.anix", "--", "go"]),
+                    .args(["case.agent", "--", "go"]),
             );
             expect_code(&out, 0);
             let rows = jsonl(&wal);
@@ -89,7 +89,7 @@ fn media_fixture(bridge: Option<(&str, u64)>) -> Fixture {
         .unwrap();
         executable(&root.join("local-bridge"), body);
     }
-    fs::write(root.join("case.anix"), "media fixture").unwrap();
+    fs::write(root.join("case.agent"), "media fixture").unwrap();
     scripted_provider(
         &fx,
         &[
@@ -114,7 +114,7 @@ fn run_media(fx: &Fixture, vision: bool, arg: &str) {
         flag,
         "-c",
         "history",
-        "case.anix",
+        "case.agent",
         "--",
         arg,
     ]));

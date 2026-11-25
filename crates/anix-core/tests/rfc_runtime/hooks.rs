@@ -11,7 +11,7 @@ fn pre_context_filters_can_rewrite_and_append_conversation_records_before_freezi
     use serde_json::json;
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "original prompt").unwrap();
+    fs::write(root.join("case.agent"), "original prompt").unwrap();
     let hooks = root.join("config/anix/hooks/pre-context.d");
     let system = json!({"role":"system","turn_id":0,"text":" revised\n\t中  "});
     let user =
@@ -51,7 +51,7 @@ set -eu
 "#,
     );
     scripted_provider(&fx, &[success_text("first"), success_text("second")]);
-    let args = ["-q", "-c", "history", "case.anix", "--", "go"];
+    let args = ["-q", "-c", "history", "case.agent", "--", "go"];
     expect_code(&fx.run(fx.anix().args(args)), 0);
     let seed = jsonl(&root.join("initial.ir"));
     assert_eq!(seed[1]["text"], "original prompt");
@@ -81,7 +81,7 @@ set -eu
 fn pre_context_failure_forwards_stderr_and_stops_before_inference() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "body").unwrap();
+    fs::write(root.join("case.agent"), "body").unwrap();
     let dir = root.join("config/anix/hooks/pre-context.d");
     executable(
         &dir.join("51-fail"),
@@ -91,7 +91,7 @@ fn pre_context_failure_forwards_stderr_and_stops_before_inference() {
         &dir.join("52-next"),
         "#!/bin/sh\n: > should-not-run\n/bin/cat\n",
     );
-    let out = fx.run(fx.anix().args(["case.anix", "--", "start"]));
+    let out = fx.run(fx.anix().args(["case.agent", "--", "start"]));
     expect_code(&out, 1);
     assert!(
         String::from_utf8(out.stderr)
@@ -107,7 +107,7 @@ fn pre_context_failure_forwards_stderr_and_stops_before_inference() {
 fn post_tool_failure_stops_before_later_hooks_tools_and_provider_turns() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "body").unwrap();
+    fs::write(root.join("case.agent"), "body").unwrap();
     let dir = root.join("config/anix/hooks/post-tool.d");
     executable(
         &dir.join("51-fail"),
@@ -132,7 +132,7 @@ fn post_tool_failure_stops_before_later_hooks_tools_and_provider_turns() {
             .env("ANIX_TRACE_LEVEL", "events")
             .args([
                 "-c",
-                r#"exec "$1" --trace-fd=3 --shell /bin/sh -y case.anix -- start 3>trace"#,
+                r#"exec "$1" --trace-fd=3 --shell /bin/sh -y case.agent -- start 3>trace"#,
                 "fixture",
                 env!("CARGO_BIN_EXE_anix"),
             ]),
@@ -155,7 +155,7 @@ fn post_tool_failure_stops_before_later_hooks_tools_and_provider_turns() {
 fn on_exit_timeout_is_local_to_one_hook_and_preserves_the_primary_exit_code() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "body").unwrap();
+    fs::write(root.join("case.agent"), "body").unwrap();
     let dir = root.join("config/anix/hooks/on-exit.d");
     executable(
         &dir.join("10-slow"),
@@ -170,7 +170,7 @@ fn on_exit_timeout_is_local_to_one_hook_and_preserves_the_primary_exit_code() {
     let start = Instant::now();
     let out = fx.run(fx.command_for("/bin/sh").args([
         "-c",
-        r#"exec "$1" --trace-fd=3 -q case.anix -- go 3>trace"#,
+        r#"exec "$1" --trace-fd=3 -q case.agent -- go 3>trace"#,
         "fixture",
         env!("CARGO_BIN_EXE_anix"),
     ]));
@@ -197,7 +197,7 @@ fn each_skill_search_layer_wins_once_and_the_body_stays_out_of_the_index() {
     let root = &fx.dir.0;
     let project = root.join("project");
     fs::create_dir(&project).unwrap();
-    fs::write(project.join("case.anix"), "body").unwrap();
+    fs::write(project.join("case.agent"), "body").unwrap();
     fs::remove_file(root.join("config/anix/hooks/pre-context.d/20-skills")).unwrap();
     let layers = [
         project.join(".anix/skills"),
@@ -221,7 +221,7 @@ fn each_skill_search_layer_wins_once_and_the_body_stays_out_of_the_index() {
             &fx.run(
                 fx.anix()
                     .current_dir(&project)
-                    .args(["case.anix", "--", "go"]),
+                    .args(["case.agent", "--", "go"]),
             ),
             0,
         );
@@ -241,7 +241,7 @@ fn each_skill_search_layer_wins_once_and_the_body_stays_out_of_the_index() {
         &fx.run(
             fx.anix()
                 .current_dir(&project)
-                .args(["case.anix", "--", "go"]),
+                .args(["case.agent", "--", "go"]),
         ),
         0,
     );
@@ -258,7 +258,7 @@ fn each_skill_search_layer_wins_once_and_the_body_stays_out_of_the_index() {
 fn tips_are_restored_after_version_drift_and_fall_back_to_runtime_when_state_is_unwritable() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "body").unwrap();
+    fs::write(root.join("case.agent"), "body").unwrap();
     let mask = root.join("config/anix/hooks/pre-context.d/30-tips");
     let state = root.join("state");
     let builtin = state.join("anix/builtin-tips");
@@ -267,7 +267,7 @@ fn tips_are_restored_after_version_drift_and_fall_back_to_runtime_when_state_is_
             &fx.run(
                 fx.anix()
                     .env("XDG_STATE_HOME", &state)
-                    .args(["case.anix", "--", "go"]),
+                    .args(["case.agent", "--", "go"]),
             ),
             0,
         );
@@ -300,7 +300,7 @@ fn masking_the_whole_tips_hook_suppresses_both_its_index_and_first_run_files() {
         for dev_null in [false, true] {
             let fx = Fixture::new();
             let root = &fx.dir.0;
-            fs::write(root.join("case.anix"), "body").unwrap();
+            fs::write(root.join("case.agent"), "body").unwrap();
             let global = root.join("config/anix/hooks/pre-context.d/30-tips");
             fs::remove_file(&global).unwrap();
             let mask = if project {
@@ -321,7 +321,7 @@ fn masking_the_whole_tips_hook_suppresses_both_its_index_and_first_run_files() {
                 if !disabled {
                     fs::remove_file(&mask).unwrap();
                 }
-                expect_code(&fx.run(fx.anix().args(["-q", "case.anix", "--", "go"])), 0);
+                expect_code(&fx.run(fx.anix().args(["-q", "case.agent", "--", "go"])), 0);
                 let rows = jsonl(&fx.capture);
                 let text = rows[1]["text"].as_str().unwrap();
                 if disabled {
@@ -345,10 +345,10 @@ fn masking_the_whole_tips_hook_suppresses_both_its_index_and_first_run_files() {
 fn an_empty_merged_tips_index_costs_no_prompt_bytes() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "body").unwrap();
+    fs::write(root.join("case.agent"), "body").unwrap();
     fs::remove_file(root.join("config/anix/hooks/pre-context.d/30-tips")).unwrap();
     let run = || {
-        expect_code(&fx.run(fx.anix().args(["-q", "case.anix", "--", "go"])), 0);
+        expect_code(&fx.run(fx.anix().args(["-q", "case.agent", "--", "go"])), 0);
         jsonl(&fx.capture)[1]["text"].as_str().unwrap().to_owned()
     };
     assert!(run().contains("<runtime_tips>"));
@@ -376,7 +376,7 @@ fn an_empty_merged_tips_index_costs_no_prompt_bytes() {
 fn mcp_guide_follows_anix_xdg_and_project_precedence_without_disclosing_tool_schemas() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "body").unwrap();
+    fs::write(root.join("case.agent"), "body").unwrap();
     fs::remove_file(root.join("config/anix/hooks/pre-context.d/30-tips")).unwrap();
     let name = "how-to-mcp.md";
     let builtin = root.join("state/anix/builtin-tips").join(name);
@@ -407,7 +407,7 @@ fn mcp_guide_follows_anix_xdg_and_project_precedence_without_disclosing_tool_sch
         expect_code(
             &fx.run(fx.anix().env("XDG_STATE_HOME", root.join("state")).args([
                 "-q",
-                "case.anix",
+                "case.agent",
                 "--",
                 "go",
             ])),
@@ -468,12 +468,12 @@ fn runtime_contract_depends_on_stderr_and_only_changes_at_the_tail_on_resume() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
     fs::remove_file(root.join("config/anix/hooks/pre-context.d/00-posix-runtime")).unwrap();
-    fs::write(root.join("case.anix"), "keep this prompt").unwrap();
+    fs::write(root.join("case.agent"), "keep this prompt").unwrap();
     let request = |mode: &str, context: &str| {
         let out =
             fx.run(
                 fx.anix()
-                    .args(["--stderr", mode, "-c", context, "case.anix", "--", "input"]),
+                    .args(["--stderr", mode, "-c", context, "case.agent", "--", "input"]),
             );
         expect_code(&out, 0);
         assert!(out.stdout.is_empty());
@@ -535,10 +535,10 @@ fn each_builtin_can_be_replaced_globally_then_overridden_or_masked_by_the_projec
         "---\nname: sample\ndescription: Example\n---\n",
     )
     .unwrap();
-    fs::write(root.join("case.anix"), "SCRIPT_MARKER").unwrap();
+    fs::write(root.join("case.agent"), "SCRIPT_MARKER").unwrap();
     let capture = || {
         expect_code(
-            &fx.run(fx.anix().args(["-q", "case.anix", "--", "input"])),
+            &fx.run(fx.anix().args(["-q", "case.agent", "--", "input"])),
             0,
         );
         jsonl(&fx.capture)[1]["text"].as_str().unwrap().to_owned()
@@ -586,7 +586,7 @@ fn post_tool_filters_chain_in_order_and_only_the_final_text_reaches_wal_and_prov
     for status in [0, 7, 124] {
         let fx = Fixture::new();
         let root = &fx.dir.0;
-        fs::write(root.join("case.anix"), "fixture").unwrap();
+        fs::write(root.join("case.agent"), "fixture").unwrap();
         fs::write(root.join("sample"), "RAW fixture 文").unwrap();
         let hooks = root.join("config/anix/hooks/post-tool.d");
         for (name, capture, substitution) in [
@@ -616,7 +616,7 @@ fn post_tool_filters_chain_in_order_and_only_the_final_text_reaches_wal_and_prov
             "/bin/sh",
             "-c",
             "history",
-            "case.anix",
+            "case.agent",
             "--",
             "go",
         ];

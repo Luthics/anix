@@ -9,7 +9,7 @@ use time::format_description::well_known::Rfc3339;
 fn traced(fx: &Fixture) -> std::process::Output {
     fx.run(fx.command_for("/bin/sh").args([
         "-c",
-        r#"exec "$1" --trace-fd=3 -q -c history case.anix -- go 3>trace"#,
+        r#"exec "$1" --trace-fd=3 -q -c history case.agent -- go 3>trace"#,
         "fixture",
         env!("CARGO_BIN_EXE_anix"),
     ]))
@@ -20,7 +20,7 @@ fn traced(fx: &Fixture) -> std::process::Output {
 fn retryable_failures_exhaust_three_backoffs_and_preserve_the_request_and_final_stderr() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "body").unwrap();
+    fs::write(root.join("case.agent"), "body").unwrap();
     let turns: Vec<_> = (1..=4).map(|i| {
         vec![json!({"type":"error", "code":"busy", "message":format!("busy-{i}"), "retryable":true})]
     }).collect();
@@ -93,7 +93,7 @@ fn retryable_failures_exhaust_three_backoffs_and_preserve_the_request_and_final_
 fn check_terminal_failure(script: &str, timeout: u64, status: i32, single_attempt: bool) {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "body").unwrap();
+    fs::write(root.join("case.agent"), "body").unwrap();
     let conf = root.join("config/anix/config.toml");
     fs::write(
         &conf,
@@ -164,7 +164,7 @@ fn provider_timeout_maps_to_124_without_a_retry() {
 fn opaque_round_trips_with_the_same_provider_and_is_removed_before_a_provider_switch() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "body").unwrap();
+    fs::write(root.join("case.agent"), "body").unwrap();
     let config = root.join("config/anix/config.toml");
     fs::write(
         &config,
@@ -195,7 +195,7 @@ fn opaque_round_trips_with_the_same_provider_and_is_removed_before_a_provider_sw
                 "-q",
                 "-c",
                 "history",
-                "case.anix",
+                "case.agent",
                 "--",
                 "input",
             ])),
@@ -237,7 +237,7 @@ fn max_turns_allows_completion_on_the_last_request_and_stops_unfinished_work() {
             let fx = Fixture::new();
             let root = &fx.dir.0;
             fs::write(
-                root.join("case.anix"),
+                root.join("case.agent"),
                 format!("---\nmax_turns: {limit}\napproval: auto\nshell: /bin/sh\n---\nbody"),
             )
             .unwrap();

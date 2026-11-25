@@ -27,7 +27,7 @@ exit 1
 "#,
         )
         .unwrap();
-        let opts = ["-q", "-c", "history", "case.anix", "--", "initial"];
+        let opts = ["-q", "-c", "history", "case.agent", "--", "initial"];
         let mut agent = Agent::start(&fx, &opts);
         until("active provider", || root.join("provider-ready").exists());
         agent.signal(signal);
@@ -61,7 +61,7 @@ fn idle_process_holds_wal_and_usr2_snapshots_exact_ir_at_a_safe_boundary() {
             "-q",
             "-c",
             "history",
-            "case.anix",
+            "case.agent",
         ],
     );
     until("inbox initialization", || root.join("mail/done").is_dir());
@@ -71,7 +71,7 @@ fn idle_process_holds_wal_and_usr2_snapshots_exact_ir_at_a_safe_boundary() {
     expect_code(
         &fx.run(
             fx.anix()
-                .args(["-c", "history", "case.anix", "--", "cannot enter"]),
+                .args(["-c", "history", "case.agent", "--", "cannot enter"]),
         ),
         1,
     );
@@ -136,7 +136,7 @@ fn usr1_forces_one_tool_free_compaction_before_the_next_inbox_inference() {
             "0",
             "-c",
             "history",
-            "case.anix",
+            "case.agent",
         ],
     );
     until("inbox initialization", || root.join("mail/done").is_dir());
@@ -193,7 +193,7 @@ printf finished > natural-exit
 "#,
     )
     .unwrap();
-    let mut agent = Agent::start(&fx, &["-q", "-c", "history", "case.anix", "--", "go"]);
+    let mut agent = Agent::start(&fx, &["-q", "-c", "history", "case.agent", "--", "go"]);
     until("active provider", || root.join("ready").is_file());
     let start = Instant::now();
     agent.signal(signal);
@@ -208,7 +208,7 @@ printf finished > natural-exit
     expect_code(
         &fx.run(
             fx.anix()
-                .args(["-q", "-c", "history", "case.anix", "--", "resume"]),
+                .args(["-q", "-c", "history", "case.agent", "--", "resume"]),
         ),
         0,
     );
@@ -234,7 +234,7 @@ fn abrupt_parent_exit_stops_the_active_provider_or_shell_child() {
         }
         let mut agent = Agent::start(
             &fx,
-            &["-q", "-y", "--shell", "/bin/sh", "case.anix", "--", "go"],
+            &["-q", "-y", "--shell", "/bin/sh", "case.agent", "--", "go"],
         );
         until("child pid published", || root.join("child-pid").exists());
         let pid: u32 = fs::read_to_string(root.join("child-pid"))

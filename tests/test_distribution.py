@@ -77,7 +77,7 @@ class Distribution(unittest.TestCase):
                 link.type = tarfile.SYMTYPE
                 link.linkname = "anix-provider"
                 tar.addfile(link)
-            tar.add(REPO / "examples/bash.anix", arcname=f"{stage}/examples/bash.anix")
+            tar.add(REPO / "examples/bash.agent", arcname=f"{stage}/examples/bash.agent")
         cls.archive_name = archive.name
         digest = hashlib.sha256()
         with archive.open("rb") as content:
@@ -135,7 +135,7 @@ esac
                 with self.subTest(installation=iteration):
                     self.install(root)
                     cfg = root / ".config/anix/config.toml"
-                    starter = cfg.parent / "agents/bash.anix"
+                    starter = cfg.parent / "agents/bash.agent"
                     private = root / ".local/libexec/anix"
                     for dialect in DIALECTS:
                         alias = private / f"anix-provider-{dialect}"
@@ -225,7 +225,7 @@ timeout_sec=3
                 attrs = termios.tcgetattr(slave)
                 attrs[1] &= ~termios.OPOST
                 termios.tcsetattr(slave, termios.TCSANOW, attrs)
-                result = subprocess.run([agents / "bash.anix", "xxx"], cwd=root,
+                result = subprocess.run([agents / "bash.agent", "xxx"], cwd=root,
                                         env={**env, "TERM": "xterm-256color"}, stdin=subprocess.DEVNULL,
                                         stdout=subprocess.PIPE, stderr=slave, timeout=8)
                 os.set_blocking(master, False)
@@ -249,7 +249,7 @@ timeout_sec=3
         with tempfile.TemporaryDirectory(prefix="anix-install-tty-") as home:
             root = Path(home)
             agents, env = self.install_with_text_provider(root)
-            for program, cwd in [("bash.anix", root), ("./bash.anix", agents)]:
+            for program, cwd in [("bash.agent", root), ("./bash.agent", agents)]:
                 with self.subTest(program=program):
                     (root / "request").unlink(missing_ok=True)
                     master, slave = pty.openpty()
@@ -307,7 +307,7 @@ timeout_sec=3
             f"base_url='http://127.0.0.1:{http.server_port}/v1'\n"
             "api_key_env=''\napi_key='loopback-fixture'\ntimeout_sec=10\n")
         (root / "pixel.png").write_bytes(PNG)
-        script = root / "demo.anix"
+        script = root / "demo.agent"
         script.write_text("#!/usr/bin/env anix\n---\napproval: auto\nstderr: explicit\n"
                           "context: session.jsonl\n---\ninspect fixture")
         script.chmod(0o700)

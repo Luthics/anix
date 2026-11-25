@@ -17,8 +17,8 @@ fn cli_version_usage_and_success_have_distinct_stream_contracts() {
     for args in [
         &[][..],
         &["--no-such-option"],
-        &["--approval", "maybe", "case.anix"],
-        &["--max-turns", "-1", "case.anix"],
+        &["--approval", "maybe", "case.agent"],
+        &["--max-turns", "-1", "case.agent"],
     ] {
         let output = fx.run(fx.anix().args(args));
         expect_code(&output, 2);
@@ -35,7 +35,7 @@ fn cli_version_usage_and_success_have_distinct_stream_contracts() {
 fn args_stdin_and_sparse_extra_descriptors_are_ordered_and_trace_is_separate() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "body").unwrap();
+    fs::write(root.join("case.agent"), "body").unwrap();
     for (file, bytes) in [
         ("input", "primary"),
         ("four", "four"),
@@ -45,7 +45,7 @@ fn args_stdin_and_sparse_extra_descriptors_are_ordered_and_trace_is_separate() {
         fs::write(root.join(file), bytes).unwrap();
     }
     let result=fx.run(fx.command_for("/bin/sh").args(["-c",
-        r#"exec "$1" --trace-fd=3 case.anix -- "two words" end <input 9<nine 4<four 6<six 7>write-only 3>trace"#,
+        r#"exec "$1" --trace-fd=3 case.agent -- "two words" end <input 9<nine 4<four 6<six 7>write-only 3>trace"#,
         "fixture",env!("CARGO_BIN_EXE_anix")]));
     expect_code(&result, 0);
     assert!(result.stdout.is_empty());
@@ -88,7 +88,7 @@ fn repeated_payload_redirection_appends_raw_bytes_in_both_stderr_modes() {
     for mode in ["auto", "explicit"] {
         let fx = Fixture::new();
         let root = &fx.dir.0;
-        fs::write(root.join("case.anix"), "body").unwrap();
+        fs::write(root.join("case.agent"), "body").unwrap();
         scripted_provider(
             &fx,
             &[
@@ -107,7 +107,7 @@ fn repeated_payload_redirection_appends_raw_bytes_in_both_stderr_modes() {
         );
         let result = fx.run(fx.command_for("/bin/sh").args([
             "-c",
-            r#"exec "$1" --trace-fd=3 --shell /bin/sh -y --stderr "$2" case.anix -- go >payload 3>trace"#,
+            r#"exec "$1" --trace-fd=3 --shell /bin/sh -y --stderr "$2" case.agent -- go >payload 3>trace"#,
             "fixture",
             env!("CARGO_BIN_EXE_anix"),
             mode,
@@ -149,7 +149,7 @@ fn repeated_payload_redirection_appends_raw_bytes_in_both_stderr_modes() {
 fn tool_receives_control_channels_tools_path_and_no_parent_model_or_wal() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "body").unwrap();
+    fs::write(root.join("case.agent"), "body").unwrap();
     let tools = root.join(".local/libexec/anix/tools");
     fs::create_dir_all(&tools).unwrap();
     fs::write(tools.join("aclr"), "").unwrap();
@@ -159,7 +159,7 @@ fn tool_receives_control_channels_tools_path_and_no_parent_model_or_wal() {
         fx.anix()
             .env("ANIX_CONTEXT", "session.wal")
             .env("ANIX_MODEL", "parent-only")
-            .args(["--shell", "/bin/sh", "-y", "case.anix", "--", "go"]),
+            .args(["--shell", "/bin/sh", "-y", "case.agent", "--", "go"]),
     );
     expect_code(&result, 0);
     assert!(root.join("session.wal").is_file());
@@ -185,14 +185,14 @@ fn tool_receives_control_channels_tools_path_and_no_parent_model_or_wal() {
 #[test]
 fn script_arguments_accept_an_optional_separator_and_preserve_option_like_literals() {
     let fx = Fixture::new();
-    fs::write(fx.dir.0.join("case.anix"), "body").unwrap();
+    fs::write(fx.dir.0.join("case.agent"), "body").unwrap();
     for (args, user) in [
-        (&["case.anix", "hello", "two words"][..], "hello two words"),
+        (&["case.agent", "hello", "two words"][..], "hello two words"),
         (
-            &["case.anix", "--", "hello", "two words"][..],
+            &["case.agent", "--", "hello", "two words"][..],
             "hello two words",
         ),
-        (&["case.anix", "--", "-q", "--version"][..], "-q --version"),
+        (&["case.agent", "--", "-q", "--version"][..], "-q --version"),
     ] {
         expect_code(&fx.run(fx.anix().args(args)), 0);
         assert_eq!(
@@ -216,7 +216,7 @@ done"#;
     for rotation in 0..4 {
         let fx = Fixture::new();
         let root = &fx.dir.0;
-        fs::write(root.join("case.anix"), "body").unwrap();
+        fs::write(root.join("case.agent"), "body").unwrap();
         let hook = root.join("config/anix/hooks/pre-context.d/70-inspect");
         executable(&hook, &format!("#!/bin/sh\n{inspect}\n/bin/cat\n"));
         scripted_provider(
@@ -247,7 +247,7 @@ done"#;
                 fs::write(root.join(format!("readable-{n}")), "").unwrap();
             }
         }
-        let script = format!("exec \"$1\" -y -q --shell /bin/sh case.anix -- initial{redirects}");
+        let script = format!("exec \"$1\" -y -q --shell /bin/sh case.agent -- initial{redirects}");
         expect_code(
             &fx.run(fx.command_for("/bin/sh").args([
                 "-c",
@@ -311,7 +311,7 @@ fn shell_environment_contains_only_observability_effective_approval_and_routed_f
             fs::read_to_string(&config).unwrap() + "\n[approval]\nsafe_commands=['observe']\n",
         )
         .unwrap();
-        fs::write(root.join("case.anix"), "body").unwrap();
+        fs::write(root.join("case.agent"), "body").unwrap();
         executable(
             &root.join("observe"),
             "#!/bin/sh\n/usr/bin/env > observed\n",
@@ -357,7 +357,7 @@ fn shell_environment_contains_only_observability_effective_approval_and_routed_f
             cmd.env("ANIX_INBOX", "parent-mail")
                 .args(["--idle-timeout", "1"]);
         }
-        expect_code(&fx.run(cmd.args(["case.anix", "--", "go"])), 0);
+        expect_code(&fx.run(cmd.args(["case.agent", "--", "go"])), 0);
         let raw = fs::read_to_string(root.join("observed")).unwrap();
         let vars: BTreeMap<_, _> = raw.lines().map(|l| l.split_once('=').unwrap()).collect();
         for (key, value) in [
@@ -395,7 +395,7 @@ fn unterminated_deltas_are_separated_from_tool_status_diagnostics_and_usage() {
         for mode in ["auto", "explicit"] {
             let fx = Fixture::new();
             let root = &fx.dir.0;
-            fs::write(root.join("case.anix"), "fixture").unwrap();
+            fs::write(root.join("case.agent"), "fixture").unwrap();
             // Keep the diagnostic out of the command text so a status line
             // echoing the command cannot satisfy the fd 5 assertion.
             fs::write(root.join("note"), "from-diagnostic-channel\n").unwrap();
@@ -411,7 +411,7 @@ fn unterminated_deltas_are_separated_from_tool_status_diagnostics_and_usage() {
                 "--shell",
                 "/bin/sh",
                 "-y",
-                "case.anix",
+                "case.agent",
                 "--",
                 "go",
             ]));

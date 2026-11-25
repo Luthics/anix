@@ -9,7 +9,7 @@ pub(super) struct Agent(pub(super) Child);
 
 impl Agent {
     pub(super) fn start(fx: &Fixture, args: &[&str]) -> Self {
-        fs::write(fx.dir.0.join("case.anix"), "frozen-test-text").unwrap();
+        fs::write(fx.dir.0.join("case.agent"), "frozen-test-text").unwrap();
         let c = fx
             .anix()
             .args(args)

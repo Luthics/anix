@@ -363,7 +363,7 @@ class ProviderDialects(unittest.TestCase):
                              f"base_url='http://127.0.0.1:{self.http.server_port}/v1'",
                              "api_key='fixture'", "api_key_env=''", "timeout_sec=5"])
         (config / "config.toml").write_text("\n".join(settings))
-        (self.root / "case.anix").write_text("routing fixture")
+        (self.root / "case.agent").write_text("routing fixture")
         env = {"HOME": str(self.root), "PATH": f"{self.root}:/usr/bin:/bin",
                "XDG_RUNTIME_DIR": str(self.root / "run")}
         text = {
@@ -379,7 +379,7 @@ class ProviderDialects(unittest.TestCase):
                 self.http.replies.append((200, sse(text[dialect]) + completion(dialect), None))
                 proc = subprocess.run(
                     ["/bin/sh", "-c", 'exec "$@" 7>trace', "fixture", self.binary.with_name("anix"),
-                     "-q", "--trace-fd=7", "--provider", dialect, "-c", wal, "case.anix", "--", dialect],
+                     "-q", "--trace-fd=7", "--provider", dialect, "-c", wal, "case.agent", "--", dialect],
                     env=env, cwd=self.root, stdin=subprocess.DEVNULL, capture_output=True, timeout=12)
                 self.assertEqual(proc.returncode, 0, proc.stderr)
                 self.assertFalse(self.http.replies)

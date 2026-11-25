@@ -6,11 +6,11 @@ use serde_json::{Value, json};
 use std::fs;
 
 fn run_script(fixture: &Fixture, script: &[u8]) -> std::process::Output {
-    fs::write(fixture.dir.0.join("case.anix"), script).unwrap();
+    fs::write(fixture.dir.0.join("case.agent"), script).unwrap();
     fixture.run(
         fixture
             .anix()
-            .args(["--stderr", "explicit", "case.anix", "--", "user input"]),
+            .args(["--stderr", "explicit", "case.agent", "--", "user input"]),
     )
 }
 

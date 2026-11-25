@@ -160,8 +160,8 @@ fn every_subset_of_five_layers_selects_highest_priority_model_and_output_limit()
         }
         fs::write(root.join("config/anix/config.toml"), global + MOCK).unwrap();
         fs::write(root.join(".anix/config.toml"), project).unwrap();
-        fs::write(root.join("case.anix"), front + "body").unwrap();
-        let result = fx.run(cmd.args(["case.anix", "--", "go"]));
+        fs::write(root.join("case.agent"), front + "body").unwrap();
+        let result = fx.run(cmd.args(["case.agent", "--", "go"]));
         expect_code(&result, 0);
         assert_eq!(
             fs::read_to_string(root.join("model")).unwrap(),
@@ -280,7 +280,7 @@ fn scalar_settings_resolve_for_every_subset_of_the_five_override_layers() {
                 ["-c", "cli.wal", "--inbox", "cli-box", "--idle-timeout", "0"].map(String::from),
             );
         }
-        args.push(String::from("case.anix"));
+        args.push(String::from("case.agent"));
         let cwd = root.canonicalize().unwrap();
         let mut paths = AgentPaths::discover(&cwd).unwrap();
         paths.global_config_dir = root.join("config/anix");
@@ -347,7 +347,7 @@ fn scalar_settings_resolve_for_every_subset_of_the_five_override_layers() {
 fn output_limit_is_strictly_below_effective_context_budget_zero_omits_it() {
     let fx = Fixture::new();
     fs::write(
-        fx.dir.0.join("case.anix"),
+        fx.dir.0.join("case.agent"),
         "---\nmax_tokens: 1024\n---\nPrompt",
     )
     .unwrap();
@@ -365,7 +365,7 @@ fn output_limit_is_strictly_below_effective_context_budget_zero_omits_it() {
         let result = fx.run(fx.anix().args([
             "--max-output-tokens",
             &limit.to_string(),
-            "case.anix",
+            "case.agent",
             "--",
             "go",
         ]));
@@ -400,7 +400,7 @@ fn params_merge_by_key_and_cli_values_preserve_json_types() {
     )
     .unwrap();
     fs::write(
-        root.join("case.anix"),
+        root.join("case.agent"),
         "---\nparams: {front: 3, all: f}\n---\nbody",
     )
     .unwrap();
@@ -415,7 +415,7 @@ fn params_merge_by_key_and_cli_values_preserve_json_types() {
         "word=a=b",
         "--param",
         "obj={\"a\":true}",
-        "case.anix",
+        "case.agent",
         "--",
         "go",
     ]));
@@ -438,7 +438,7 @@ fn empty_context_override_is_distinct_from_an_unset_variable() {
     ] {
         let fx = Fixture::new();
         fs::write(
-            fx.dir.0.join("case.anix"),
+            fx.dir.0.join("case.agent"),
             "---\ncontext: front.wal\n---\nbody",
         )
         .unwrap();
@@ -449,7 +449,7 @@ fn empty_context_override_is_distinct_from_an_unset_variable() {
         if let Some(path) = cli_path {
             cmd.args(["-c", path]);
         }
-        expect_code(&fx.run(cmd.args(["case.anix", "--", "go"])), 0);
+        expect_code(&fx.run(cmd.args(["case.agent", "--", "go"])), 0);
         for name in ["front.wal", "env.wal", "cli.wal"] {
             assert_eq!(
                 fx.dir.0.join(name).exists(),
@@ -471,13 +471,13 @@ fn project_search_stops_at_nearest_configuration_git_or_home_boundary() {
     fs::create_dir_all(&nested).unwrap();
     fs::create_dir(outer.join(".anix")).unwrap();
     fs::write(outer.join(".anix/config.toml"), "[defaults]\nmodel='outer'").unwrap();
-    fs::write(nested.join("case.anix"), "body").unwrap();
+    fs::write(nested.join("case.agent"), "body").unwrap();
     let run = |expected| {
         expect_code(
             &fx.run(
                 fx.anix()
                     .current_dir(&nested)
-                    .args(["case.anix", "--", "go"]),
+                    .args(["case.agent", "--", "go"]),
             ),
             0,
         );
@@ -501,7 +501,7 @@ fn project_search_stops_at_nearest_configuration_git_or_home_boundary() {
             fx.anix()
                 .current_dir(&nested)
                 .env("HOME", root.join("outer/project/src"))
-                .args(["case.anix", "--", "go"]),
+                .args(["case.agent", "--", "go"]),
         ),
         0,
     );
@@ -533,7 +533,7 @@ api_key="configured-placeholder"
     )
     .unwrap();
     fs::write(
-        root.join("case.anix"),
+        root.join("case.agent"),
         "---\nprovider: fixture\nmodel: front\n---\nbody",
     )
     .unwrap();
@@ -553,7 +553,7 @@ printf '%s\n' '{"type":"text_delta","text":"ok"}' '{"type":"done","finish_reason
         let mut cmd = fx.anix();
         cmd.env("ANIX_PROVIDER", "alternate")
             .env("ANIX_MODEL", "env-model")
-            .args(["case.anix", "--", "go"]);
+            .args(["case.agent", "--", "go"]);
         if let Some(v) = value {
             cmd.env("LOCAL_KEY_FIXTURE", v);
         }
@@ -580,7 +580,7 @@ fn environment_approval_aliases_and_cli_override_produce_the_expected_tool_effec
         let fx = Fixture::new();
         let root = &fx.dir.0;
         fs::write(
-            root.join("case.anix"),
+            root.join("case.agent"),
             "---\napproval: deny\nstderr: auto\n---\nbody",
         )
         .unwrap();
@@ -600,7 +600,7 @@ fn environment_approval_aliases_and_cli_override_produce_the_expected_tool_effec
         if !approval.is_empty() {
             cmd.env("ANIX_APPROVAL", approval);
         }
-        let out = fx.run(cmd.args(opts).args(["case.anix", "--", "go"]));
+        let out = fx.run(cmd.args(opts).args(["case.agent", "--", "go"]));
         expect_code(&out, 0);
         assert!(out.stderr.is_empty() && out.stdout.is_empty());
         assert_eq!(root.join("marker").exists(), allowed);
@@ -629,8 +629,8 @@ fn invalid_resolved_environment_values_exit_two_before_contacting_the_provider()
         ("ANIX_IDLE_TIMEOUT", "-1"),
     ] {
         let fx = Fixture::new();
-        fs::write(fx.dir.0.join("case.anix"), "body").unwrap();
-        let out = fx.run(fx.anix().env(key, value).args(["case.anix", "--", "go"]));
+        fs::write(fx.dir.0.join("case.agent"), "body").unwrap();
+        let out = fx.run(fx.anix().env(key, value).args(["case.agent", "--", "go"]));
         assert_eq!(
             out.status.code(),
             Some(2),
@@ -660,7 +660,7 @@ fn global_and_project_config_reject_unknown_keys_before_any_inference() {
             let config = dir.join("config.toml");
             fs::write(config, text).unwrap();
             fs::write(
-                root.join("case.anix"),
+                root.join("case.agent"),
                 "---\nmodel: fixture-model\n---\nbody",
             )
             .unwrap();
@@ -670,11 +670,13 @@ fn global_and_project_config_reject_unknown_keys_before_any_inference() {
                 &root.join("anix-provider-openai-responses"),
                 "#!/bin/sh\n: > \"$HOME/request.jsonl\"\nexit 1\n",
             );
-            let out =
-                fx.run(
-                    fx.anix()
-                        .args(["--provider", "openai-responses", "case.anix", "--", "go"]),
-                );
+            let out = fx.run(fx.anix().args([
+                "--provider",
+                "openai-responses",
+                "case.agent",
+                "--",
+                "go",
+            ]));
             assert_eq!(
                 out.status.code(),
                 Some(2),
@@ -699,11 +701,11 @@ fn absolute_frontmatter_threshold_must_fit_uint32_before_the_disable_rule_applie
     ] {
         let fx = Fixture::new();
         fs::write(
-            fx.dir.0.join("case.anix"),
+            fx.dir.0.join("case.agent"),
             format!("---\nmax_tokens: 1024\ncompact_threshold: {value}\n---\nbody"),
         )
         .unwrap();
-        let out = fx.run(fx.anix().args(["-q", "case.anix", "--", "go"]));
+        let out = fx.run(fx.anix().args(["-q", "case.agent", "--", "go"]));
         if out.status.code() != Some(expected) || fx.capture.exists() != (expected == 0) {
             unexpected.push((value, out.status.code(), fx.capture.exists()));
         } else if expected == 2 {
@@ -721,7 +723,7 @@ fn absolute_frontmatter_threshold_must_fit_uint32_before_the_disable_rule_applie
 #[test]
 fn cli_params_preserve_json_literals_and_the_exact_fallback_string() {
     let fx = Fixture::new();
-    fs::write(fx.dir.0.join("case.anix"), "body").unwrap();
+    fs::write(fx.dir.0.join("case.agent"), "body").unwrap();
     let cases = [
         ("flag", " true ", json!(true)),
         ("empty", "", json!("")),
@@ -750,7 +752,7 @@ fn cli_params_preserve_json_literals_and_the_exact_fallback_string() {
         cmd.arg("--param").arg(format!("{key}={raw}"));
         params[key] = expected;
     }
-    expect_code(&fx.run(cmd.args(["-q", "case.anix", "--", "go"])), 0);
+    expect_code(&fx.run(cmd.args(["-q", "case.agent", "--", "go"])), 0);
     assert_eq!(jsonl(&fx.capture)[0]["params"], params);
 }
 
@@ -759,7 +761,7 @@ fn cli_params_preserve_json_literals_and_the_exact_fallback_string() {
 fn malformed_cli_param_stops_before_provider_or_wal_creation() {
     for param in ["without-separator", "=value", ""] {
         let fx = Fixture::new();
-        fs::write(fx.dir.0.join("case.anix"), "body").unwrap();
+        fs::write(fx.dir.0.join("case.agent"), "body").unwrap();
         let out = fx.run(fx.anix().args([
             "-c",
             "history",
@@ -767,7 +769,7 @@ fn malformed_cli_param_stops_before_provider_or_wal_creation() {
             "valid=true",
             "--param",
             param,
-            "case.anix",
+            "case.agent",
             "--",
             "go",
         ]));
@@ -791,7 +793,7 @@ fn a_shared_script_resolves_its_context_and_project_configuration_from_each_cwd(
         "[defaults]\nmodel='beside-script'",
     )
     .unwrap();
-    let script = scripts.join("shared.anix");
+    let script = scripts.join("shared.agent");
     fs::write(&script, "---\ncontext: session.jsonl\n---\nshared prompt").unwrap();
     for project in ["one", "two"] {
         let dir = root.join(project);
@@ -881,7 +883,7 @@ tree = {from_project_b = 4}
     )
     .unwrap();
     fs::write(
-        root.join("case.anix"),
+        root.join("case.agent"),
         "---\nprovider: alternate\nparams: {common: 'script', overridable: [1]}\n---\nbody",
     )
     .unwrap();
@@ -899,7 +901,14 @@ tree = {from_project_b = 4}
             cmd.args(["--provider", v]);
         }
         expect_code(
-            &fx.run(cmd.args(["--param", "overridable=null", "-q", "case.anix", "--", "go"])),
+            &fx.run(cmd.args([
+                "--param",
+                "overridable=null",
+                "-q",
+                "case.agent",
+                "--",
+                "go",
+            ])),
             0,
         );
         let expected = if provider == "fixture" {
@@ -940,7 +949,7 @@ fn a_named_provider_searches_path_then_libexec_while_a_path_executes_directly() 
             &format!("{recorder}\nprintf '%s' {label} > selected\n"),
         );
     }
-    fs::write(root.join("case.anix"), "body").unwrap();
+    fs::write(root.join("case.agent"), "body").unwrap();
     let search = std::env::join_paths([&first, &second]).unwrap();
     let run = |spec: &str, label: Option<&str>| {
         fs::write(&config, original.replace("record-provider", spec)).unwrap();
@@ -954,7 +963,7 @@ fn a_named_provider_searches_path_then_libexec_while_a_path_executes_directly() 
         let out = fx.run(
             fx.anix()
                 .env("PATH", &search)
-                .args(["-q", "case.anix", "--", "go"]),
+                .args(["-q", "case.agent", "--", "go"]),
         );
         if let Some(label) = label {
             assert_eq!(
@@ -1045,12 +1054,12 @@ fn each_xdg_directory_resolves_independently_when_other_overrides_are_absent() {
 fn selected_model_changes_the_provider_environment_without_entering_the_ir() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "portable prompt").unwrap();
+    fs::write(root.join("case.agent"), "portable prompt").unwrap();
     for model in ["first-model-marker", "second-model-marker"] {
         expect_code(
             &fx.run(
                 fx.anix()
-                    .args(["--model", model, "case.anix", "--", "input"]),
+                    .args(["--model", model, "case.agent", "--", "input"]),
             ),
             0,
         );

@@ -48,7 +48,7 @@ while [ ! -f release ] && [ "$i" -lt 240 ]; do /bin/sleep 0.1; i=$((i+1)); done
             "0",
             "-c",
             "history",
-            "case.anix",
+            "case.agent",
         ],
     );
     until("inbox initialization", || mail.join("done").is_dir());
@@ -120,7 +120,7 @@ while [ ! -f release ] && [ "$i" -lt 240 ]; do /bin/sleep 0.1; i=$((i+1)); done
 fn a_publisher_can_queue_work_while_the_initial_cli_task_is_running() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "queue prompt").unwrap();
+    fs::write(root.join("case.agent"), "queue prompt").unwrap();
     for dir in ["tmp", "new", "cur", "done"] {
         fs::create_dir_all(root.join("mail").join(dir)).unwrap();
     }
@@ -144,7 +144,7 @@ fn a_publisher_can_queue_work_while_the_initial_cli_task_is_running() {
         "1",
         "-c",
         "history",
-        "case.anix",
+        "case.agent",
         "--",
         "initial",
     ]));
@@ -213,7 +213,7 @@ fi
             "1",
             "-c",
             "history",
-            "case.anix",
+            "case.agent",
         ],
     );
     until("first task inside provider", || {
@@ -232,7 +232,7 @@ fi
     expect_code(
         &fx.run(
             fx.anix()
-                .args(["-c", "history", "case.anix", "--", "lock probe"]),
+                .args(["-c", "history", "case.agent", "--", "lock probe"]),
         ),
         1,
     );
@@ -247,7 +247,7 @@ fi
     expect_code(
         &fx.run(
             fx.anix()
-                .args(["-c", "history", "case.anix", "--", "after idle exit"]),
+                .args(["-c", "history", "case.agent", "--", "after idle exit"]),
         ),
         0,
     );
@@ -265,7 +265,7 @@ fi
 fn oneshot_nonzero_after_done_discards_uncommitted_calls_and_preserves_later_jobs() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "queue prompt").unwrap();
+    fs::write(root.join("case.agent"), "queue prompt").unwrap();
     for dir in ["tmp", "new"] {
         fs::create_dir_all(root.join("mail").join(dir)).unwrap();
     }
@@ -296,7 +296,7 @@ fn oneshot_nonzero_after_done_discards_uncommitted_calls_and_preserves_later_job
         "1",
         "-c",
         "history",
-        "case.anix",
+        "case.agent",
     ]));
     expect_code(&out, 1);
     assert!(String::from_utf8_lossy(&out.stderr).contains("failure after done"));
@@ -318,7 +318,7 @@ fn oneshot_nonzero_after_done_discards_uncommitted_calls_and_preserves_later_job
     expect_code(
         &fx.run(
             fx.anix()
-                .args(["-c", "history", "case.anix", "--", "reopen"]),
+                .args(["-c", "history", "case.agent", "--", "reopen"]),
         ),
         0,
     );
@@ -340,7 +340,7 @@ fn an_idle_inbox_sleeps_without_periodic_wakeups_then_consumes_a_publication() {
 
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "idle test").unwrap();
+    fs::write(root.join("case.agent"), "idle test").unwrap();
     // Keep sun_path short even when the build runs under a long TMPDIR.
     let run = super::TempDir::under(Path::new("/tmp"));
     let journal = run.0.join("anix");
@@ -350,7 +350,7 @@ fn an_idle_inbox_sleeps_without_periodic_wakeups_then_consumes_a_publication() {
     let mut agent = Agent(
         fx.anix()
             .env("XDG_RUNTIME_DIR", &run.0)
-            .args(["-q", "--inbox", "mail", "--idle-timeout", "0", "case.anix"])
+            .args(["-q", "--inbox", "mail", "--idle-timeout", "0", "case.agent"])
             .stderr(Stdio::null())
             .stdout(Stdio::null())
             .spawn()

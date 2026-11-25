@@ -17,7 +17,7 @@ fn events_distinguish_tool_approval_from_execution_and_record_an_applied_fold() 
     for policy in ["auto", "deny"] {
         let fx = Fixture::new();
         let root = &fx.dir.0;
-        fs::write(root.join("case.anix"), "trace fixture").unwrap();
+        fs::write(root.join("case.agent"), "trace fixture").unwrap();
         scripted_provider(
             &fx,
             &[
@@ -32,7 +32,7 @@ fn events_distinguish_tool_approval_from_execution_and_record_an_applied_fold() 
             ],
         );
         let out = fx.run(fx.command_for("/bin/sh").env("ANIX_TRACE_LEVEL", "events").args([
-            "-c", r#"exec "$1" -q --trace-fd=3 --approval "$2" --shell /bin/sh -c history case.anix -- go 3>trace"#,
+            "-c", r#"exec "$1" -q --trace-fd=3 --approval "$2" --shell /bin/sh -c history case.agent -- go 3>trace"#,
             "fixture", env!("CARGO_BIN_EXE_anix"), policy,
         ]));
         expect_code(&out, 0);
@@ -73,7 +73,7 @@ fn events_distinguish_tool_approval_from_execution_and_record_an_applied_fold() 
 
 fn fixture() -> Fixture {
     let fx = Fixture::new();
-    fs::write(fx.dir.0.join("case.anix"), PROMPT).unwrap();
+    fs::write(fx.dir.0.join("case.agent"), PROMPT).unwrap();
     scripted_provider(
         &fx,
         &[vec![
@@ -158,7 +158,7 @@ fn explicit_fd_separates_events_deltas_and_wire_and_omits_provider_key() {
         let mut cmd = fx.command_for("/bin/sh");
         cmd.args([
             "-c",
-            r#"exec "$1" -q --trace-fd=3 case.anix -- input 3>trace"#,
+            r#"exec "$1" -q --trace-fd=3 case.agent -- input 3>trace"#,
             "fixture",
             env!("CARGO_BIN_EXE_anix"),
         ])
@@ -212,7 +212,7 @@ fn journal_without_an_explicit_fd_receives_lifecycle_events_and_no_wire_records(
             .env("TRACE_FIXTURE_KEY", KEY)
             .args([
                 "-c",
-                r#"exec "$1" -q case.anix -- input 3</dev/null"#,
+                r#"exec "$1" -q case.agent -- input 3</dev/null"#,
                 "fixture",
                 env!("CARGO_BIN_EXE_anix"),
             ]);
@@ -240,7 +240,7 @@ fn disconnected_trace_recipient_does_not_change_payload_stderr_or_exit_status() 
     use std::process::Stdio;
     for connected_at_launch in [true, false] {
         let fx = Fixture::new();
-        fs::write(fx.dir.0.join("case.anix"), "trace disconnect fixture").unwrap();
+        fs::write(fx.dir.0.join("case.agent"), "trace disconnect fixture").unwrap();
         scripted_provider(
             &fx,
             &[
@@ -257,7 +257,7 @@ fn disconnected_trace_recipient_does_not_change_payload_stderr_or_exit_status() 
         let mut cmd = fx.command_for("/bin/sh");
         cmd.stdin(Stdio::from(OwnedFd::from(writer))).args([
             "-c",
-            r#"exec 3<&0; exec "$1" -q -y --shell /bin/sh --trace-fd=3 case.anix -- go </dev/null"#,
+            r#"exec 3<&0; exec "$1" -q -y --shell /bin/sh --trace-fd=3 case.agent -- go </dev/null"#,
             "fixture",
             env!("CARGO_BIN_EXE_anix"),
         ]);
@@ -299,7 +299,7 @@ fn explicit_trace_fd_takes_precedence_over_an_available_journal() {
         .env("ANIX_TRACE_LEVEL", "events")
         .args([
             "-c",
-            r#"exec "$1" -q case.anix -- hello 8>trace"#,
+            r#"exec "$1" -q case.agent -- hello 8>trace"#,
             "fixture",
             env!("CARGO_BIN_EXE_anix"),
         ]);

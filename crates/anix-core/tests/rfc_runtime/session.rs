@@ -22,7 +22,7 @@ fn launch(fx: &Fixture, context: Option<&str>) -> Value {
     if let Some(wal) = context {
         cmd.args(["-c", wal]);
     }
-    expect_code(&fx.run(cmd.args(["case.anix", "--", "hi"])), 0);
+    expect_code(&fx.run(cmd.args(["case.agent", "--", "hi"])), 0);
     let run = jsonl(&fx.dir.0.join("trace"))
         .into_iter()
         .find(|e| e["type"] == "run_start")
@@ -49,7 +49,7 @@ fn assert_uuid_v4(sid: &str) {
 
 fn oneshot_fixture(replies: &[Vec<Value>]) -> Fixture {
     let fx = Fixture::new();
-    fs::write(fx.dir.0.join("case.anix"), "session fixture").unwrap();
+    fs::write(fx.dir.0.join("case.agent"), "session fixture").unwrap();
     scripted_provider(&fx, replies);
     let provider = fx.dir.0.join("record-provider");
     fs::rename(&provider, fx.dir.0.join("scripted-provider")).unwrap();
@@ -74,7 +74,7 @@ done
 fn coprocess_fixture(provider_script: &str) -> Fixture {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "session fixture").unwrap();
+    fs::write(root.join("case.agent"), "session fixture").unwrap();
     let config = root.join("config/anix/config.toml");
     fs::write(
         &config,
@@ -223,14 +223,14 @@ fn latest_checkpoint_supplies_exact_stored_id_to_trace_env_and_coprocess_envelop
 #[test]
 fn nested_anix_gets_its_own_id_and_the_parent_resumes_with_its_original_id() {
     let command =
-        r#""$HOME/anix" -q --trace-fd=8 --provider inner child.anix -- nested 8>inner-trace"#;
+        r#""$HOME/anix" -q --trace-fd=8 --provider inner child.agent -- nested 8>inner-trace"#;
     let fx = oneshot_fixture(&[
         with_tools([tool("child", command)]),
         success_text("parent complete"),
     ]);
     let root = &fx.dir.0;
     symlink(env!("CARGO_BIN_EXE_anix"), root.join("anix")).unwrap();
-    fs::write(root.join("child.anix"), "child prompt").unwrap();
+    fs::write(root.join("child.agent"), "child prompt").unwrap();
     let config = root.join("config/anix/config.toml");
     fs::write(
         &config,
@@ -282,7 +282,7 @@ fn inbox_keeps_one_session_id_for_both_messages_in_a_single_coprocess() {
         super::inbox::publish(root, name, name);
     }
     expect_code(&fx.run(fx.command_for("/bin/sh").args([
-        "-c",r#"exec "$1" -q --trace-fd=3 --inbox mail --idle-timeout 1 -c history case.anix 3>trace"#,
+        "-c",r#"exec "$1" -q --trace-fd=3 --inbox mail --idle-timeout 1 -c history case.agent 3>trace"#,
         "fixture",env!("CARGO_BIN_EXE_anix")])), 0);
     let trace = jsonl(&root.join("trace"));
     let start = trace.iter().find(|r| r["type"] == "run_start").unwrap();
@@ -358,7 +358,11 @@ fn empty_context_overrides_a_saved_wal_and_keeps_one_ephemeral_id_through_compac
         success_text("resumed saved"),
     ]);
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "---\ncontext: saved.wal\n---\nbody").unwrap();
+    fs::write(
+        root.join("case.agent"),
+        "---\ncontext: saved.wal\n---\nbody",
+    )
+    .unwrap();
     let saved = launch(&fx, None);
     let saved_id = session_id(&saved);
     let original = fs::read(root.join("saved.wal")).unwrap();

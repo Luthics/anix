@@ -46,7 +46,7 @@ class ApprovalFixture:
             "[defaults]\nmodel='local-model'\nprovider='fixture'\n"
             "[providers.fixture]\nbin='provider'\nmode='oneshot'\ntimeout_sec=8\n"
             "[approval]\n" + approval_settings)
-        (root / "case.anix").write_text("---\nname: approval-fixture\n---\nLocal fixture")
+        (root / "case.agent").write_text("---\nname: approval-fixture\n---\nLocal fixture")
         executable(root / "provider", """#!/bin/sh
 set -eu
 n=0
@@ -72,7 +72,7 @@ printf '%s\\n' "$n" > count
 
     def argv(self, options):
         return [str(BUILD / "anix"), "-q", "--shell", "/bin/sh", "--trace-fd=7", "-c", "history",
-                *options, "case.anix"]
+                *options, "case.agent"]
 
     def detached(self, *options):
         return subprocess.run(["/bin/sh", "-c", 'exec "$@" 7>trace', "fixture", *self.argv(options)],

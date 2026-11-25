@@ -58,12 +58,12 @@ fn every_partial_byte_write_of_a_final_record_fails_without_modifying_history() 
 #[test]
 fn resuming_a_complete_last_object_without_lf_never_joins_two_wal_records() {
     let fx = Fixture::new();
-    fs::write(fx.dir.0.join("case.anix"), "fixture").unwrap();
+    fs::write(fx.dir.0.join("case.agent"), "fixture").unwrap();
     let history = fx.dir.0.join("history");
     let run = |message: &str| {
         fx.run(
             fx.anix()
-                .args(["-q", "-c", "history", "case.anix", "--", message]),
+                .args(["-q", "-c", "history", "case.agent", "--", message]),
         )
     };
     expect_code(&run("seed"), 0);
@@ -179,12 +179,12 @@ fn cli_rejects_corrupted_tails_and_unknown_section_versions_before_inference() {
     ] {
         let fx = Fixture::new();
         let root = &fx.dir.0;
-        fs::write(root.join("case.anix"), "body").unwrap();
+        fs::write(root.join("case.agent"), "body").unwrap();
         let mut input = lines(&[section(kind, 0, version), msg("system", 0, "frozen")]);
         input.extend_from_slice(suffix);
         let path = root.join("history");
         fs::write(&path, &input).unwrap();
-        let output = fx.run(fx.anix().args(["-c", "history", "case.anix", "--", "go"]));
+        let output = fx.run(fx.anix().args(["-c", "history", "case.agent", "--", "go"]));
         expect_code(&output, code);
         assert!(output.stdout.is_empty() && !output.stderr.is_empty() && !fx.capture.exists());
         assert_eq!(fs::read(path).unwrap(), input);
@@ -196,10 +196,10 @@ fn cli_rejects_corrupted_tails_and_unknown_section_versions_before_inference() {
 fn nonblocking_wal_lock_excludes_second_process_and_is_released_on_close() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "body").unwrap();
+    fs::write(root.join("case.agent"), "body").unwrap();
     let path = root.join("history");
     let held = WalStore::open(&path).unwrap();
-    let args = ["-c", "history", "case.anix", "--", "go"];
+    let args = ["-c", "history", "case.agent", "--", "go"];
     let refused = fx.run(fx.anix().args(args));
     expect_code(&refused, 1);
     assert!(refused.stdout.is_empty() && !refused.stderr.is_empty());
@@ -215,11 +215,11 @@ fn nonblocking_wal_lock_excludes_second_process_and_is_released_on_close() {
 fn resumed_session_reuses_frozen_prefix_and_appends_configuration_drift_once() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    let script = root.join("case.anix");
+    let script = root.join("case.agent");
     fs::write(&script, "first instruction").unwrap();
     let wal = root.join("history");
     expect_code(
-        &fx.run(fx.anix().args(["-c", "history", "case.anix", "--", "one"])),
+        &fx.run(fx.anix().args(["-c", "history", "case.agent", "--", "one"])),
         0,
     );
     let original = fs::read(&wal).unwrap();
@@ -229,7 +229,7 @@ fn resumed_session_reuses_frozen_prefix_and_appends_configuration_drift_once() {
         expect_code(
             &fx.run(
                 fx.anix()
-                    .args(["-q", "-c", "history", "case.anix", "--", label]),
+                    .args(["-q", "-c", "history", "case.agent", "--", label]),
             ),
             0,
         );
@@ -396,7 +396,7 @@ fn all_live_anchors_across_three_successive_folds_match_forward_replay_and_usage
 fn running_out_of_uint64_turn_ids_never_reuses_a_committed_anchor() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "fixture").unwrap();
+    fs::write(root.join("case.agent"), "fixture").unwrap();
     let history = root.join("history");
     let start = u64::MAX - 4;
     let prefix = lines(&[
@@ -406,7 +406,7 @@ fn running_out_of_uint64_turn_ids_never_reuses_a_committed_anchor() {
         msg("assistant", start + 2, "old answer"),
     ]);
     fs::write(&history, &prefix).unwrap();
-    let run = |text: &str| fx.run(fx.anix().args(["-c", "history", "case.anix", "--", text]));
+    let run = |text: &str| fx.run(fx.anix().args(["-c", "history", "case.agent", "--", text]));
     // Exactly two IDs remain for a normal user/assistant exchange.
     expect_code(&run("last pair"), 0);
     let before = fs::read(&history).unwrap();
@@ -451,13 +451,13 @@ fn checkpoint_recovery_only_dispatches_a_complete_context_at_each_record_boundar
     for committed in 0..=new.len() {
         let fx = Fixture::new();
         let root = &fx.dir.0;
-        fs::write(root.join("case.anix"), "current script").unwrap();
+        fs::write(root.join("case.agent"), "current script").unwrap();
         let history = root.join("history");
         let before = [lines(&old), lines(&new[..committed])].concat();
         fs::write(&history, &before).unwrap();
         let out = fx.run(
             fx.anix()
-                .args(["-c", "history", "case.anix", "--", "resume"]),
+                .args(["-c", "history", "case.agent", "--", "resume"]),
         );
         assert!(fs::read(&history).unwrap().starts_with(&before));
         if committed == 0 || committed == new.len() {
@@ -521,7 +521,7 @@ fn initial_section_interruption_never_dispatches_without_a_frozen_system_message
     for committed in [2, 0, 1] {
         let fx = Fixture::new();
         let root = &fx.dir.0;
-        fs::write(root.join("case.anix"), "script on restart").unwrap();
+        fs::write(root.join("case.agent"), "script on restart").unwrap();
         let history = root.join("history");
         let prefix = lines(&initial[..committed]);
         fs::write(&history, &prefix).unwrap();
@@ -532,7 +532,7 @@ fn initial_section_interruption_never_dispatches_without_a_frozen_system_message
             "auto",
             "--approval",
             "ask",
-            "case.anix",
+            "case.agent",
             "--",
             "resume",
         ]));
@@ -579,7 +579,7 @@ fn resume_uses_the_last_surviving_assistant_usage_for_the_hard_limit() {
     ] {
         let fx = Fixture::new();
         let history = fx.dir.0.join("history");
-        fs::write(fx.dir.0.join("case.anix"), "prompt").unwrap();
+        fs::write(fx.dir.0.join("case.agent"), "prompt").unwrap();
         let mut rows = vec![
             section("session_init", 0, 1),
             msg("system", 0, "frozen"),
@@ -608,7 +608,7 @@ fn resume_uses_the_last_surviving_assistant_usage_for_the_hard_limit() {
             "ask",
             "-c",
             "history",
-            "case.anix",
+            "case.agent",
             "--",
             "next",
         ]));
@@ -637,7 +637,7 @@ fn each_combination_of_stderr_approval_and_vision_drift_creates_one_tail_update(
         for changed in 0..8 {
             let fx = Fixture::new();
             let root = &fx.dir.0;
-            fs::write(root.join("case.anix"), "different script on disk").unwrap();
+            fs::write(root.join("case.agent"), "different script on disk").unwrap();
             let wal = root.join("history");
             let frozen = "  不变\r\nsystem 🦀  ";
             let previous = json!({"stderr":"explicit", "approval":"deny", "vision":false});
@@ -672,7 +672,7 @@ fn each_combination_of_stderr_approval_and_vision_drift_creates_one_tail_update(
                     "--approval",
                     approval,
                     vision,
-                    "case.anix",
+                    "case.agent",
                     "--",
                     label,
                 ]));

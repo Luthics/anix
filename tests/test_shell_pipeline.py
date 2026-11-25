@@ -47,7 +47,7 @@ else
 fi
 """)
         self.provider.chmod(0o700)
-        (self.root / "case.anix").write_text("tool fixture")
+        (self.root / "case.agent").write_text("tool fixture")
         self.env = {"HOME": str(self.root), "PATH": "/bin:/usr/bin",
                     "XDG_CONFIG_HOME": str(self.root / "config"), "XDG_RUNTIME_DIR": str(self.root / "run")}
 
@@ -58,7 +58,7 @@ fi
         args = [str(self.anix), "-q", *approval_opts]
         if shell:
             args += ["--shell", shell]
-        args += ["case.anix", "--", "go"]
+        args += ["case.agent", "--", "go"]
         result = subprocess.run(args,
                                 cwd=self.root, env={**self.env, **(extra_env or {})},
                                 stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
@@ -105,7 +105,7 @@ fi
                 (self.root / "first.ir").unlink(missing_ok=True)
                 (self.root / "second.ir").unlink(missing_ok=True)
                 wal = self.root / f"{size}.wal"
-                run = subprocess.run([self.anix, "-q", "-y", "-c", wal, "case.anix", "--", "go"],
+                run = subprocess.run([self.anix, "-q", "-y", "-c", wal, "case.agent", "--", "go"],
                                      cwd=self.root, env=self.env, stdin=subprocess.DEVNULL,
                                      capture_output=True, timeout=10)
                 rows = [json.loads(line) for line in wal.read_bytes().splitlines()]
@@ -130,7 +130,7 @@ fi
                 signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
                 resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
 
-            return subprocess.run([self.anix, "-q", "-c", wal, "case.anix", "--", message],
+            return subprocess.run([self.anix, "-q", "-c", wal, "case.agent", "--", message],
                                   cwd=self.root, env=self.env, stdin=subprocess.DEVNULL,
                                   capture_output=True, timeout=15,
                                   preexec_fn=None if limit is None else limit_file_growth)
@@ -201,7 +201,7 @@ printf '%s\\n' '{"type":"text_delta","text":"ok"}' '{"type":"done","finish_reaso
                                {**header, "type": "checkpoint", "turn_id": 3}, message("system", 3, "active prefix"),
                                message("user", 4, summary)]:
                     writer.write(line(record))
-            run = subprocess.run([self.anix, "-q", "-c", wal, "case.anix", "--", "resume"],
+            run = subprocess.run([self.anix, "-q", "-c", wal, "case.agent", "--", "resume"],
                                  cwd=self.root, env=self.env, stdin=subprocess.DEVNULL,
                                  capture_output=True, timeout=20)
             self.assertEqual(run.returncode, 0, run.stderr)
@@ -246,7 +246,7 @@ else:
     print(json.dumps({"type":"text_delta","text":"finished"}))
     print(json.dumps({"type":"done","finish_reason":"stop"}))
 ''')
-        run = subprocess.run([self.anix, "-q", "-y", "case.anix", "--", "go"], cwd=self.root,
+        run = subprocess.run([self.anix, "-q", "-y", "case.agent", "--", "go"], cwd=self.root,
                              stdin=subprocess.DEVNULL, capture_output=True, timeout=15,
                              env={**self.env, "FIXTURE_PYTHON": sys.executable})
         self.assertEqual(run.returncode, 0, run.stderr)
@@ -265,7 +265,7 @@ else:
         # fd 0 carries the pipe into the launcher, which gives it the actual
         # requested number without touching descriptors in the test runner.
         redirect = "" if fd == 0 else f"exec {fd}<&0; exec </dev/null; "
-        argv = ["/bin/sh", "-c", redirect + 'exec "$@"', "fixture", self.anix, "-q", "case.anix", *args]
+        argv = ["/bin/sh", "-c", redirect + 'exec "$@"', "fixture", self.anix, "-q", "case.agent", *args]
         with ExitStack() as stack:
             read_fd, write_fd = os.pipe()
             reader = stack.enter_context(os.fdopen(read_fd, "rb", buffering=0))
@@ -330,7 +330,7 @@ else:
                 self.assertFalse((self.root / "first.ir").exists())
 
     # RFC v1.1.1 §7.1, §6.4
-    def test_msh_timeout_signals_the_whole_group_and_grants_three_seconds_before_kill(self):
+    def test_msh_timeout_signals_the_whole_group_and_grants_two_seconds_before_kill(self):
         # Both witnesses keep a FIFO writer open until they actually exit. EOF
         # observes the last descendant's exit, including after its parent dies.
         (self.root / "witness.py").write_text(
@@ -351,7 +351,7 @@ else:
             started = time.monotonic()
             out = subprocess.run([self.libexec / "msh", "-c", 'exec "$WITNESS" witness.py leader'],
                                  cwd=self.root, stdin=subprocess.DEVNULL, capture_output=True, timeout=12,
-                                 env={**self.env, "MSH_TIMEOUT_SEC": "2", "WITNESS": sys.executable})
+                                 env={**self.env, "MSH_TIMEOUT_SEC": "2", "MSH_KILL_ON_TIMEOUT": "1", "WITNESS": sys.executable})
             finished = time.monotonic()
             self.assertEqual(out.returncode, 124, out)
             self.assertRegex((out.stdout + out.stderr).lower(), rb"timeout|timed out")
@@ -364,8 +364,8 @@ else:
                           for role in ("leader", "worker")}
             self.assertTrue(select.select([reader], [], [], 1)[0], "a group member still holds the FIFO")
             self.assertEqual(reader.read(1), b"")
-            self.assertGreaterEqual(finished - started, 5 - .05,
-                                    f"2 s timeout + 3 s grace; seconds after TERM: {since_term}")
+            self.assertGreaterEqual(finished - started, 4 - .05,
+                                    f"2 s timeout + 2 s grace; seconds after TERM: {since_term}")
 
     # RFC v1.1.1 §6.2, §6.4, §6.5, §9.1
     def test_interrupting_a_live_msh_discards_its_partial_result_and_replays_a_closed_history(self):
@@ -388,7 +388,7 @@ time.sleep(12)
                 for name in ("first.ir", "second.ir", "tool-ready", "observed-signal"):
                     (self.root / name).unlink(missing_ok=True)
                 wal = self.root / (sig.name + ".wal")
-                args = [self.anix, "-q", "-y", "-c", wal, "case.anix", "--"]
+                args = [self.anix, "-q", "-y", "-c", wal, "case.agent", "--"]
                 with subprocess.Popen([*args, "before"], cwd=self.root, stdin=subprocess.DEVNULL,
                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                       env={**self.env, "WITNESS": sys.executable}) as child:
@@ -445,7 +445,7 @@ for name, channel in (("output","ANIX_OUT"), ("diagnostic","ANIX_ERR")):
         events = [{"type":"tool_call", "id":"relay", "name":"msh", "arguments":{"cmd":cmd}},
                   {"type":"done", "finish_reason":"tool_calls"}]
         (self.root / "first.reply").write_text("".join(json.dumps(e) + "\n" for e in events))
-        out = subprocess.run([self.anix, "-y", "-q", "case.anix", "--", "go"], cwd=self.root,
+        out = subprocess.run([self.anix, "-y", "-q", "case.agent", "--", "go"], cwd=self.root,
                              stdin=subprocess.DEVNULL, capture_output=True, timeout=20,
                              env={**self.env, "FIXTURE_PYTHON": sys.executable})
         self.assertEqual(out.returncode, 0, out.stderr[-160:])
@@ -502,7 +502,7 @@ for name, channel in (("output","ANIX_OUT"), ("diagnostic","ANIX_ERR")):
                         (self.root / "first.ir").unlink(missing_ok=True)
                         out, read_out = channel(stack, out_tty)
                         err, read_err = channel(stack, err_tty)
-                        result = subprocess.run([self.anix, "-y", "--stderr", mode, "case.anix", "--", "go"],
+                        result = subprocess.run([self.anix, "-y", "--stderr", mode, "case.agent", "--", "go"],
                                                 cwd=self.root, env=self.env, stdout=out, stderr=err,
                                                 stdin=subprocess.DEVNULL, timeout=20)
                         payload, diagnostic = read_out(), read_err()
@@ -547,9 +547,9 @@ for name, channel in (("output","ANIX_OUT"), ("diagnostic","ANIX_ERR")):
         launcher_dir = self.root / "bin"
         launcher_dir.mkdir()
         launch = launcher_dir / "start-child"
-        launch.write_text('#!/bin/sh\nexec "$TEST_ANIX_BINARY" child.anix -- subtask\n')
+        launch.write_text('#!/bin/sh\nexec "$TEST_ANIX_BINARY" child.agent -- subtask\n')
         launch.chmod(0o700)
-        self.root.joinpath("child.anix").write_text(
+        self.root.joinpath("child.agent").write_text(
             f"---\nprovider: inner\nmodel: child-model\napproval: {child_policy}\n"
             "stderr: explicit\ncontext: child.wal\nmax_turns: 5\n---\nchild instructions")
         inner = self.libexec / "inner-provider"

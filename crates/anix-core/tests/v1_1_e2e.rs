@@ -1024,6 +1024,7 @@ timeout_sec = 30
     let _ = fs::remove_dir_all(&root);
 }
 
+// RFC v1.1.2 §6.3, §6.5, §7.1, §7.2, §8.2, §9.1, §9.5
 #[test]
 fn test_v1_1_2_msh_per_call_timeout_yield_bg_notification_and_kill_on_timeout() {
     let root = make_temp_env("msh-bg-v112");

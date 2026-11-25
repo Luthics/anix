@@ -11,7 +11,7 @@ fn run(fx: &Fixture) {
         "/bin/sh",
         "-c",
         "history",
-        "case.anix",
+        "case.agent",
         "--",
         "go",
     ]));
@@ -24,7 +24,7 @@ fn run(fx: &Fixture) {
 fn concatenated_and_split_media_frames_keep_order_and_tool_identity_after_resume() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "frozen").unwrap();
+    fs::write(root.join("case.agent"), "frozen").unwrap();
     let images: Vec<_> = ["left.gif", "中.gif", "right.gif"]
         .iter()
         .map(|name| {
@@ -102,7 +102,7 @@ fn two_valid_fold_frames_from_one_tool_are_appended_in_arrival_order() {
     ] {
         let fx = Fixture::new();
         let root = &fx.dir.0;
-        fs::write(root.join("case.anix"), "frozen").unwrap();
+        fs::write(root.join("case.agent"), "frozen").unwrap();
         let mut input = Vec::new();
         for frame in frames {
             serde_json::to_writer(&mut input, frame).unwrap();

@@ -56,8 +56,8 @@ class StreamingResponse(JsonRequest):
         self.event({"type": "response.completed", "response": {"usage": {"input_tokens": 8, "output_tokens": 3}}})
         self.wfile.write(b"0\r\n\r\n")
 
-    def msh_call(self, cmd, fragment_delay=0):
-        arguments = json.dumps({"cmd": cmd})
+    def msh_call(self, cmd, fragment_delay=0, **options):
+        arguments = json.dumps({"cmd": cmd, **options})
         item = {"type": "function_call", "id": "item1", "call_id": "call1", "name": "msh"}
         self.event({"type": "response.output_item.added", "output_index": 0,
                     "item": {**item, "arguments": ""}})
@@ -83,7 +83,7 @@ class ProviderStreaming(unittest.TestCase):
         (self.bin_dir / "anix").symlink_to(build / "anix")
         (libexec / "msh").symlink_to(build / "msh")
         (libexec / "anix-provider-openai-responses").symlink_to(build / "anix-provider")
-        (self.root / "case.anix").write_text("stream fixture")
+        (self.root / "case.agent").write_text("stream fixture")
         (self.root / "trace").touch(mode=0o600)
 
     def rows(self, name):
@@ -170,7 +170,7 @@ class ProviderStreaming(unittest.TestCase):
                 f"base_url='http://127.0.0.1:{http.server_port}/v1'\n"
                 f"api_key_env=''\napi_key='fixture'\ntimeout_sec={provider_timeout}\n")
             args = ["/bin/sh", "-c", 'exec "$@" 7>trace', "fixture", self.bin_dir / "anix",
-                    "--trace-fd=7", "-q", "-c", "history", *options, "case.anix", "--", "input"]
+                    "--trace-fd=7", "-q", "-c", "history", *options, "case.agent", "--", "input"]
             env = {"HOME": str(self.root), "PATH": f"{self.bin_dir}:/bin:/usr/bin",
                    "XDG_RUNTIME_DIR": str(self.root / "run"), "ANIX_TRACE_LEVEL": level}
             if msh_timeout is not None:
@@ -262,7 +262,7 @@ class ProviderStreaming(unittest.TestCase):
     def test_msh_timeout_is_delivered_to_the_next_provider_turn_as_a_tool_error(self):
         def request_tool(peer):
             peer.begin_stream()
-            peer.msh_call("printf started > marker; exec /bin/sleep 20")
+            peer.msh_call("printf started > marker; exec /bin/sleep 20", kill_on_timeout=True)
             peer.finish_stream()
 
         def finish(peer):
@@ -443,8 +443,8 @@ class ProviderStreaming(unittest.TestCase):
     def test_executable_script_on_path_and_by_relative_name_obeys_tty_eof_rules(self):
         scripts = self.root / ".config/anix/agents"
         scripts.mkdir(parents=True)
-        example = Path(__file__).resolve().parents[1] / "examples/bash.anix"
-        installed = scripts / "bash.anix"
+        example = Path(__file__).resolve().parents[1] / "examples/bash.agent"
+        installed = scripts / "bash.agent"
         installed.write_bytes(example.read_bytes())
         installed.chmod(0o700)
         config = scripts.parent / "config.toml"
@@ -455,10 +455,10 @@ class ProviderStreaming(unittest.TestCase):
 printf '%s\\n' '{"type":"text_delta","text":"fixture reply"}' '{"type":"done","finish_reason":"stop"}'
 """)
         provider.chmod(0o700)
-        (self.root / "bash.anix").symlink_to(installed)
+        (self.root / "bash.agent").symlink_to(installed)
         env = {"HOME": str(self.root), "PATH": f"{scripts}:{self.bin_dir}:/usr/bin:/bin",
                "XDG_RUNTIME_DIR": str(self.root / "run")}
-        for program in ("bash.anix", "./bash.anix"):
+        for program in ("bash.agent", "./bash.agent"):
             for args in (["xxx"], []):
                 with self.subTest(program=program, args=args):
                     request = self.root / "request"
@@ -491,8 +491,8 @@ printf '%s\\n' '{"type":"text_delta","text":"fixture reply"}' '{"type":"done","f
 
     # RFC v1.1 §3.1, §4.1, §6.4, §6.5, §9.2, §9.5
     def test_keyboard_interrupt_returns_to_the_same_shell_while_waiting_for_provider(self):
-        example = Path(__file__).resolve().parents[1] / "examples/bash.anix"
-        (self.root / "bash.anix").symlink_to(example)
+        example = Path(__file__).resolve().parents[1] / "examples/bash.agent"
+        (self.root / "bash.agent").symlink_to(example)
         config = self.root / ".config/anix"
         config.mkdir(parents=True)
         prompt = b"RFC-ready> "
@@ -515,7 +515,7 @@ printf '%s\\n' '{"type":"text_delta","text":"fixture reply"}' '{"type":"done","f
                     read_until(master, prompt)
                     for pipeline in (False, True):
                         with self.subTest(pipeline=pipeline):
-                            cmd = b'./bash.anix --trace-fd=7 "xxx" 7>trace'
+                            cmd = b'./bash.agent --trace-fd=7 "xxx" 7>trace'
                             os.write(master, cmd + (b" | cat" if pipeline else b"") + b"\n")
 
                             def interrupt(peer):
@@ -548,7 +548,7 @@ printf '%s\\n' '{"type":"text_delta","text":"fixture reply"}' '{"type":"done","f
 
     # RFC v1.1 §4.1, §6.3, §6.4, §6.5, §9.2, §9.5
     def test_keyboard_interrupt_reaches_a_provider_that_closed_stdout_before_exit(self):
-        (self.root / "bash.anix").symlink_to(Path(__file__).resolve().parents[1] / "examples/bash.anix")
+        (self.root / "bash.agent").symlink_to(Path(__file__).resolve().parents[1] / "examples/bash.agent")
         config = self.root / ".config/anix"
         config.mkdir(parents=True)
         (config / "config.toml").write_text("[providers.openai-responses]\nbin='local-provider'\nmode='oneshot'\n")
@@ -570,7 +570,7 @@ printf finished > natural-exit
         with controlling_terminal(["/bin/bash", "--noprofile", "--norc", "-i"], self.root, env) as (master, _):
             os.write(master, b"PS1=$RFC_PROMPT\n")
             read_until(master, prompt)
-            os.write(master, b'./bash.anix --trace-fd=7 "xxx" 7>trace\n')
+            os.write(master, b'./bash.agent --trace-fd=7 "xxx" 7>trace\n')
             read_until(master, b"fixture-final")
             # Interrupt during child cleanup regardless of how anix formats
             # the final delta. Allow its pipe reader time to observe EOF.
@@ -610,7 +610,7 @@ printf '%s\\n' '{"type":"text_delta","text":"unfinished reply"}'
         env = {"HOME": str(self.root), "PATH": f"{self.bin_dir}:/bin:/usr/bin",
                "XDG_RUNTIME_DIR": str(self.root / "run"), "ANIX_TRACE_LEVEL": "deltas"}
         args = ["/bin/sh", "-c", 'exec "$@" 7>trace 2>diagnostics', "inbox-test", self.bin_dir / "anix",
-                "--inbox", "queue", "--idle-timeout=0", "--trace-fd=7", "-c", "history", "case.anix"]
+                "--inbox", "queue", "--idle-timeout=0", "--trace-fd=7", "-c", "history", "case.agent"]
 
         def wait_for(description, predicate):
             deadline = time.monotonic() + 8

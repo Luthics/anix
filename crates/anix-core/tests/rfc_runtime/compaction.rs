@@ -42,7 +42,7 @@ fn each_subset_of_optional_usage_details_preserves_inclusive_totals_through_exit
         let fx = Fixture::new();
         let root = &fx.dir.0;
         hook(&fx);
-        fs::write(root.join("case.anix"), "usage fixture").unwrap();
+        fs::write(root.join("case.agent"), "usage fixture").unwrap();
         let mut event = json!({"type":"usage","input_tokens":input,"output_tokens":output});
         let mut expected = counts(input, output, 0, 0, 0);
         for (bit, (field, n)) in details.iter().copied().enumerate() {
@@ -61,7 +61,7 @@ fn each_subset_of_optional_usage_details_preserves_inclusive_totals_through_exit
         );
         let out = fx.run(fx.command_for("/bin/sh").args([
             "-c",
-            r#"exec "$1" --trace-fd=3 -q -c history case.anix -- go 3>trace"#,
+            r#"exec "$1" --trace-fd=3 -q -c history case.agent -- go 3>trace"#,
             "fixture",
             env!("CARGO_BIN_EXE_anix"),
         ]));
@@ -100,7 +100,7 @@ fn a_reported_zero_watermark_and_an_unreported_usage_use_different_budget_baseli
     for reported in [false, true] {
         let fx = Fixture::new();
         let root = &fx.dir.0;
-        fs::write(root.join("case.anix"), "frozen prefix").unwrap();
+        fs::write(root.join("case.agent"), "frozen prefix").unwrap();
         hook(&fx);
         let mut reply = success_text("finished");
         if reported {
@@ -113,7 +113,7 @@ fn a_reported_zero_watermark_and_an_unreported_usage_use_different_budget_baseli
         expect_code(
             &fx.run(
                 fx.anix()
-                    .args(["-q", "-c", "history", "case.anix", "--", "hello"]),
+                    .args(["-q", "-c", "history", "case.agent", "--", "hello"]),
             ),
             0,
         );
@@ -139,7 +139,7 @@ fn a_reported_zero_watermark_and_an_unreported_usage_use_different_budget_baseli
 fn retry_usage_counts_every_charged_attempt_without_inflating_the_final_watermark() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "body").unwrap();
+    fs::write(root.join("case.agent"), "body").unwrap();
     hook(&fx);
     let mut partial = counts(17, 7, 9, 3, 5);
     partial["type"] = json!("usage");
@@ -155,7 +155,7 @@ fn retry_usage_counts_every_charged_attempt_without_inflating_the_final_watermar
         fs::read_to_string(&provider).unwrap() + "\n[ \"$n\" -gt 1 ]\n",
     )
     .unwrap();
-    let cmd = r#"exec "$1" --trace-fd=3 -q -c history case.anix -- go 3>trace"#;
+    let cmd = r#"exec "$1" --trace-fd=3 -q -c history case.agent -- go 3>trace"#;
     let output =
         fx.run(
             fx.command_for("/bin/sh")
@@ -199,7 +199,7 @@ fn full_compaction_and_resume_account_for_every_call_without_inflating_watermark
     let fx = Fixture::new();
     let root = &fx.dir.0;
     hook(&fx);
-    fs::write(root.join("case.anix"), "frozen prompt").unwrap();
+    fs::write(root.join("case.agent"), "frozen prompt").unwrap();
     let first = counts(50, 20, 10, 5, 7);
     let summarize = counts(1230, 6000, 111, 22, 5000);
     let third = json!({"input_tokens":7,"output_tokens":3});
@@ -238,7 +238,7 @@ fn full_compaction_and_resume_account_for_every_call_without_inflating_watermark
             "history",
             "--stderr",
             mode,
-            "case.anix",
+            "case.agent",
             "--",
             "input",
         ]);
@@ -321,7 +321,7 @@ fn full_compaction_and_resume_account_for_every_call_without_inflating_watermark
 fn tail_fold_aligns_to_assistant_and_removes_the_triggering_tool_call() {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "frozen").unwrap();
+    fs::write(root.join("case.agent"), "frozen").unwrap();
     scripted_provider(
         &fx,
         &[
@@ -341,7 +341,7 @@ fn tail_fold_aligns_to_assistant_and_removes_the_triggering_tool_call() {
         "/bin/sh",
         "-c",
         "history",
-        "case.anix",
+        "case.agent",
         "--",
         "go",
     ];
@@ -380,7 +380,7 @@ fn external_compactor_receives_tool_free_ir_and_empty_or_failed_summary_is_fatal
     ] {
         let fx = Fixture::new();
         let root = &fx.dir.0;
-        fs::write(root.join("case.anix"), "prompt").unwrap();
+        fs::write(root.join("case.agent"), "prompt").unwrap();
         let conf = root.join("config/anix/config.toml");
         let original = fs::read_to_string(&conf).unwrap();
         fs::write(&conf, original + "\n[compact]\nbin='fixture-compact'\n").unwrap();
@@ -408,7 +408,7 @@ fn external_compactor_receives_tool_free_ir_and_empty_or_failed_summary_is_fatal
             "/bin/sh",
             "-c",
             "history",
-            "case.anix",
+            "case.agent",
             "--",
             "go",
         ]));
@@ -425,14 +425,14 @@ fn external_compactor_receives_tool_free_ir_and_empty_or_failed_summary_is_fatal
 fn initial_watermark(input: &str) -> u64 {
     let fx = Fixture::new();
     hook(&fx);
-    fs::write(fx.dir.0.join("case.anix"), "body").unwrap();
+    fs::write(fx.dir.0.join("case.agent"), "body").unwrap();
     fs::write(
         fx.dir.0.join("record-provider"),
         "#!/bin/sh\n/bin/cat >/dev/null\nexit 1\n",
     )
     .unwrap();
     expect_code(
-        &fx.run(fx.anix().args(["--no-compact", "case.anix", "--", input])),
+        &fx.run(fx.anix().args(["--no-compact", "case.agent", "--", input])),
         1,
     );
     exit_report(&fx)["context"]["tokens"].as_u64().unwrap()
@@ -462,13 +462,13 @@ fn hard_limit_allows_equality_and_blocks_the_first_provider_request_above_it() {
     assert!(watermark > 1024);
     for (limit, status) in [(watermark - 1, 124), (watermark, 0), (watermark + 1, 0)] {
         let fx = Fixture::new();
-        fs::write(fx.dir.0.join("case.anix"), "body").unwrap();
+        fs::write(fx.dir.0.join("case.agent"), "body").unwrap();
         let out = fx.run(fx.anix().args([
             "-q",
             "--no-compact",
             "--max-tokens",
             &limit.to_string(),
-            "case.anix",
+            "case.agent",
             "--",
             &input,
         ]));
@@ -496,7 +496,7 @@ fn auto_compaction_runs_before_inference_and_rechecks_the_new_window_against_the
     ] {
         let fx = Fixture::new();
         let root = &fx.dir.0;
-        fs::write(root.join("case.anix"), "body").unwrap();
+        fs::write(root.join("case.agent"), "body").unwrap();
         fs::write(root.join("summary"), summary).unwrap();
         let compact = root.join("compress");
         fs::write(
@@ -517,7 +517,7 @@ fn auto_compaction_runs_before_inference_and_rechecks_the_new_window_against_the
             "2048",
             "--compact-threshold",
             &threshold.to_string(),
-            "case.anix",
+            "case.agent",
             "--",
             &input,
         ]));
@@ -549,7 +549,7 @@ fn builtin_compactor_uses_configured_provider_model_and_literal_or_file_prompt()
     for from_file in [false, true] {
         let fx = Fixture::new();
         let root = &fx.dir.0;
-        fs::write(root.join("case.anix"), "regular prompt").unwrap();
+        fs::write(root.join("case.agent"), "regular prompt").unwrap();
         let conf = root.join("config/anix/config.toml");
         let prompt = "summarize only the fixture";
         let setting = if from_file {
@@ -585,7 +585,7 @@ printf '%s\n' '{"type":"text_delta","text":"local summary"}' '{"type":"done","fi
         expect_code(
             &fx.run(
                 fx.anix()
-                    .args(["-y", "--shell", "/bin/sh", "case.anix", "--", "go"]),
+                    .args(["-y", "--shell", "/bin/sh", "case.agent", "--", "go"]),
             ),
             0,
         );
@@ -628,7 +628,7 @@ fn two_checkpoints_carry_folded_usage_once_and_refresh_the_prefix_across_process
         ],
     );
     let run = |prompt: &str, mode: &str, input: &str, usage: Value, session: Value| {
-        fs::write(root.join("case.anix"), prompt).unwrap();
+        fs::write(root.join("case.agent"), prompt).unwrap();
         expect_code(
             &fx.run(fx.anix().args([
                 "-c",
@@ -639,7 +639,7 @@ fn two_checkpoints_carry_folded_usage_once_and_refresh_the_prefix_across_process
                 "/bin/sh",
                 "--stderr",
                 mode,
-                "case.anix",
+                "case.agent",
                 "--",
                 input,
             ])),
@@ -743,7 +743,7 @@ fn run_tail_turn(fx: &Fixture, input: &str) {
         "/bin/sh",
         "-c",
         "history",
-        "case.anix",
+        "case.agent",
         "--",
         input,
     ]));
@@ -762,7 +762,7 @@ struct TailFold {
 fn request_auto_fold(plugin_response: &str) -> TailFold {
     let fx = Fixture::new();
     let root = &fx.dir.0;
-    fs::write(root.join("case.anix"), "frozen prefix marker").unwrap();
+    fs::write(root.join("case.agent"), "frozen prefix marker").unwrap();
     let cfg = root.join("config/anix/config.toml");
     let settings = fs::read_to_string(&cfg).unwrap();
     fs::write(cfg, settings + "\n[compact]\nbin='local-summary'\n").unwrap();

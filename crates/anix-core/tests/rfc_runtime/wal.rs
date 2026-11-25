@@ -3,12 +3,15 @@ use serde_json::{Value, json};
 use std::fs;
 
 fn run(fixture: &Fixture, vision: &str, input: &str) -> Vec<Value> {
-    let result =
-        fixture.run(
-            fixture
-                .anix()
-                .args(["-q", "-c", "history", vision, "case.anix", "--", input]),
-        );
+    let result = fixture.run(fixture.anix().args([
+        "-q",
+        "-c",
+        "history",
+        vision,
+        "case.agent",
+        "--",
+        input,
+    ]));
     assert_eq!(
         result.status.code(),
         Some(0),
@@ -34,7 +37,7 @@ fn legacy_wal_without_vision_or_fold_usage_resumes_without_rewriting_the_prefix(
         "{\"type\":\"fold\",\"from_turn\":3,\"to_turn\":4,\"summary\":\"summary\",\"ts\":\"2026-01-01T00:00:06Z\"}\n",
     );
     fs::write(&history, old).unwrap();
-    fs::write(root.join("case.anix"), "new script text").unwrap();
+    fs::write(root.join("case.agent"), "new script text").unwrap();
     let ir = run(&fixture, "--vision", "resume");
     assert_eq!(
         ir[1],
@@ -60,10 +63,10 @@ fn repeated_resume_appends_one_vision_update_per_change_and_reuses_frozen_text()
     let fixture = Fixture::new();
     let root = &fixture.dir.0;
     let history = root.join("history");
-    fs::write(root.join("case.anix"), "frozen").unwrap();
+    fs::write(root.join("case.agent"), "frozen").unwrap();
     run(&fixture, "--no-vision", "first");
     assert_eq!(jsonl(&history)[0]["config"]["vision"], false);
-    fs::write(root.join("case.anix"), "later edit").unwrap();
+    fs::write(root.join("case.agent"), "later edit").unwrap();
     for (option, expected) in [
         ("--vision", vec![true]),
         ("--vision", vec![true]),

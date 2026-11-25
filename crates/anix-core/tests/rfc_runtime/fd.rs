@@ -4,7 +4,7 @@ use std::fs;
 use std::process::Output;
 
 fn run(fixture: &Fixture, redirections: &str, cli: Option<u8>, env: Option<u8>) -> Output {
-    fs::write(fixture.dir.0.join("case.anix"), "fixture script").unwrap();
+    fs::write(fixture.dir.0.join("case.agent"), "fixture script").unwrap();
     // Limit inherited descriptors to those each case explicitly sets up in its child.
     let shell = format!("exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-\nexec \"$@\" {redirections}");
     let mut cmd = fixture.command_for("/bin/sh");
@@ -15,7 +15,7 @@ fn run(fixture: &Fixture, redirections: &str, cli: Option<u8>, env: Option<u8>) 
     if let Some(fd) = env {
         cmd.env("ANIX_TRACE_FD", fd.to_string());
     }
-    fixture.run(cmd.args(["case.anix", "--", "first", "argument"]))
+    fixture.run(cmd.args(["case.agent", "--", "first", "argument"]))
 }
 
 fn assert_success(output: &Output) {

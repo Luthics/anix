@@ -267,6 +267,7 @@ fn timeout_reports_124_before_a_finite_longer_command_completes() {
     let start = Instant::now();
     let result = msh("exec /bin/sleep 20")
         .env("MSH_TIMEOUT_SEC", "1")
+        .env("MSH_KILL_ON_TIMEOUT", "1")
         .output()
         .unwrap();
     assert_eq!(result.status.code(), Some(124));
