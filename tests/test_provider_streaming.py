@@ -1,14 +1,76 @@
 """Exercise the real agent and Responses adapter against a paused loopback HTTP peer."""
+from contextlib import contextmanager
+import fcntl
 import json
 import os
 from pathlib import Path
+import pty
+import select
 import subprocess
 import tempfile
+import termios
 import time
 import unittest
 from http.server import HTTPServer
 
 from http_fixture import JsonRequest
+
+
+@contextmanager
+def interactive_shell(argv, cwd, env):
+    """Give job control and keyboard signals to a disposable shell."""
+    master, slave = pty.openpty()
+
+    def acquire_terminal():
+        os.setsid()
+        fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+    try:
+        shell = subprocess.Popen(argv, cwd=cwd, env=env, stdin=slave, stdout=slave,
+                                 stderr=slave, preexec_fn=acquire_terminal)
+        try:
+            yield master
+        finally:
+            # Closing the master also releases a shell exiting on Darwin.
+            os.close(master)
+            master = -1
+            try:
+                shell.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                shell.kill()
+                shell.wait(timeout=2)
+    finally:
+        os.close(slave)
+        if master >= 0:
+            os.close(master)
+
+
+def read_until(master, marker):
+    seen = bytearray()
+    deadline = time.monotonic() + 8
+    while marker not in seen:
+        timeout = deadline - time.monotonic()
+        if timeout <= 0 or not select.select([master], [], [], timeout)[0]:
+            raise AssertionError(f"timed out waiting for {marker!r}: {bytes(seen)!r}")
+        chunk = os.read(master, 8192)
+        if not chunk:
+            raise AssertionError(f"terminal closed before {marker!r}: {bytes(seen)!r}")
+        seen.extend(chunk)
+    return bytes(seen)
+
+
+def accept_request(http, master):
+    # A real terminal emulator drains the PTY even while the shell redraws
+    # the submitted line. Keep servicing it until the HTTP request arrives.
+    output = bytearray()
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        ready = select.select([http.socket, master], [], [], max(0, deadline - time.monotonic()))[0]
+        if http.socket in ready:
+            return http.get_request()
+        if master in ready:
+            output.extend(os.read(master, 8192))
+    raise AssertionError(f"provider never reached loopback peer: {bytes(output)!r}")
 
 
 class StreamingResponse(JsonRequest):
@@ -275,6 +337,103 @@ class ProviderStreaming(unittest.TestCase):
         self.assertEqual(requests[1:], [requests[0], requests[0]])
         self.assertEqual([r["text"] for r in self.rows("history") if r.get("role") == "assistant"], ["success"])
         self.assertFalse(any(r["type"] in ("text_delta", "reasoning_delta") for r in self.rows("trace")))
+
+
+    # RFC §3.1, §4.1, §6.3, §6.4, §9.5
+    def test_keyboard_interrupt_returns_to_the_same_shell_while_waiting_for_provider(self):
+        example = Path(__file__).resolve().parents[1] / "examples/bash.agent"
+        (self.root / "bash.agent").symlink_to(example)
+        config = self.root / ".config/agent"
+        config.mkdir(parents=True)
+        prompt = b"RFC-ready> "
+        env = {"HOME": str(self.root), "PATH": f"{self.bin_dir}:/usr/bin:/bin",
+               "TERM": "dumb", "RFC_PROMPT": prompt.decode(), "AGENT_TRACE_LEVEL": "events",
+               "XDG_RUNTIME_DIR": str(self.root / "run")}
+        shells = [["/bin/bash", "--noprofile", "--norc", "-i"]]
+        if Path("/bin/zsh").is_file():
+            shells.append(["/bin/zsh", "-f", "-i"])
+        with HTTPServer(("127.0.0.1", 0), StreamingResponse) as http:
+            http.socket.settimeout(8)
+            http.requests = []
+            (config / "config.toml").write_text(
+                "[providers.openai-responses]\n"
+                f"base_url='http://127.0.0.1:{http.server_port}/v1'\n"
+                "api_key_env=''\napi_key='fixture'\ntimeout_sec=20\n")
+            for argv in shells:
+                with self.subTest(shell=argv[0]), interactive_shell(argv, self.root, env) as master:
+                    os.write(master, b"stty -g > before; PS1=$RFC_PROMPT\n")
+                    read_until(master, prompt)
+                    for pipeline in (False, True):
+                        with self.subTest(pipeline=pipeline):
+                            cmd = b'./bash.agent "xxx" 3>trace'
+                            os.write(master, cmd + (b" | cat" if pipeline else b"") + b"\n")
+
+                            def interrupt(peer):
+                                # Receiving the POST without keyboard input proves
+                                # the argument has already passed through the TTY.
+                                users = [i["content"] for i in http.requests[-1]["input"] if i.get("role") == "user"]
+                                self.assertEqual(users[-1], [{"type": "input_text", "text": "<args>xxx</args>"}])
+                                peer.begin_stream()
+                                peer.event({"type": "response.created", "response": {}})
+                                os.write(master, b"\x03")
+                                output = read_until(master, prompt)
+                                self.assertEqual(output.count(b"[usage]"), 1, output)
+                                self.assertNotIn(b"Broken pipe", output)
+
+                            http.reply = interrupt
+                            conn, addr = accept_request(http, master)
+                            with conn:
+                                conn.settimeout(8)
+                                StreamingResponse(conn, addr, http)
+                            os.write(master, b'printf "%s" "$?" | cat > result; stty -g > after\n')
+                            read_until(master, prompt)
+                            self.assertEqual((self.root / "result").read_text(), "130")
+                            self.assertEqual((self.root / "after").read_bytes(), (self.root / "before").read_bytes())
+                            events = self.rows("trace")
+                            self.assertEqual([e["type"] for e in events].count("llm_request_start"), 1)
+                            self.assertFalse(any(e["type"] in ("llm_response", "tool_start") for e in events))
+                            self.assertEqual((events[-1]["type"], events[-1]["exit_code"]), ("run_end", 130))
+                    os.write(master, b"exit\n")
+
+    # RFC §4.1, §6.3, §6.4
+    def test_keyboard_interrupt_reaches_a_provider_that_closed_stdout_before_exit(self):
+        (self.root / "bash.agent").symlink_to(Path(__file__).resolve().parents[1] / "examples/bash.agent")
+        config = self.root / ".config/agent"
+        config.mkdir(parents=True)
+        (config / "config.toml").write_text("[providers.openai-responses]\nbin='local-provider'\n")
+        provider = self.root / "local-provider"
+        provider.write_text("""#!/bin/sh
+/bin/cat > request
+trap 'printf term > stopped; exit 0' TERM
+printf '%s\\n' '{"type":"text_delta","text":"fixture-final"}' '{"type":"done","finish_reason":"stop"}'
+exec 1>&-
+/bin/sleep 0.25
+printf ready > stdout-closed
+/bin/sleep 5
+printf finished > natural-exit
+""")
+        provider.chmod(0o700)
+        prompt = b"RFC-ready> "
+        env = {"HOME": str(self.root), "PATH": f"{self.root}:{self.bin_dir}:/usr/bin:/bin",
+               "TERM": "dumb", "RFC_PROMPT": prompt.decode(), "XDG_RUNTIME_DIR": str(self.root / "run")}
+        with interactive_shell(["/bin/bash", "--noprofile", "--norc", "-i"], self.root, env) as master:
+            os.write(master, b"PS1=$RFC_PROMPT\n")
+            read_until(master, prompt)
+            os.write(master, b'./bash.agent "xxx"\n')
+            read_until(master, b"fixture-final")
+            # Interrupt during child cleanup regardless of how agent formats
+            # the final delta. Allow its pipe reader time to observe EOF.
+            deadline = time.monotonic() + 4
+            while not (self.root / "stdout-closed").exists():
+                self.assertLess(time.monotonic(), deadline, "provider did not close stdout")
+                time.sleep(.01)
+            os.write(master, b"\x03")
+            output = read_until(master, prompt)
+            os.write(master, b'printf "%s" "$?" | cat > result\n')
+            read_until(master, prompt)
+            os.write(master, b"exit\n")
+        self.assertEqual(((self.root / "stopped").exists(), (self.root / "natural-exit").exists(),
+                          (self.root / "result").read_text()), (True, False, "130"), output)
 
 
 if __name__ == "__main__":
