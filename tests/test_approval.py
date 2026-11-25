@@ -127,7 +127,8 @@ class Approval(unittest.TestCase):
         end, = fx.trace("run_end")
         self.assertEqual((cycle["reason"], cycle["exit_code"], end["exit_code"]), (reason, code, code))
 
-    # RFC v1.1.1 §4.1, §5.1, §5.3, §9.5
+    # RFC §5.3-01 — 提示与回答走控制终端，管道 stdin 保留为模型输入。
+    # RFC §5.3-03 — n 返回模型错误，支持空理由及 UTF-8 文本。
     def test_tty_yes_and_no_use_the_terminal_while_stdin_remains_model_input(self):
         for allow, reason in [(True, ""), (False, "稍后再试"), (False, "")]:
             with self.subTest(allow=allow, reason=reason):
@@ -152,7 +153,8 @@ class Approval(unittest.TestCase):
                 self.assertNotIn("decider_exit_code", event)
                 self.assert_cycle(fx, 0, "completed")
 
-    # RFC v1.1.1 §5.1, §5.2, §5.3, §6.2
+    # RFC §5.1-03 — Always 对同一可执行程序生效，换进程读取同一 WAL 后需重新审批。
+    # RFC §5.3-04 — a 的授权以可执行程序及 PID 为界。
     def test_always_applies_to_one_executable_and_resets_on_wal_resume(self):
         fx = self.fixture([[("first", "printf one"), ("same", "printf two"), ("other", "echo three")],
                            [], [("new-process", "printf four")], []], "safe_commands=[]\nbin='decide'\n")
@@ -163,7 +165,7 @@ class Approval(unittest.TestCase):
         self.assertEqual((fx.root / "decider-calls").read_text().splitlines(), ["called"] * 3)
         self.assertEqual(fx.tools(4)[-1]["text"].split("\n", 1)[-1].strip(), "four")
 
-    # RFC v1.1.1 §5.3
+    # RFC §5.3-05 — 编辑器收到私有临时文件，只执行保存后的命令并清理文件。
     def test_editor_receives_private_original_and_only_the_edited_command_runs(self):
         for use_default in (False, True):
             with self.subTest(fallback_vi=use_default):
@@ -190,7 +192,7 @@ p.write_text("printf edited > edited-receipt")
                 self.assertEqual((fx.root / "edited-receipt").read_text(), "edited")
                 self.assertFalse(fx.tools()[0].get("is_error", False))
 
-    # RFC v1.1.1 §5.3
+    # RFC §5.3-05 — 编辑失败或保存为空时，原命令和编辑结果均未执行，临时文件被清理。
     def test_failed_or_empty_edit_removes_the_file_and_runs_neither_command(self):
         for edit in ["""printf 'printf altered > alternate' > "$1"\nexit 1""", ': > "$1"']:
             with self.subTest(editor_body=edit):
@@ -202,7 +204,7 @@ p.write_text("printf edited > edited-receipt")
                 self.assertFalse((fx.root / "receipt").exists())
                 self.assertFalse((fx.root / "alternate").exists())
 
-    # RFC v1.1.1 §5.1, §5.3, §9.1
+    # RFC §5.3-02 — y 只批准一条，同批下一条可单独拒绝。
     def test_yes_authorizes_only_one_call_in_a_batch(self):
         fx = self.fixture([[("one", "printf first > first"), ("two", "printf second > second")], []])
         self.assertEqual(fx.terminal([("printf first > first", b"y\n"),
@@ -215,7 +217,9 @@ p.write_text("printf edited > edited-receipt")
         self.assertEqual((fx.root / "first").read_text(), "first")
         self.assertFalse((fx.root / "second").exists())
 
-    # RFC v1.1.1 §5.2, §5.4, §6.5, §9.5
+    # RFC §5.2-04 — 需交给人工处理且无控制终端时返回 75，不执行命令。
+    # RFC §5.4-01 — 无控制终端时打印原命令、记录终止事件并退出 75。
+    # RFC §6.5-06 — 无控制终端且需要人工审批时返回 75。
     def test_no_controlling_terminal_exits_75_with_command_and_no_tool_execution(self):
         for external in (False, True):
             with self.subTest(external_escalation=external):
@@ -230,7 +234,7 @@ p.write_text("printf edited > edited-receipt")
                 self.assertEqual((fx.root / "frame").exists(), external)
                 self.assert_cycle(fx, 75, "approval_blocked")
 
-    # RFC v1.1.1 §4.1, §5.1, §5.2, §5.3
+    # RFC §5.2-04 — 外部返回 2 后从控制终端读取最终选择。
     def test_external_escalation_hands_the_decision_to_the_terminal(self):
         for allow in (True, False):
             with self.subTest(allow=allow):
@@ -243,7 +247,9 @@ p.write_text("printf edited > edited-receipt")
                 self.assertEqual((fx.root / "receipt").exists(), allow)
                 self.assertEqual(fx.tools()[0].get("is_error", False), not allow)
 
-    # RFC v1.1.1 §5.2, §9.1, §9.5
+    # RFC §5.2-01 — 外部裁决器读到一行 JSON、真实进程标识及 EOF。
+    # RFC §5.2-02 — 外部返回 0，无控制终端也能执行一次已批准的命令。
+    # RFC §5.2-06 — 外部裁决允许时 Trace 关联真实调用和裁决来源。
     def test_external_decider_receives_one_utf8_frame_with_the_real_caller_identity(self):
         command = "printf '%s' 'café 雪' > receipt"
         fx = self.fixture([[("t", command)], []], "safe_commands=[]\nbin='decide'\n")
@@ -261,7 +267,8 @@ p.write_text("printf edited > edited-receipt")
         self.assertEqual((event["decider"], event["decider_exit_code"]), ("external", 0))
         self.assertNotIn("ignored-on-allow", fx.tools()[0]["text"])
 
-    # RFC v1.1.1 §5.2, §9.1, §9.5
+    # RFC §5.2-03 — 外部返回 1，裁剪拒绝理由、为空时给出默认值，继续推理。
+    # RFC §5.2-06 — 外部拒绝时保留对应来源及裁决结果。
     def test_external_denial_trims_reason_or_supplies_default_and_continues(self):
         for why, options in [("拒绝本轮", ()), ("", ()), ("explicit", ("--fail-on-deny",))]:
             with self.subTest(reason=why, options=options):
@@ -281,7 +288,7 @@ p.write_text("printf edited > edited-receipt")
                 self.assertEqual((event["decider"], event["decider_exit_code"]), ("external", 1))
                 self.assert_cycle(fx, 0, "completed")
 
-    # RFC v1.1.1 §5.2, §6.3, §6.5, §9.5
+    # RFC §5.2-05 — 其他非零或超时透出诊断，结束当前轮且不执行工具。
     def test_external_error_and_timeout_surface_stderr_and_end_the_cycle_with_75(self):
         for code in (3, 75, 127, None):
             with self.subTest(code=code):
@@ -303,7 +310,7 @@ p.write_text("printf edited > edited-receipt")
                     self.assertEqual(event["decider_exit_code"], code)
                 self.assert_cycle(fx, 75, "approval_blocked")
 
-    # RFC v1.1.1 §5.2, §6.5, §9.5
+    # RFC §5.2-05 — 裁决器不可用时以 75 退出，Trace 记录审批失败且命令未执行。
     def test_unavailable_external_decider_exits_75_and_records_the_failed_approval(self):
         fx = self.fixture(settings="safe_commands=[]\nbin='missing-decider'\n")
         result = fx.detached()
@@ -315,7 +322,8 @@ p.write_text("printf edited > edited-receipt")
         self.assertEqual(event.get("decider"), "external", event)
         self.assert_cycle(fx, 75, "approval_blocked")
 
-    # RFC v1.1.1 §5.1, §5.2, §6.5, §9.5
+    # RFC §5.1-01 — auto 和白名单命令无需调用外部裁决器。
+    # RFC §5.1-02 — deny 保留白名单，拦截时返回工具错误，开启 fail-on-deny 时退出 75。
     def test_auto_deny_and_allowlisted_commands_skip_the_external_decider(self):
         for policy, listed, fail, want_code, executes in [
             ("auto", False, False, 0, True), ("deny", False, False, 0, False),
@@ -341,7 +349,7 @@ p.write_text("printf edited > edited-receipt")
                 else:
                     self.assertFalse((fx.root / "request-2").exists())
 
-    # RFC v1.1.1 §5.3, §6.4, §6.5, §9.5
+    # RFC §6.4-02 — 在内置审批处只按一次 Ctrl+C，命令不执行，原 shell 恢复并读到退出码 130。
     def test_ctrl_c_at_the_approval_prompt_returns_to_the_same_shell(self):
         fx = self.fixture()
         self.assertEqual(fx.terminal([(COMMAND, b"\x03")]), 130)
@@ -349,7 +357,7 @@ p.write_text("printf edited > edited-receipt")
         self.assertFalse((fx.root / "request-2").exists())
         self.assert_cycle(fx, 130, "interrupted")
 
-    # RFC v1.1.1 §5.2, §6.4, §6.5, §9.5
+    # RFC §5.2-06 — 内置审批被 SIGINT 中断时 Trace 仍应标记 builtin。
     def test_interrupt_during_builtin_decision_identifies_the_decider_in_trace(self):
         fx = self.fixture()
         argv = ["/bin/sh", "-c", 'exec "$@" </dev/null >payload 2>diagnostic 7>trace',
@@ -375,7 +383,8 @@ p.write_text("printf edited > edited-receipt")
         self.assertEqual(event.get("decider"), "builtin", event)
         self.assertNotIn("decider_exit_code", event)
 
-    # RFC v1.1.1 §5.2, §6.4, §6.5, §9.5
+    # RFC §5.2-06 — 外部审批被 SIGTERM 中断时 Trace 仍应标记 external。
+    # RFC §6.4-03 — 外部审批中收到 SIGTERM，退出 143 并记录中断。
     def test_interrupt_during_external_decision_identifies_the_decider_in_trace(self):
         fx = self.fixture(settings="safe_commands=[]\nbin='decide'\ntimeout_sec=20\n")
         fx.decider("exec /bin/sleep 12")

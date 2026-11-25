@@ -237,7 +237,7 @@ pub enum ProviderEvent {
 mod tests {
     use super::*;
 
-    // RFC v1.1 §9.2
+    // RFC §9.2-11 — 把包含五项计数的 usage 帧序列化再解码，所有字段保持相等。
     #[test]
     fn provider_events_round_trip() {
         let evt = ProviderEvent::Usage {

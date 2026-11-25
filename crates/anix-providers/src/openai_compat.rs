@@ -921,7 +921,7 @@ mod tests {
         (exit, events)
     }
 
-    // RFC v1.1 §9.2
+    // RFC §2-04 — Chat 兼容端点只追加一次 chat/completions 路径。
     #[test]
     fn endpoint_url_appends_chat_completions_once() {
         assert_eq!(
@@ -934,7 +934,7 @@ mod tests {
         );
     }
 
-    // RFC v1.1 §9.1, §9.2
+    // RFC §9.1-18 — Chat 请求保留首条 system，后续 runtime_update 按方言降级，同时传递工具及参数。
     #[test]
     fn translates_frozen_system_degraded_runtime_update_tools_and_params() {
         let mut header = base_header(vec![IrStream::msh_tool_def()]);
@@ -979,7 +979,7 @@ mod tests {
         );
     }
 
-    // RFC v1.1 §9.1, §9.2
+    // RFC §9.1-05 — IR 中空 tools 经转换后，Chat 请求不携带 tools 参数。
     #[test]
     fn omits_tools_when_empty_and_supports_disabling_stream_options() {
         let mut header = base_header(vec![]);
@@ -1001,7 +1001,7 @@ mod tests {
         assert_eq!(body["max_completion_tokens"], 1024);
     }
 
-    // RFC v1.1 §9.1, §9.2
+    // RFC §9.2-14 — Chat 适配器重放不透明推理状态，工具附件放在批量工具结果后。
     #[test]
     fn replays_opaque_reasoning_and_flushes_tool_media_after_batch() {
         let tmp_img =
@@ -1075,7 +1075,7 @@ mod tests {
         assert_eq!(msgs[4]["role"], "user");
     }
 
-    // RFC v1.1 §9.2
+    // RFC §9.2-18 — Chat SSE 输出 reasoning/text 增量，并读取 finish_reason 后的 usage。
     #[test]
     fn sse_streams_reasoning_text_and_trailing_usage_after_finish_reason() {
         let sse = concat!(
@@ -1123,7 +1123,7 @@ mod tests {
         );
     }
 
-    // RFC v1.1 §9.1, §9.2
+    // RFC §9.2-18 — 把分块工具调用参数拼回完整对象，并保留 extra_content。
     #[test]
     fn sse_accumulates_multi_chunk_tool_calls_and_extra_content() {
         let sse = concat!(
@@ -1173,7 +1173,7 @@ mod tests {
         );
     }
 
-    // RFC v1.1 §9.2
+    // RFC §9.2-18 — 区分已有 finish_reason 的正常 EOF 与未完成的截断。
     #[test]
     fn sse_clean_eof_after_finish_reason_without_done_and_truncated_error() {
         let sse_ok = concat!(
@@ -1196,7 +1196,7 @@ mod tests {
         ));
     }
 
-    // RFC v1.1 §9.2
+    // RFC §9.2-18 — 非流式 JSON 既能解码普通回复，也能识别正文中的 error。
     #[test]
     fn non_streaming_json_fallback_parses_message_and_inline_error() {
         let raw = r#"{

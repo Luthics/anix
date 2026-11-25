@@ -100,7 +100,7 @@ mod tests {
     use super::*;
     use crate::IR_VERSION;
 
-    // RFC v1.1 §6.2
+    // RFC §6.2-12 — WAL 事件序列化再解码后字段保持相等。
     #[test]
     fn wal_events_round_trip() {
         let init = WalEvent::SessionInit {

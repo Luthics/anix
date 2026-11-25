@@ -26,7 +26,7 @@ fn installation(key_env: &str, key: &str) -> Fixture {
     fx
 }
 
-// RFC v1.1.1 §10.3, §2, §8.1
+// RFC §10.3-03 — 逐个移除私有二进制或其执行权限，doctor 指出故障路径。
 #[test]
 fn each_missing_or_non_executable_private_binary_is_identified() {
     let fx = installation("", "");
@@ -65,7 +65,8 @@ fn each_missing_or_non_executable_private_binary_is_identified() {
     expect_code(&fx.run(fx.anix().arg("--doctor")), 0);
 }
 
-// RFC v1.1.1 §10.3
+// RFC §3.1-03 — 自检与凭据诊断。
+// RFC §10.3-04 — 对比密钥缺失、空值及回退来源的 doctor 诊断。
 #[test]
 fn doctor_distinguishes_required_missing_empty_and_fallback_credentials() {
     for (key_env, key, value, expected) in [
@@ -94,7 +95,7 @@ fn doctor_distinguishes_required_missing_empty_and_fallback_credentials() {
     }
 }
 
-// RFC v1.1.1 §10.3
+// RFC §8.1-03 — runtime 目录不可用时 doctor 报错。
 #[test]
 fn invalid_global_or_project_toml_and_unusable_runtime_directory_report_failure() {
     for name in ["config/anix/config.toml", ".anix/config.toml"] {
@@ -117,7 +118,7 @@ fn invalid_global_or_project_toml_and_unusable_runtime_directory_report_failure(
     assert!(!out.stderr.is_empty());
 }
 
-// RFC v1.1.1 §8.1, §8.2, §10.3
+// RFC §10.3-04 — doctor 检查项目实际选中的默认 Provider 及其凭据。
 #[test]
 fn doctor_checks_the_selected_project_provider_and_its_credentials() {
     let fx = installation("UNSET_DEFAULT_KEY", "");
@@ -149,7 +150,7 @@ fn doctor_checks_the_selected_project_provider_and_its_credentials() {
     );
 }
 
-// RFC v1.1.1 §10.3
+// RFC §10.3-02 — 同时缺少 msh 且全局 TOML 损坏时先报告第 1 步。
 #[test]
 fn doctor_reports_missing_msh_before_a_malformed_global_config() {
     let fx = installation("", "");

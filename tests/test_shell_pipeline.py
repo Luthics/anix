@@ -68,7 +68,8 @@ fi
         self.assertEqual((reply["role"], reply["tool_call_id"]), ("tool", "fixture-id"))
         return result, reply
 
-    # RFC v1.1.1 §7.2, §6.1, §6.2
+    # RFC §7.2-02 — 按含 LF 的实际序列化长度逐个比较 aclr 发送端和内核接收端的判定。
+    # RFC §7.2-07 — 按序列化字节数逐一比较发送端及接收端的 64 KiB 边界。
     def test_aclr_and_anix_agree_on_the_serialized_fold_frame_size_limit(self):
         def emit(summary):
             return subprocess.run(["/bin/sh", "-c", 'exec 6>&1; exec "$@" >/dev/null', "fixture",
@@ -118,7 +119,9 @@ fi
                     actual = [json.loads(line) for line in (self.root / "second.ir").read_bytes().splitlines()]
                     self.assertTrue(any(summary in row.get("text", "") for row in actual))
 
-    # RFC v1.1.1 §6.2, §6.5
+    # RFC §6.2-07 — 文件增长受限时保留原有字节，只在尾行完整可回放时继续。
+    # RFC §6.2-12 — 限制文件增长制造写入失败，检查已写字节和恢复边界。
+    # RFC §6.5-04 — WAL 无法追加时返回 1，已有前缀保留。
     def test_wal_append_failure_preserves_the_prefix_and_reopens_according_to_tail_state(self):
         # Use a real kernel-enforced short write or EFBIG. Limits apply only
         # to the disposable Anix process, and never to the test runner.
@@ -161,7 +164,7 @@ fi
                     self.assertEqual(resumed.returncode, 1, resumed.stderr)
                     self.assertEqual(wal.read_bytes(), after)
 
-    # RFC v1.1.1 §6.2, §9.1
+    # RFC §6.2-08 — 活跃窗口不变时将归档从 1 MiB 增至 32 MiB，用系统调用计量恢复读取量。
     @unittest.skipUnless(sys.platform.startswith("linux") and Path("/proc/self/io").is_file(),
                          "requires Linux process I/O counters")
     def test_archived_wal_growth_keeps_resume_reads_bounded_at_the_latest_checkpoint(self):
@@ -217,7 +220,8 @@ printf '%s\\n' '{"type":"text_delta","text":"ok"}' '{"type":"done","finish_reaso
         self.assertLess(counts[1] - counts[0], 1024**2,
                         f"adding 31 MiB before the checkpoint increased logical reads: {counts}")
 
-    # RFC v1.1.1 §9.4, §7.1
+    # RFC §9.4-01 — 模型从真实 XML 索引读取含特殊字符的技能路径，经 msh 按需获取完整正文。
+    # RFC §9.4-04 — 含特殊字符的路径能从 XML 索引解码，并由 msh 按需读取正文。
     def test_skill_index_round_trips_xml_metadata_and_msh_reads_the_indexed_file_on_demand(self):
         guide = self.root / '.skills/R&D "examples"/SKILL.md'
         guide.parent.mkdir(parents=True)
@@ -290,7 +294,9 @@ else:
                     child.kill()
                 child.communicate(timeout=5)
 
-    # RFC v1.1.1 §3.1, §4.1, §9.1
+    # RFC §4.1-10 — 真实管道有无脚本参数均等到 EOF，保留跨写入的 UTF-8 及内嵌 NUL。
+    # RFC §4.1-11 — 逐个通过真实管道连接 fd 4 至 9，读完后保留输入来源和完整正文。
+    # RFC §4.1-13 — 每个额外输入管道跨写入拼接字节，读到 EOF 后才生成带编号的输入。
     def test_open_input_descriptor_defers_inference_until_eof(self):
         (self.root / "first.reply").write_text(
             '{"type":"text_delta","text":"ok"}\n{"type":"done","finish_reason":"stop"}\n')
@@ -316,7 +322,7 @@ else:
                 else:
                     self.assertRegex(text, rf'^<input fd="{fd}">\n?{re.escape(expected)}\n?</input>$')
 
-    # RFC v1.1.1 §4.1, §6.4, §6.5
+    # RFC §6.5-02 — 读 stdin 或额外输入管道期间取消，写端仍打开也能返回 shell 可见的 130 或 143。
     def test_cancelling_input_does_not_need_eof_or_dispatch_the_partial_message(self):
         for fd, sig in product((0, 4, 9), (signal.SIGINT, signal.SIGTERM)):
             with self.subTest(fd=fd, signal=sig):
@@ -329,7 +335,7 @@ else:
                     self.assertEqual(out, b"")
                 self.assertFalse((self.root / "first.ir").exists())
 
-    # RFC v1.1.1 §7.1, §6.4
+    # RFC §7.1-01 — 独立 msh 显式强杀时向整组发 TERM，2 秒宽限后强制回收并返回 124。
     def test_msh_timeout_signals_the_whole_group_and_grants_two_seconds_before_kill(self):
         # Both witnesses keep a FIFO writer open until they actually exit. EOF
         # observes the last descendant's exit, including after its parent dies.
@@ -367,7 +373,8 @@ else:
             self.assertGreaterEqual(finished - started, 4 - .05,
                                     f"2 s timeout + 2 s grace; seconds after TERM: {since_term}")
 
-    # RFC v1.1.1 §6.2, §6.4, §6.5, §9.1
+    # RFC §6.2-16 — 打断有部分输出的 msh，恢复后没有半条工具结果或悬空调用。
+    # RFC §6.4-04 — 工具输出一部分后中断，shell 后代收到 TERM、释放 WAL 锁，恢复时没有半截工具结果。
     def test_interrupting_a_live_msh_discards_its_partial_result_and_replays_a_closed_history(self):
         (self.root / "wait_for_signal.py").write_text('''import signal, time
 from pathlib import Path
@@ -420,7 +427,10 @@ time.sleep(12)
                                  ["<args>before</args>", "<args>resume</args>"])
                 self.assertFalse(any(r.get("tool_calls") or r.get("role") == "tool" for r in rows))
 
-    # RFC v1.1.1 §4.1, §4.3
+    # RFC §4.3-01 — output=explicit 时真实 msh 子进程的标准输入指向空设备，fd 4、5、6 都是只写匿名管道。
+    # RFC §4.3-02 — 多次打开输出管道，超过 1 MiB 的二进制 Payload 逐字节完整转发。
+    # RFC §4.3-03 — 诊断管道可独立传输超过 1 MiB 的二进制数据。
+    # RFC §4.3-04 — 真实 msh 子进程中 fd 6 是只写匿名管道。
     def test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity(self):
         stdout = bytes(range(256)) * 4097 + b"stdout-end"
         stderr = bytes(reversed(range(256))) * 4099 + b"stderr-end"
@@ -460,7 +470,9 @@ for name, channel in (("output","ANIX_OUT"), ("diagnostic","ANIX_ERR")):
         self.assertEqual(header, f'[t{result[0]["turn_id"]}] exit=0')
         self.assertEqual(json.loads(report), {"null_stdin": True, "write_pipes": [True]*3})
 
-    # RFC v1.1.1 §4.1, §4.3
+    # RFC §4.1-12 — stdout 与 stderr 各自为终端或普通文件的四种组合，测试 auto 和 explicit。
+    # RFC §4.4-02 — stdout/stderr 独立连接到 TTY 或文件，核对 auto 模式诊断字节。
+    # RFC §4.4-03 — explicit 模式只交付约定诊断，并在四种 TTY 组合下保持原始输出。
     def test_stdout_and_stderr_terminal_modes_are_independent(self):
         cmd = r"""printf 'a\000\377b' > "$ANIX_OUT"; printf 'human\n' > "$ANIX_ERR" """
         reply = [{"type": "reasoning_delta", "text": "reasoning-fixture"},
@@ -525,7 +537,8 @@ for name, channel in (("output","ANIX_OUT"), ("diagnostic","ANIX_ERR")):
                         self.assertNotIn(b"\r", plain)
                         self.assertNotIn(b"\x1b", plain)
 
-    # RFC v1.1.1 §2
+    # RFC §2-01 — PATH 中的同名 msh 可覆盖私有安装位置，显式路径仍优先。
+    # RFC §3.3-05 — shell 路径或命令名。
     def test_path_precedes_libexec_and_explicit_shell_path_has_priority_over_both(self):
         override = self.root / "bin"
         override.mkdir()
@@ -589,10 +602,10 @@ while [ -f "child-$n.ir" ]; do n=$((n+1)); done
         self.assertIn("child instructions", child)
         self.assertNotIn("child instructions", parent)
 
-    # RFC v1.1.1 §3.4, §5.1
+    # RFC §3.4-01 — 父进程 CLI 开启 auto 后子进程无需重新审批，子模型及 WAL 仍独立。
     def test_nested_anix_uses_own_model_wal_and_budget_and_inherits_cli_auto(self):
         self.run_nested(("-y",), "ask", True)
 
-    # RFC v1.1.1 §3.4, §5.1
+    # RFC §3.4-01 — 父进程的 deny 覆盖子脚本的 auto；子命令没有产生磁盘副作用。
     def test_nested_anix_inherits_cli_deny_over_its_own_auto_frontmatter(self):
         self.run_nested(("--approval", "deny"), "auto", False)

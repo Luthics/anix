@@ -743,7 +743,7 @@ mod tests {
         }
     }
 
-    // RFC v1.1 §6.2, §9.1
+    // RFC §6.2-16 — 回放丢弃未闭合工具调用，同时保留已经提交的 usage。
     #[test]
     fn replay_skips_empty_assistant_and_prunes_unclosed_tool_calls_preserving_usage() {
         let tmp =
@@ -854,7 +854,7 @@ mod tests {
             .expect("replayed stream must satisfy invariants");
     }
 
-    // RFC v1.1.1 §6.2
+    // RFC §6.2-03 — 从分节恢复已有 session_id，同一路径的旧 WAL 在重复读取时得到同一回退值。
     #[test]
     fn replay_restores_session_id_across_checkpoint_and_derives_stable_legacy_fallback() {
         let tmp = std::env::temp_dir().join(format!("anix-wal-sid-{}.jsonl", uuid::Uuid::new_v4()));

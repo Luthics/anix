@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
 
-// RFC v1.1 §3.1, §3.3, §3.4, §5.5, §6.2, §8.2
+// RFC §5.5-01 — 依次覆盖 CLI、环境、脚本、所选 Provider、全局默认和内置默认。
 #[test]
 fn vision_resolves_from_cli_env_script_selected_provider_then_defaults() {
     let fx = Fixture::new();
@@ -158,7 +158,7 @@ fn round_trip(fx: &Fixture, vision: bool) -> Value {
     ir
 }
 
-// RFC v1.1 §5.5, §6.2, §7.2, §9.1
+// RFC §9.1-21 — 启用原生视觉时附件随 tool 消息写入 WAL，恢复后保留附件且不调用桥接器。
 #[test]
 fn native_vision_keeps_the_attachment_through_resume_and_never_calls_a_bridge() {
     let fx = media_fixture(Some((
@@ -176,7 +176,7 @@ fn native_vision_keeps_the_attachment_through_resume_and_never_calls_a_bridge() 
     assert!(!fx.dir.0.join("bridge-called").exists());
 }
 
-// RFC v1.1 §5.5, §6.2, §7.2, §9.1
+// RFC §5.5-02 — 无原生视觉且无桥接器时，工具报错且附件不进入恢复的历史。
 #[test]
 fn no_native_vision_without_a_bridge_returns_the_documented_error_through_resume() {
     let fx = media_fixture(None);
@@ -186,7 +186,7 @@ fn no_native_vision_without_a_bridge_returns_the_documented_error_through_resume
     assert!(ir["text"].as_str().unwrap().contains("Error: current model does not support native vision (vision=false). Use text tools (e.g. OCR/pdftotext) or delegate to a vision-capable sub-agent."));
 }
 
-// RFC v1.1 §5.5, §6.2, §7.2, §9.1
+// RFC §5.5-03 — 桥接器接收图片信息和 EOF，恢复会话后保留转译描述。
 #[test]
 fn bridge_gets_one_utf8_json_line_then_eof_and_its_description_survives_resume() {
     let fx = media_fixture(Some((
@@ -213,7 +213,7 @@ fn bridge_gets_one_utf8_json_line_then_eof_and_its_description_survives_resume()
     )));
 }
 
-// RFC v1.1 §5.5, §6.2, §7.2, §9.1
+// RFC §5.5-05 — 视觉桥接非零退出或超时成为可恢复的工具错误。
 #[test]
 fn bridge_nonzero_exit_and_timeout_both_return_stderr_as_a_recoverable_tool_error() {
     for (termination, timeout) in [("exit 17", 10), ("exec /bin/sleep 15", 4)] {

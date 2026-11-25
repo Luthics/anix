@@ -937,7 +937,7 @@ mod tests {
         }
     }
 
-    // RFC v1.1 §9.2
+    // RFC §2-04 — Anthropic 端点接受基础 URL 及已含 /v1/messages 的路径，避免重复添加后缀。
     #[test]
     fn resolves_anthropic_endpoint_urls() {
         assert_eq!(
@@ -954,7 +954,7 @@ mod tests {
         );
     }
 
-    // RFC v1.1 §9.1, §9.2
+    // RFC §9.2-14 — Anthropic 合并相邻 user/tool 记录，并在请求中重放带签名的 thinking。
     #[test]
     fn coalesces_adjacent_user_and_tool_results_and_replays_signed_thinking() {
         let tmp_img =
@@ -1058,7 +1058,7 @@ mod tests {
         );
     }
 
-    // RFC v1.1 §9.1, §9.2
+    // RFC §9.2-11 — Anthropic 的 SSE 输入用量加上缓存计数，产生包含式总数，同时保留思考签名与工具调用。
     #[test]
     fn sse_normalizes_inclusive_usage_captures_thinking_signature_and_tool_use() {
         let sse = concat!(
@@ -1137,7 +1137,7 @@ mod tests {
         );
     }
 
-    // RFC v1.1 §9.2
+    // RFC §9.2-15 — Anthropic overloaded SSE 错误被转换为 retryable=true。
     #[test]
     fn sse_overloaded_error_is_retryable() {
         let sse = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n";

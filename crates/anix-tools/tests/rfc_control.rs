@@ -45,7 +45,7 @@ fn frame(result: &Output) -> Value {
     serde_json::from_slice(&result.stdout).unwrap()
 }
 
-// RFC v1.1 §7.2, §6.1
+// RFC §7.2-09 — compact 或 fold 写入一条合法帧，JSON 转义后摘要无损。
 #[test]
 fn aclr_emits_a_single_compact_or_fold_frame_with_lossless_json_escaping() {
     let bin = env!("CARGO_BIN_EXE_aclr");
@@ -62,7 +62,7 @@ fn aclr_emits_a_single_compact_or_fold_frame_with_lossless_json_escaping() {
         );
     }
 }
-// RFC v1.1 §6.1, §7.2
+// RFC §7.2-01 — 省略摘要时，aclr 在有效 turn_id 边界都省略 JSON summary 字段。
 #[test]
 fn aclr_without_a_summary_omits_the_field_at_each_valid_turn_id_boundary() {
     let bin = env!("CARGO_BIN_EXE_aclr");
@@ -72,7 +72,8 @@ fn aclr_without_a_summary_omits_the_field_at_each_valid_turn_id_boundary() {
     }
 }
 
-// RFC v1.1 §6.1, §7.2
+// RFC §6.1-09 — 无参 aclr 输出用法并退出 2。
+// RFC §7.2-09 — 非法 aclr 参数以使用错误结束，控制通道没有帧。
 #[test]
 fn invalid_aclr_argv_never_submits_a_frame() {
     for args in [
@@ -91,7 +92,7 @@ fn invalid_aclr_argv_never_submits_a_frame() {
         );
     }
 }
-// RFC v1.1 §7.2
+// RFC §7.2-07 — 转义后的 fold 帧超出 64 KiB 时不能写入控制通道。
 #[test]
 fn fold_control_frames_stay_within_64_kib_even_after_json_escaping() {
     // Leave a margin on either side: both interpretations of whether the final LF
@@ -143,7 +144,7 @@ fn take_image(record: &Value) -> DynamicImage {
     image::load_from_memory_with_format(&bytes, ImageFormat::Png).unwrap()
 }
 
-// RFC v1.1 §7.2
+// RFC §7.2-08 — 比较横、竖、方图在阈值两侧的实际输出尺寸。
 #[test]
 fn aview_resizes_portrait_landscape_and_square_images_only_when_needed() {
     for (w, h, limit, expected) in [
@@ -166,7 +167,7 @@ fn aview_resizes_portrait_landscape_and_square_images_only_when_needed() {
     }
 }
 
-// RFC v1.1 §7.2
+// RFC §7.2-08 — 同一图像经文件和 stdin 输入得到相同输出尺寸。
 #[test]
 fn aview_file_input_and_stdin_agree_on_image_dimensions() {
     let bytes = png(5, 3);
@@ -181,7 +182,7 @@ fn aview_file_input_and_stdin_agree_on_image_dimensions() {
     );
 }
 
-// RFC v1.1 §7.2
+// RFC §7.2-08 — 读取发布的 PNG，检查像素内容与方向。
 #[test]
 fn aview_preserves_image_content_and_orientation_in_the_published_png() {
     let colors = [
@@ -225,7 +226,7 @@ fn aview_preserves_image_content_and_orientation_in_the_published_png() {
     }
 }
 
-// RFC v1.1 §7.2
+// RFC §7.2-08 — 输入无法解码或参数非法时不发布媒体控制帧。
 #[test]
 fn undecodable_input_or_invalid_options_do_not_emit_media() {
     for (args, input) in [
@@ -239,7 +240,7 @@ fn undecodable_input_or_invalid_options_do_not_emit_media() {
     }
 }
 
-// RFC v1.1.1 §7.2
+// RFC §7.2-03 — 四页文档的 15 种非空页集合，从文件、显式和隐式 stdin 输入，逐页核对 PNG 尺寸及色块。
 #[test]
 #[ignore = "requires a native PDF renderer; run in the PDF conformance CI step"]
 fn aview_selects_pdf_pages_with_their_actual_geometry_and_colors() {
@@ -309,7 +310,7 @@ fn aview_selects_pdf_pages_with_their_actual_geometry_and_colors() {
     }
 }
 
-// RFC v1.1.1 §7.2
+// RFC §7.2-04 — 页码语法错误时以非零状态退出且不发布附件。
 #[test]
 fn aview_rejects_invalid_pdf_page_expressions_without_publishing_attachments() {
     let pdf = include_bytes!("../../../tests/fixtures/media/four-pages.pdf");

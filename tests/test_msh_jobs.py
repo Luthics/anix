@@ -83,7 +83,8 @@ sys.exit(int(sys.argv[1]))
 """)
         return f'exec "$PYTHON" worker.py {status}'
 
-    # RFC v1.1.2 §7.1, §7.2
+    # RFC §7.1-12 — 立即后台启动时 fd 4–6 和三个侧信道变量均已关闭或清除，进程组和会话隔离。
+    # RFC §7.1-14 — 运行时目录下 jobs 为 0700、日志为 0600，后台退出前不存在最终状态文件，随后读到真实的非零退出码。
     def test_immediate_handoff_closes_side_channels_and_publishes_the_real_exit(self):
         raw = b"actual stdout\x00\xff\n"
         cmd = self.worker(raw, 7)
@@ -112,7 +113,8 @@ sys.exit(int(sys.argv[1]))
         self.assertEqual(int(exit_file.read_bytes()), 7)
         self.assertEqual(log.read_bytes(), raw + b"WORKER-DONE\n")
 
-    # RFC v1.1.2 §7.1, §7.2
+    # RFC §1.4-01 — 正等待到期后 msh 成功返回后台预览，子进程继续写完整日志。
+    # RFC §7.1-13 — 真实命令等待到期时仅返回清洗后的有限预览，后台继续执行并保留完整原始日志。
     def test_positive_deadline_returns_a_clean_bounded_tail_and_keeps_the_complete_log(self):
         source = b"".join(f"row-{n:03d}:".encode() + b"x" * 110 + b"\n" for n in range(90))
         raw = source + b"\x1b[31mLAST\x1b[0m\n"
@@ -136,7 +138,7 @@ sys.exit(int(sys.argv[1]))
         self.assertEqual(int(Path(job["exit_file"]).read_bytes()), 0)
         self.assertEqual(Path(job["log_path"]).read_bytes(), raw + b"WORKER-DONE\n")
 
-    # RFC v1.1.2 §7.1, §7.2
+    # RFC §7.1-11 — 前台成功与普通非零退出保留双流输出、透传真实退出码并清理任务文件。
     def test_foreground_completion_returns_real_status_and_removes_job_files(self):
         for status in (0, 7):
             with self.subTest(status=status):
@@ -145,7 +147,7 @@ sys.exit(int(sys.argv[1]))
                 self.assertEqual(rows(self.root / "control"), [])
                 self.assertEqual(list(self.jobs.iterdir()), [])
 
-    # RFC v1.1.2 §6.4, §6.5, §7.1
+    # RFC §7.1-16 — 前台等待中分别发送 INT、TERM，两种超时策略都清理整组并返回 130、143。
     def test_foreground_int_and_term_clean_up_in_both_timeout_modes(self):
         script = self.root / "sig.py"
         script.write_text("""import signal, time
@@ -176,7 +178,7 @@ time.sleep(12)
                     self.assertEqual(int((self.root / "received").read_text()), signal.SIGTERM)
                     self.assertEqual(list(self.jobs.iterdir()), [])
 
-    # RFC v1.1.2 §6.5, §7.1
+    # RFC §7.1-15 — 显式强杀且指定 0 秒时先等待一秒，输出已有文本与超时标记，清理任务文件。
     def test_zero_with_explicit_kill_waits_one_second_and_leaves_no_job(self):
         started = time.monotonic()
         run = self.direct("printf begun; exec /bin/sleep 12", 0, kill=1)
@@ -187,7 +189,7 @@ time.sleep(12)
         self.assertEqual(rows(self.root / "control"), [])
         self.assertEqual(list(self.jobs.iterdir()), [])
 
-    # RFC v1.1.2 §7.1, §7.2
+    # RFC §7.2-10 — 511 至 66,000 字节的命令都执行到末尾，fd 6 只产生一条有效且有界的 JSONL 帧。
     def test_long_commands_execute_their_suffix_and_handoff_with_a_single_bounded_frame(self):
         for length in (511, 512, 513, 32_768, 66_000):
             with self.subTest(command_bytes=length):
@@ -248,7 +250,8 @@ printf '%s|%s|%s|%s|%s\\n' "$1" "$2" "$MSH_TIMEOUT_SEC" "$MSH_KILL_ON_TIMEOUT" "
             observed.append((int(seconds), int(kill)))
         return observed
 
-    # RFC v1.1.2 §7.1, §8.2, §9.1
+    # RFC §7.1-10 — 单次请求依次覆盖缺省、零、正数、上限两侧与回到默认，自定义 shell 收到 -c、原命令、策略变量及任务目录。
+    # RFC §9.1-20 — msh 的工具声明仅要求 cmd，timeout_sec 为非负整数，kill_on_timeout 为可选布尔值。
     def test_msh_tool_schema_and_per_call_options_do_not_leak_into_the_next_call(self):
         self.configure("msh_timeout_sec=3\nmax_msh_timeout_sec=5\n")
         args = [{}, {"timeout_sec": 0}, {"timeout_sec": 1, "kill_on_timeout": True},
@@ -263,28 +266,29 @@ printf '%s|%s|%s|%s|%s\\n' "$1" "$2" "$MSH_TIMEOUT_SEC" "$MSH_KILL_ON_TIMEOUT" "
                           properties["timeout_sec"]["minimum"], properties["kill_on_timeout"]["type"]),
                          ("string", "integer", 0, "boolean"))
 
-    # RFC v1.1.2 §7.1, §8.2
+    # RFC §8.2-03 — 只将硬上限配置为 2 时，每个显式请求仍应裁剪到 2，即使默认等待为 120。
     def test_single_call_never_exceeds_a_configured_maximum_below_the_default_wait(self):
         self.configure("max_msh_timeout_sec=2\n")
         self.assertEqual(self.capture_policy([{"timeout_sec": n} for n in (1, 2, 3, 999)]),
                          [(1, 0), (2, 0), (2, 0), (2, 0)])
 
-    # RFC v1.1.2 §7.1, §8.2
+    # RFC §8.2-04 — 环境覆盖 TOML 的默认等待与单次上限，单次覆盖后恢复默认等待。
     def test_environment_maximum_overrides_toml_for_each_explicit_request(self):
         self.configure("msh_timeout_sec=1\nmax_msh_timeout_sec=8\n")
         self.assertEqual(self.capture_policy([{}, {"timeout_sec": 8}, {}],
                                             {"MSH_TIMEOUT_SEC": "2", "MSH_MAX_TIMEOUT_SEC": "4"}),
                          [(2, 0), (4, 0), (2, 0)])
 
-    # RFC v1.1.2 §6.2, §7.1, §7.2, §9.1, §9.5
+    # RFC §7.2-12 — 后台任务结束后仅在下一次请求前通知一次，冻结前缀、WAL 和重启恢复结果可核对。
+    # RFC §9.5-08 — started 和 finished 通过相同任务标识、PID、进程组和日志路径关联，并报告真实状态及经过的毫秒数。
     def test_background_completion_is_reported_once_before_inference_and_replays_from_wal(self):
         self.check_completion(0, b"\x1b[31mnotice-body\x1b[0m\n")
 
-    # RFC v1.1.2 §7.1, §7.2, §9.2, §9.5
+    # RFC §7.1-17 — 正数等待到期后，后一轮推理可以在任务仍存活时运行，随后报告一次完成结果。
     def test_positive_timeout_dispatches_the_next_request_while_the_job_is_alive(self):
         self.check_completion(1, b"notice-body\n")
 
-    # RFC v1.1.2 §6.2, §7.1, §7.2, §9.1
+    # RFC §7.2-13 — 终端标题和已覆盖的进度文本应从后台通知中清除，在 WAL 及后续 Provider 请求中使用清洗后的文本。
     def test_terminal_title_and_overwritten_progress_are_cleaned_from_the_completion_notice(self):
         self.check_completion(0, b"\x1b]0;job title\x07old-progress\rnotice-body\n")
 
@@ -338,7 +342,7 @@ while not Path(job['exit_file']).is_file():
         self.assertNotIn("\x1b", update["content"])
         self.assertNotIn("old-progress", update["content"])
 
-    # RFC v1.1.2 §7.2, §9.5
+    # RFC §9.5-07 — 检查已终止的任务组且没有退出码文件时，完成事件含显式 null，后续推理不重复通知。
     def test_finished_group_without_an_exit_file_reports_null_exactly_once(self):
         self.configure()
         # A custom shell reaps its own child so that the group has definitely
@@ -381,7 +385,7 @@ with open(os.environ["ANIX_CTL"], "w") as ctl:
             self.assertEqual(len(hits), 1)
             self.assertEqual(hits[0]["text"], "<runtime_update>" + update["content"] + "</runtime_update>")
 
-    # RFC v1.1.2 §6.3, §7.1
+    # RFC §6.3-03 — 强杀时组长退出、有限子进程仍在，Linux 宽限期的等待不应持续空转。
     @unittest.skipUnless(sys.platform.startswith("linux") and shutil.which("strace"), "requires Linux strace")
     def test_hard_kill_grace_waits_for_a_living_descendant_without_repeated_polling(self):
         trace = self.root / "wait.trace"

@@ -117,7 +117,7 @@ esac
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=75)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    # RFC v1.1.1 §2, §10.3
+    # RFC §10.3-01 — 重新安装后 rc 文件保留，私有工具仅在 libexec。
     def test_reinstall_keeps_shell_startup_files_and_private_tools_out_of_the_user_bin(self):
         with tempfile.TemporaryDirectory(prefix="anix reinstall ") as home:
             root = Path(home)
@@ -159,7 +159,8 @@ esac
                         path = root / ".local" / rel
                         self.assertTrue(path.is_file() and os.access(path, os.X_OK), path)
 
-    # RFC v1.1.1 §4.1, §10.3
+    # RFC §10.3-05 — doctor 发现无法创建匿名管道并给出修复提示。
+    # RFC §10.3-06 — doctor 检测锁操作失败或失去互斥性。
     @unittest.skipUnless(platform.system() == "Linux" and shutil.which("strace"), "requires Linux strace")
     def test_doctor_detects_unavailable_pipes_and_unusable_file_locking(self):
         with tempfile.TemporaryDirectory(prefix="anix-doctor-") as home:
@@ -214,7 +215,7 @@ timeout_sec=3
                "XDG_RUNTIME_DIR": str(root / "run")}
         return agents, env
 
-    # RFC v1.1.1 §4.1
+    # RFC §4.1-07 — 在真实 TTY 上精确检查 Dim 使用量行在最后一个换行前重置 ANSI 样式。
     def test_usage_line_resets_dim_before_the_final_newline_on_a_terminal(self):
         with tempfile.TemporaryDirectory(prefix="anix-usage-tty-") as home:
             root = Path(home)
@@ -244,7 +245,9 @@ timeout_sec=3
             self.assertEqual(output.count(b"[usage]"), 1)
             self.assertRegex(bytes(output), rb"(?:^|\n)\x1b\[2m\[usage\] [^\r\n]+\x1b\[0m\n\Z")
 
-    # RFC v1.1.1 §2, §3.1, §4.1, §9.2, §10.3
+    # RFC §1.2-01 — 安装后的 .agent 脚本以 shebang 从 PATH 或相对路径直接启动。
+    # RFC §4.1-01 — 有参数的可执行脚本通过 PATH 或相对路径启动，TTY 保持打开即可推理。
+    # RFC §10.3-01 — 安装后的 bash.agent 保持 stdin TTY 打开，直接或经相对路径启动都能完成。
     def test_installed_bash_script_accepts_args_on_path_and_by_relative_name_without_tty_eof(self):
         with tempfile.TemporaryDirectory(prefix="anix-install-tty-") as home:
             root = Path(home)
@@ -268,7 +271,10 @@ timeout_sec=3
                     frames = [json.loads(line) for line in (root / "request").read_bytes().splitlines()]
                     self.assertEqual([f["text"] for f in frames if f.get("role") == "user"], ["<args>xxx</args>"])
 
-    # RFC v1.1.1 §2, §3.1, §4.1, §4.4, §6.1, §6.2, §7.2, §9.2, §9.6, §10.3
+    # RFC §2-03 — 安装后从 msh 调用私有 aview 和 aclr，检查附件及折叠结果。
+    # RFC §4.1-04 — 已安装的脚本通过真实 shell 输出 A、NUL、B，不掺入模型回复。
+    # RFC §7.2-06 — 原生工具和图片管道的字节一致性。
+    # RFC §9.1-15 — 已安装 Provider 将真实 aview 附件送入本地 HTTP 请求。
     def test_installed_pipeline_and_fold(self):
         with tempfile.TemporaryDirectory(prefix="anix-fhs-") as home:
             root = Path(home)

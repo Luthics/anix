@@ -3,7 +3,7 @@ use super::{Fixture, expect_code, jsonl, scripted_provider, success_text, tool, 
 use serde_json::{Value, json};
 use std::fs;
 
-// RFC v1.1 §3.1, §4.1, §6.5
+// RFC §3.1-04 — --version 成功退出，在 stdout 报告包版本与 ir_version。
 #[test]
 fn cli_version_usage_and_success_have_distinct_stream_contracts() {
     let fx = Fixture::new();
@@ -30,7 +30,7 @@ fn cli_version_usage_and_success_have_distinct_stream_contracts() {
     assert!(!fx.capture.exists());
 }
 
-// RFC v1.1 §4.1, §9.5
+// RFC §4.1-13 — 先拼 args 与 stdin，再按 4、6、9 的顺序拼入可读 FD，跳过只写 FD 和 Trace。
 #[test]
 fn args_stdin_and_sparse_extra_descriptors_are_ordered_and_trace_is_separate() {
     let fx = Fixture::new();
@@ -82,7 +82,10 @@ fn args_stdin_and_sparse_extra_descriptors_are_ordered_and_trace_is_separate() {
         && r["ts"].is_string()));
 }
 
-// RFC v1.1 §4.1, §4.3
+// RFC §3.1-10 — 两种 stderr 模式都不改变重定向到文件的工具原始字节。
+// RFC §4.1-04 — 在两个工具调用中写出含 NUL 和 0xff 的片段，目标文件保留顺序和原始字节。
+// RFC §4.3-05 — 连续工具重定向到普通文件时顺序追加。
+// RFC §6.5-03 — 正常结束返回 0，普通文件中保留完整的显式输出。
 #[test]
 fn repeated_payload_redirection_appends_raw_bytes_in_both_stderr_modes() {
     for mode in ["auto", "explicit"] {
@@ -144,7 +147,9 @@ fn repeated_payload_redirection_appends_raw_bytes_in_both_stderr_modes() {
     }
 }
 
-// RFC v1.1 §2, §3.4, §4.3
+// RFC §2-03 — 检查工具进程 PATH 的第一项目录为私有 tools。
+// RFC §3.4-06 — 在 output=explicit 的工具进程中读到 ANIX_OUT=/dev/fd/4、ANIX_ERR=/dev/fd/5、ANIX_CTL=/dev/fd/6。
+// RFC §7.1-02 — 实际子 shell 所见 PATH 起始项为私有工具目录。
 #[test]
 fn tool_receives_control_channels_tools_path_and_no_parent_model_or_wal() {
     let fx = Fixture::new();
@@ -190,7 +195,7 @@ fn tool_receives_control_channels_tools_path_and_no_parent_model_or_wal() {
     );
 }
 
-// RFC v1.1 §3.1, §4.1
+// RFC §3.1-01 — -- 分隔后的类选项字符串按原顺序送入 Provider；普通参数允许省略分隔符。
 #[test]
 fn script_arguments_accept_an_optional_separator_and_preserve_option_like_literals() {
     let fx = Fixture::new();
@@ -211,7 +216,8 @@ fn script_arguments_accept_an_optional_separator_and_preserve_option_like_litera
     }
 }
 
-// RFC v1.1 §4.1, §4.3
+// RFC §4.1-13 — 逐个设置 fd 4–9 的访问模式，核对输入顺序及调用子进程前关闭文件。
+// RFC §4.1-14 — Provider、钩子、shell 不能继承已消费的文件。
 #[test]
 fn every_static_fd_access_mode_is_probed_and_consumed_input_files_are_closed_before_spawn() {
     use super::executable;
@@ -284,7 +290,7 @@ done"#;
     }
 }
 
-// RFC v1.1 §3.4, §4.3
+// RFC §3.4-05 — 清除父实例状态、保留观测变量与普通环境变量。
 #[test]
 fn shell_environment_contains_only_observability_effective_approval_and_routed_fds() {
     use super::executable;
@@ -396,7 +402,7 @@ fn shell_environment_contains_only_observability_effective_approval_and_routed_f
     }
 }
 
-// RFC v1.1.1 §4.1, §4.3
+// RFC §4.1-06 — 流式正文和思考帧在工具状态、诊断侧信道及使用量汇总处的换行，显式模式只输出诊断。
 #[test]
 fn unterminated_deltas_are_separated_from_tool_status_diagnostics_and_usage() {
     for kind in ["reasoning_delta", "text_delta"] {

@@ -215,7 +215,7 @@ pub fn run() -> ExitCode {
 mod tests {
     use super::*;
 
-    // RFC v1.1 §3.1
+    // RFC §3.1-01 — -- 后的 -q 和 -n 保留为脚本参数，解释器只消费分隔符之前的选项。
     #[test]
     fn parses_script_and_args_with_double_dash() {
         let cli = Cli::try_parse_from(["anix", "-y", "-q", "audit.agent", "--", "HEAD~1"])
@@ -233,7 +233,7 @@ mod tests {
         assert_eq!(cli.script_args, vec!["-q", "-n", "5"]);
     }
 
-    // RFC v1.1 §3.1
+    // RFC §3.1-01 — 省略 -- 时保留带空格的参数和空字符串，混排的 -y、-q、-c 仍由解释器处理。
     #[test]
     fn parses_direct_and_quoted_script_args_without_double_dash() {
         let cli = Cli::try_parse_from(["anix", "bash.agent", "git log -n 5"])
@@ -256,7 +256,7 @@ mod tests {
         assert_eq!(cli.script_args, vec![""]);
     }
 
-    // RFC v1.1 §3.1, §8.3
+    // RFC §3.1-02 — trust 子命令与普通脚本参数分别解析。
     #[test]
     fn trust_subcommand_does_not_conflict_with_script_args() {
         let cli = Cli::try_parse_from(["anix", "trust", "./proj"]).expect("parse trust");

@@ -39,7 +39,7 @@ impl Fixture {
     }
 }
 
-// RFC v1.1 §3.2, §9.1
+// RFC §3.2-01 — CRLF 脚本的正文和 params 按预期进入真实 Provider 请求。
 #[test]
 fn crlf_script_reaches_the_provider_as_the_intended_system_message() {
     let fixture = Fixture::new();
@@ -62,7 +62,7 @@ fn crlf_script_reaches_the_provider_as_the_intended_system_message() {
     );
 }
 
-// RFC v1.1 §3.2, §3.3, §6.5
+// RFC §3.2-04 — 改变拼写或位置仍拒绝未声明的顶层键，且不调用 Provider。
 #[test]
 fn unknown_top_level_fields_fail_closed_regardless_of_spelling_or_position() {
     let fixture = Fixture::new();
@@ -85,7 +85,7 @@ fn unknown_top_level_fields_fail_closed_regardless_of_spelling_or_position() {
     }
 }
 
-// RFC v1.1 §3.2, §6.5
+// RFC §6.5-05 — 脚本含非法 UTF-8 或无效 YAML 时以 2 退出并写 stderr。
 #[test]
 fn invalid_file_bytes_and_yaml_report_usage_errors_to_stderr() {
     let fixture = Fixture::new();
@@ -102,7 +102,7 @@ fn invalid_file_bytes_and_yaml_report_usage_errors_to_stderr() {
     }
 }
 
-// RFC v1.1 §3.2, §3.3, §9.1
+// RFC §3.2-03 — 分别验证 |、> 的 strip、clip 和 keep 尾换行。
 #[test]
 fn yaml_block_scalar_chomping_survives_the_frontmatter_boundary() {
     let fixture = Fixture::new();
@@ -145,7 +145,7 @@ fn yaml_block_scalar_chomping_survives_the_frontmatter_boundary() {
     assert!(differences.is_empty(), "{}", differences.join("\n"));
 }
 
-// RFC v1.1 §3.2, §3.3, §6.5
+// RFC §3.2-03 — 在顶层字段与开放 map 中使用重复 YAML 键均应拒绝。
 #[test]
 fn duplicate_yaml_keys_are_invalid_even_inside_open_maps() {
     let fixture = Fixture::new();
@@ -158,7 +158,7 @@ fn duplicate_yaml_keys_are_invalid_even_inside_open_maps() {
     }
 }
 
-// RFC v1.1 §3.2, §3.3, §9.1
+// RFC §3.2-04 — x-* 中定义的 YAML 锚点可在 params 中复用并保留类型。
 #[test]
 fn yaml_aliases_can_supply_typed_provider_params_from_an_extension_field() {
     let fixture = Fixture::new();
@@ -176,7 +176,7 @@ fn yaml_aliases_can_supply_typed_provider_params_from_an_extension_field() {
     assert_eq!(header["params"], json!({"original":item,"copied":item}));
 }
 
-// RFC v1.1 §3.2, §3.3, §5.5, §6.5
+// RFC §3.3-13 — vision 只接受 YAML 布尔值，params.vision 仍可作为普通字符串透传。
 #[test]
 fn vision_requires_a_yaml_boolean_and_leaves_provider_params_open() {
     let fixture = Fixture::new();

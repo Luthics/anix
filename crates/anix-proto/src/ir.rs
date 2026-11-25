@@ -392,7 +392,7 @@ fn is_false(b: &bool) -> bool {
 mod tests {
     use super::*;
 
-    // RFC v1.1 §9.1
+    // RFC §9.1-03 — header 在首行、消息在随后行，编码后可完整解码。
     #[test]
     fn ir_jsonl_header_and_messages_round_trip() {
         let stream = IrStream {

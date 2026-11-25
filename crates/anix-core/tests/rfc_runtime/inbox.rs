@@ -14,7 +14,9 @@ pub(super) fn publish(root: &Path, name: &str, text: &str) {
     fs::rename(tmp, root.join("mail/new").join(name)).unwrap();
 }
 
-// RFC v1.1 §4.2, §6.2
+// RFC §4.2-01 — 当前工具批次闭合后才取下一条已发布消息。
+// RFC §4.2-04 — 并发发布时核对 Inbox 目录权限，并确认每个消息体完整交付。
+// RFC §4.2-05 — 多发送方只发布完整文件。
 #[test]
 fn concurrent_publications_wait_for_tool_closure_and_preserve_each_complete_body() {
     let fx = Fixture::new();
@@ -115,7 +117,7 @@ while [ ! -f release ] && [ "$i" -lt 240 ]; do /bin/sleep 0.1; i=$((i+1)); done
     }
 }
 
-// RFC v1.1 §4.2, §6.2, §9.1
+// RFC §4.2-04 — 在初始 CLI 任务仍运行时即可向已就绪的队列发布下一任务。
 #[test]
 fn a_publisher_can_queue_work_while_the_initial_cli_task_is_running() {
     let fx = Fixture::new();
@@ -174,7 +176,8 @@ fn a_publisher_can_queue_work_while_the_initial_cli_task_is_running() {
     assert_eq!(wal.last().unwrap()["text"], "queued complete");
 }
 
-// RFC v1.1 §4.2, §6.2
+// RFC §3.1-11 — Provider 仍忙时不计闲置时间，最后一个任务完成后才退出并释放 WAL。
+// RFC §4.2-06 — 上一任务结束后才开始计算闲置超时并释放 WAL 锁。
 #[test]
 fn idle_timeout_starts_after_the_last_job_finishes_and_releases_the_wal() {
     let fx = Fixture::new();
@@ -260,7 +263,7 @@ fi
     assert_eq!(replies, ["first complete", "second complete"]);
 }
 
-// RFC v1.1 §4.2, §6.2, §6.5, §9.2
+// RFC §9.2-16 — oneshot 虽已输出 done 却非零退出时返回 1，不执行未提交的命令，后一条 Inbox 消息保留在 new/。
 #[test]
 fn oneshot_nonzero_after_done_discards_uncommitted_calls_and_preserves_later_jobs() {
     let fx = Fixture::new();
@@ -330,7 +333,8 @@ fn oneshot_nonzero_after_done_discards_uncommitted_calls_and_preserves_later_job
     );
 }
 
-// RFC v1.1 §4.2, §6.3, §9.5
+// RFC §4.2-03 — Linux 空闲时只发一次 idle，新任务结束后重新待命。
+// RFC §6.3-01 — 无截止时间的 Linux 空闲循环持续睡眠，发布消息可以唤醒。
 #[cfg(target_os = "linux")]
 #[test]
 fn an_idle_inbox_sleeps_without_periodic_wakeups_then_consumes_a_publication() {

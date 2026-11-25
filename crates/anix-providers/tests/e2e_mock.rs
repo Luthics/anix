@@ -197,7 +197,7 @@ fn run_bin(
     (output.status.code().unwrap_or(-1), events, stderr)
 }
 
-// RFC v1.1 §2, §9.2
+// RFC §2-04 — 真实主程序和三个方言软链均能输出版本并成功退出。
 #[test]
 fn version_flag_works_for_base_binary_and_busybox_symlinks() {
     let out = Command::new(provider_bin())
@@ -227,7 +227,7 @@ fn version_flag_works_for_base_binary_and_busybox_symlinks() {
     }
 }
 
-// RFC v1.1 §6.5, §9.1, §9.2
+// RFC §9.1-04 — oneshot 读取不兼容 ir_version 时报告诊断并以 2 退出。
 #[test]
 fn unsupported_ir_version_exits_2() {
     let bad_ir = r#"{"ir_version":99,"type":"header","tools":[],"meta":{"stderr_mode":"auto","cwd":"/tmp"}}"#;
@@ -246,7 +246,7 @@ fn unsupported_ir_version_exits_2() {
     ));
 }
 
-// RFC v1.1 §2, §9.2
+// RFC §2-04 — 通过 Responses 软链请求本地端点，检查返回的协议帧。
 #[test]
 fn busybox_symlink_openai_responses_end_to_end() {
     let sse = concat!(
@@ -284,7 +284,7 @@ fn busybox_symlink_openai_responses_end_to_end() {
     }));
 }
 
-// RFC v1.1 §2, §9.2
+// RFC §2-04 — 通过 Chat 软链请求免鉴权本地端点并检查响应帧。
 #[test]
 fn busybox_symlink_openai_compat_end_to_end_and_unauthenticated_local() {
     let sse = concat!(
@@ -323,7 +323,7 @@ fn busybox_symlink_openai_compat_end_to_end_and_unauthenticated_local() {
     }));
 }
 
-// RFC v1.1 §2, §9.2
+// RFC §2-04 — Anthropic 软链请求携带预期 HTTP 头，usage 帧包含缓存用量。
 #[test]
 fn busybox_symlink_anthropic_end_to_end_with_inclusive_usage_and_headers() {
     let sse = concat!(
@@ -389,7 +389,7 @@ fn busybox_symlink_anthropic_end_to_end_with_inclusive_usage_and_headers() {
     );
 }
 
-// RFC v1.1 §9.2
+// RFC §9.2-15 — HTTP 429/529 转换为可重试错误，普通 400 不重试。
 #[test]
 fn http_429_and_529_map_to_retryable_errors_and_400_is_non_retryable() {
     let (o1, _, h1) = spawn_mock_server(
@@ -453,7 +453,7 @@ fn http_429_and_529_map_to_retryable_errors_and_400_is_non_retryable() {
     ));
 }
 
-// RFC v1.1 §9.2
+// RFC §9.2-18 — 同一协进程处理多个请求，错误后仍能响应，stdin EOF 后以 0 退出。
 #[test]
 fn coprocess_mode_serves_multiple_requests_survives_error_and_exits_0_on_eof() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
@@ -610,7 +610,7 @@ fn coprocess_mode_serves_multiple_requests_survives_error_and_exits_0_on_eof() {
     assert_eq!(reqs[2].body["model"], "model-c");
 }
 
-// RFC v1.1 §5.5, §9.2
+// RFC §5.5-06 — 本地模拟上游拒绝图片，驱动返回 unsupported_media 且 retryable=false。
 #[test]
 fn http_400_image_rejection_maps_to_unsupported_media_non_retryable() {
     let tmp = TempSymlinkDir::new();
@@ -669,7 +669,7 @@ fn http_400_image_rejection_maps_to_unsupported_media_non_retryable() {
     ));
 }
 
-// RFC v1.1.1 §9.2
+// RFC §9.2-04 — 对三个 HTTP 方言核对默认 session header 与各自的 body 映射。
 #[test]
 fn session_affinity_headers_and_body_mapping_across_all_dialects() {
     let make_ir = |params: BTreeMap<String, Value>| -> String {

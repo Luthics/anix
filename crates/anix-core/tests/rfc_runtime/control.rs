@@ -21,7 +21,9 @@ fn run(fx: &Fixture) {
     assert!(out.stdout.is_empty() && out.stderr.is_empty());
 }
 
-// RFC v1.1 §7.2, §6.2, §9.1
+// RFC §4.3-04 — 同次及分次写入控制管道的多条媒体帧按顺序绑定到对应工具。
+// RFC §7.2-07 — 并列及跨写入的媒体帧均应按完整 JSONL 及到达顺序处理。
+// RFC §9.1-13 — 媒体帧保留工具调用身份和到达顺序，恢复时附件保持一致。
 #[test]
 fn concatenated_and_split_media_frames_keep_order_and_tool_identity_after_resume() {
     let fx = Fixture::new();
@@ -90,7 +92,7 @@ fn concatenated_and_split_media_frames_keep_order_and_tool_identity_after_resume
     }
 }
 
-// RFC v1.1 §7.2, §6.1, §6.2
+// RFC §7.2-07 — 同一工具提交两条合法 fold 帧，WAL 应按到达顺序各写一条。
 #[test]
 fn two_valid_fold_frames_from_one_tool_are_appended_in_arrival_order() {
     // t1 is the user, t2 the assistant, t3 its tool. Folding from t3 first

@@ -41,7 +41,7 @@ pub enum CtlFrame {
 mod tests {
     use super::*;
 
-    // RFC v1.1 §7.2
+    // RFC §7.2-07 — 控制帧编码与解码往返保持操作和参数。
     #[test]
     fn ctl_frames_round_trip() {
         let frames = [

@@ -7,7 +7,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-// RFC v1.1 §6.4, §6.5, §6.2
+// RFC §6.4-01 — 中断后收回 Provider、不提交半截回答，下一进程可以重新获取 WAL 锁。
 #[test]
 fn interruption_reaps_the_provider_discards_partial_assistant_and_releases_lock() {
     for (signal, code) in [(libc::SIGINT, 130), (libc::SIGTERM, 143)] {
@@ -45,7 +45,8 @@ exit 1
     }
 }
 
-// RFC v1.1 §4.2, §6.2, §6.4
+// RFC §6.4-05 — 保持模式进程收到 STOP 后暂停，CONT 恢复后继续响应快照请求。
+// RFC §6.4-07 — USR2 输出快照路径，文件权限为 0600，内容与活跃 IR 相符。
 #[test]
 fn idle_process_holds_wal_and_usr2_snapshots_exact_ir_at_a_safe_boundary() {
     let fx = Fixture::new();
@@ -112,7 +113,7 @@ fn idle_process_holds_wal_and_usr2_snapshots_exact_ir_at_a_safe_boundary() {
     agent.finish(143);
 }
 
-// RFC v1.1 §6.4, §6.1
+// RFC §6.4-06 — USR1 在下次推理前执行一次无工具的上下文压缩。
 #[test]
 fn usr1_forces_one_tool_free_compaction_before_the_next_inbox_inference() {
     let fx = Fixture::new();
@@ -165,13 +166,14 @@ fn usr1_forces_one_tool_free_compaction_before_the_next_inbox_inference() {
     assert!(!root.join("request-4").exists());
 }
 
-// RFC v1.1.1 §6.3, §6.4, §6.5, §10.2
+// RFC §10.2-02 — 在无 pidfd 的 Linux 配置里，SIGTERM 的子进程清理仍须按时结束。
 #[test]
 fn sigterm_bounds_cleanup_of_a_provider_that_acknowledges_term() {
     assert_bounded_provider_cleanup(libc::SIGTERM, 143);
 }
 
-// RFC v1.1.1 §6.3, §6.4, §6.5, §10.2
+// RFC §6.3-02 — 向响应 TERM 的 Provider 发 SIGINT，检查回收仍受截止时间限制。
+// RFC §10.2-02 — 在无 pidfd 的 Linux 配置里，SIGINT 也必须按期限回收已收到 TERM 的 Provider。
 #[test]
 fn sigint_bounds_cleanup_of_a_provider_that_acknowledges_term() {
     assert_bounded_provider_cleanup(libc::SIGINT, 130);
@@ -214,7 +216,7 @@ printf finished > natural-exit
     );
 }
 
-// RFC v1.1 §10.2
+// RFC §10.2-01 — Linux 上主进程异常终止后，活跃的 Provider 或 shell 子进程也终止。
 #[cfg(target_os = "linux")]
 #[test]
 fn abrupt_parent_exit_stops_the_active_provider_or_shell_child() {

@@ -5,7 +5,8 @@ use super::{
 use std::fs;
 use std::time::{Duration, Instant};
 
-// RFC v1.1 §9.3, §9.1, §6.2
+// RFC §9.1-09 — pre-context 输出中的改写及追加记录可进入被冻结的上下文。
+// RFC §9.3-01 — 串联 pre-context 过滤器后只冻结最终改写的消息序列。
 #[test]
 fn pre_context_filters_can_rewrite_and_append_conversation_records_before_freezing() {
     use serde_json::json;
@@ -76,7 +77,7 @@ set -eu
     }
 }
 
-// RFC v1.1 §9.3
+// RFC §9.3-01 — pre-context 失败时 stderr 可见，后续推理不启动。
 #[test]
 fn pre_context_failure_forwards_stderr_and_stops_before_inference() {
     let fx = Fixture::new();
@@ -102,7 +103,7 @@ fn pre_context_failure_forwards_stderr_and_stops_before_inference() {
     assert!(!root.join("should-not-run").exists() && !fx.capture.exists());
 }
 
-// RFC v1.1 §9.3, §9.5
+// RFC §9.3-02 — 首个失败的 post-tool 阻止后续过滤器、工具和推理。
 #[test]
 fn post_tool_failure_stops_before_later_hooks_tools_and_provider_turns() {
     let fx = Fixture::new();
@@ -150,7 +151,9 @@ fn post_tool_failure_stops_before_later_hooks_tools_and_provider_turns() {
     }
 }
 
-// RFC v1.1.1 §6.3, §9.3, §9.5, §10.2
+// RFC §6.3-02 — 一个 on-exit 钩子超时后其他钩子仍执行，保留主进程退出码。
+// RFC §9.3-03 — 一个 on-exit 钩子超时只影响该钩子，主退出码保持不变。
+// RFC §10.2-02 — 在无 pidfd 的 Linux 配置里，退出钩子仍有独立超时。
 #[test]
 fn on_exit_timeout_is_local_to_one_hook_and_preserves_the_primary_exit_code() {
     let fx = Fixture::new();
@@ -190,7 +193,8 @@ fn on_exit_timeout_is_local_to_one_hook_and_preserves_the_primary_exit_code() {
     assert!(!String::from_utf8(out.stderr).unwrap().contains("10-slow"));
 }
 
-// RFC v1.1 §9.4
+// RFC §9.4-03 — 六层搜索顺序和同名覆盖。
+// RFC §9.4-04 — 逐层比较同名技能的获胜路径，首轮索引中不出现正文。
 #[test]
 fn each_skill_search_layer_wins_once_and_the_body_stays_out_of_the_index() {
     let fx = Fixture::new();
@@ -253,7 +257,7 @@ fn each_skill_search_layer_wins_once_and_the_body_stays_out_of_the_index() {
     );
 }
 
-// RFC v1.1 §1.4, §8.1, §9.6
+// RFC §9.6-02 — 版本漂移后恢复内置指南；状态目录只读时使用运行时目录。
 #[test]
 fn tips_are_restored_after_version_drift_and_fall_back_to_runtime_when_state_is_unwritable() {
     let fx = Fixture::new();
@@ -292,7 +296,8 @@ fn tips_are_restored_after_version_drift_and_fall_back_to_runtime_when_state_is_
     assert!(fallback.contains(fs::canonicalize(file).unwrap().to_str().unwrap()));
 }
 
-// RFC v1.1 §9.6
+// RFC §9.6-02 — 屏蔽 30-tips 时首次运行不会释放内置指南文件。
+// RFC §9.6-03 — 空文件或 /dev/null 屏蔽 30-tips 后索引和磁盘副作用均消失。
 #[test]
 fn masking_the_whole_tips_hook_suppresses_both_its_index_and_first_run_files() {
     use std::os::unix::fs::symlink;
@@ -340,7 +345,7 @@ fn masking_the_whole_tips_hook_suppresses_both_its_index_and_first_run_files() {
     }
 }
 
-// RFC v1.1 §9.6
+// RFC §9.6-04 — 屏蔽所有指南后不向系统提示词注入 tips 索引。
 #[test]
 fn an_empty_merged_tips_index_costs_no_prompt_bytes() {
     let fx = Fixture::new();
@@ -371,7 +376,7 @@ fn an_empty_merged_tips_index_costs_no_prompt_bytes() {
     assert!(!displayed.contains("contents stay on disk"));
 }
 
-// RFC v1.1 §1.4, §8.1, §9.6
+// RFC §9.6-01 — MCP 指南按 anix 状态目录、全局和项目路径披露。
 #[test]
 fn mcp_guide_follows_anix_xdg_and_project_precedence_without_disclosing_tool_schemas() {
     let fx = Fixture::new();
@@ -462,7 +467,9 @@ fn mcp_guide_follows_anix_xdg_and_project_precedence_without_disclosing_tool_sch
     }
 }
 
-// RFC v1.1 §4.4, §4.1, §6.2, §9.1
+// RFC §3.1-10 — 启动与恢复时对照 stderr=auto/explicit 的提示词、输出与 WAL 通知。
+// RFC §4.4-02 — 首次生成 stderr=auto 的运行提示，诊断流可见模型文本。
+// RFC §4.4-03 — 在旧 WAL 上切换至 explicit，只在末尾追加通知并保留冻结首条提示。
 #[test]
 fn runtime_contract_depends_on_stderr_and_only_changes_at_the_tail_on_resume() {
     let fx = Fixture::new();
@@ -525,7 +532,10 @@ fn runtime_contract_depends_on_stderr_and_only_changes_at_the_tail_on_resume() {
     }
 }
 
-// RFC v1.1 §4.4, §8.3, §9.3, §9.4, §9.6
+// RFC §4.4-01 — 同名全局或已信任项目钩子可覆写和屏蔽。
+// RFC §8.3-01 — 三个内置 pre-context 钩子依次由全局及项目同名文件覆写，也可被空文件或空设备软链屏蔽。
+// RFC §9.4-02 — 20-skills 内置、同名覆写与禁用。
+// RFC §9.6-03 — 用全局或已信任项目中的同名钩子覆写或屏蔽 30-tips。
 #[test]
 fn each_builtin_can_be_replaced_globally_then_overridden_or_masked_by_the_project() {
     use std::os::unix::fs::symlink;
@@ -586,7 +596,8 @@ fn each_builtin_can_be_replaced_globally_then_overridden_or_masked_by_the_projec
     }
 }
 
-// RFC v1.1.1 §9.3, §9.1, §6.1, §6.2, §4.1, §7.1
+// RFC §6.1-13 — 工具退出 0、7、124 时，当前 IR、落盘 WAL 和重新加载的 IR 都含正确的轮次、退出码与过滤后文本。
+// RFC §9.3-02 — 两个 post-tool 过滤器依次改写文本，只有最终结果到达 WAL 和 Provider。
 #[test]
 fn post_tool_filters_chain_in_order_and_only_the_final_text_reaches_wal_and_provider() {
     for status in [0, 7, 124] {

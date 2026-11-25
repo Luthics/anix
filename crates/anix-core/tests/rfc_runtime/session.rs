@@ -95,7 +95,7 @@ fn provider_ids(fx: &Fixture) -> Vec<String> {
         .collect()
 }
 
-// RFC v1.1.1 §1.4, §3.4, §6.2, §9.2, §9.5
+// RFC §6.2-02 — 无状态进程内普通推理和压缩共用 UUID v4，不同进程标识不同。
 #[test]
 fn stateless_runs_get_distinct_uuid_v4s_while_all_provider_calls_in_a_run_share_one() {
     let fx = oneshot_fixture(&[
@@ -117,7 +117,7 @@ fn stateless_runs_get_distinct_uuid_v4s_while_all_provider_calls_in_a_run_share_
     assert_eq!(fs::read(fx.dir.0.join("shell-id")).unwrap(), b"unset");
 }
 
-// RFC v1.1.1 §6.1, §6.2, §9.2, §9.5
+// RFC §6.2-01 — 新建会话在压缩、路径别名与恢复后仍使用原 session_id。
 #[test]
 fn persisted_id_survives_builtin_compaction_checkpoint_alias_and_subsequent_resume() {
     let fx = oneshot_fixture(&[
@@ -156,7 +156,7 @@ fn persisted_id_survives_builtin_compaction_checkpoint_alias_and_subsequent_resu
     assert!(fs::read(history).unwrap().starts_with(&prefix));
 }
 
-// RFC v1.1.1 §1.4, §6.2, §9.2, §9.5
+// RFC §6.2-03 — 旧 WAL 的规范路径及其别名在重启时得到相同回退标识。
 #[test]
 fn legacy_wal_uses_a_stable_canonical_path_id_across_aliases_and_restarts() {
     let fx = oneshot_fixture(&[
@@ -190,7 +190,8 @@ fn legacy_wal_uses_a_stable_canonical_path_id_across_aliases_and_restarts() {
     }
 }
 
-// RFC v1.1.1 §1.4, §6.2, §9.2, §9.5
+// RFC §6.2-04 — 最新 checkpoint 提供的标识原样到达 Trace、环境和协进程信封。
+// RFC §9.5-03 — 初始 Trace 与 WAL、Provider 环境和协进程信封可用同一标识关联。
 #[test]
 fn latest_checkpoint_supplies_exact_stored_id_to_trace_env_and_coprocess_envelope() {
     let fx = coprocess_fixture(RECORD_COPROCESS);
@@ -219,7 +220,7 @@ fn latest_checkpoint_supplies_exact_stored_id_to_trace_env_and_coprocess_envelop
     );
 }
 
-// RFC v1.1.1 §1.4, §3.4, §6.2, §9.2, §9.5
+// RFC §9.2-01 — 父子会话各自路由，子进程完成后父会话保持原标识。
 #[test]
 fn nested_anix_gets_its_own_id_and_the_parent_resumes_with_its_original_id() {
     let command =
@@ -271,7 +272,7 @@ printf '%s\n' '{"type":"text_delta","text":"child complete"}' '{"type":"done","f
     );
 }
 
-// RFC v1.1.1 §4.2, §6.2, §9.2, §9.5
+// RFC §6.2-04 — 两条 Inbox 消息使用同一 Provider 进程，两个请求的 session_id 与 WAL 及 run_start 相同。
 #[test]
 fn inbox_keeps_one_session_id_for_both_messages_in_a_single_coprocess() {
     let fx = coprocess_fixture(RECORD_COPROCESS);
@@ -308,7 +309,7 @@ fn inbox_keeps_one_session_id_for_both_messages_in_a_single_coprocess() {
     }
 }
 
-// RFC v1.1.1 §1.4, §6.1, §6.2, §9.2, §9.5
+// RFC §6.2-03 — 第一次 checkpoint 持久化回退标识，移动 WAL 后仍可恢复。
 #[test]
 fn first_checkpoint_in_a_legacy_wal_persists_the_fallback_id_even_if_the_wal_moves() {
     let fx = oneshot_fixture(&[
@@ -344,7 +345,7 @@ fn first_checkpoint_in_a_legacy_wal_persists_the_fallback_id_even_if_the_wal_mov
     );
 }
 
-// RFC v1.1.1 §3.1, §3.4, §6.1, §6.2, §9.2, §9.5
+// RFC §6.2-02 — 清空 context 后不会沿用已有 WAL 标识，当次压缩仍复用本次标识。
 #[test]
 fn empty_context_overrides_a_saved_wal_and_keeps_one_ephemeral_id_through_compaction() {
     let fx = oneshot_fixture(&[
@@ -381,7 +382,7 @@ fn empty_context_overrides_a_saved_wal_and_keeps_one_ephemeral_id_through_compac
     );
 }
 
-// RFC v1.1.1 §6.2, §9.2, §9.5
+// RFC §9.2-17 — 协进程重新启动后，替代进程仍收到相同 session_id 和已提交的工具历史。
 #[test]
 fn restarting_a_coprocess_between_turns_preserves_session_and_tool_history() {
     let fx = coprocess_fixture(

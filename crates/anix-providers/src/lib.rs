@@ -227,7 +227,7 @@ mod tests {
         items.iter().map(|x| (*x).to_owned()).collect()
     }
 
-    // RFC v1.1 §2, §9.2
+    // RFC §2-04 — 通过 argv[0] 的 BusyBox 名称选方言，并识别版本请求。
     #[test]
     fn resolves_dialect_from_argv0_symlink_and_version() {
         assert_eq!(
@@ -247,7 +247,7 @@ mod tests {
         );
     }
 
-    // RFC v1.1 §2, §9.2
+    // RFC §2-04 — 普通入口分别从子命令、显式选项和环境选择方言。
     #[test]
     fn resolves_dialect_from_subcommand_flag_and_env() {
         assert_eq!(

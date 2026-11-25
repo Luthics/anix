@@ -4,7 +4,7 @@
 use anix_core::frontmatter::parse_script_str;
 use serde_json::json;
 
-// RFC v1.1 §3.2
+// RFC §3.2-01 — 组合 LF/CRLF、shebang、头部、正文与末尾 EOF，比较解析结果。
 #[test]
 fn layout_matrix_for_line_ending_shebang_header_body_and_eof() {
     let bodies = [
@@ -41,7 +41,7 @@ fn layout_matrix_for_line_ending_shebang_header_body_and_eof() {
     }
 }
 
-// RFC v1.1 §3.2
+// RFC §3.2-02 — 仅去掉首行 shebang。
 #[test]
 fn only_a_first_line_beginning_with_hash_bang_is_removed() {
     for (source, body) in [
@@ -64,7 +64,7 @@ fn only_a_first_line_beginning_with_hash_bang_is_removed() {
     }
 }
 
-// RFC v1.1 §3.2
+// RFC §3.2-03 — 仅指定位置的独占 --- 行能打开 YAML 头部。
 #[test]
 fn opening_delimiter_requires_the_designated_line_and_exact_marker() {
     for marker in ["--", "----", "—", "x---", "---x", "--- # comment"] {
@@ -87,7 +87,7 @@ fn opening_delimiter_requires_the_designated_line_and_exact_marker() {
     }
 }
 
-// RFC v1.1 §3.2
+// RFC §3.2-03 — 首个独占 --- 行关闭头部，只裁掉正文边界空行。
 #[test]
 fn first_closing_delimiter_ends_yaml_and_only_blank_body_edges_are_removed() {
     for eol in ["\n", "\r\n"] {
@@ -110,7 +110,7 @@ fn first_closing_delimiter_ends_yaml_and_only_blank_body_edges_are_removed() {
     }
 }
 
-// RFC v1.1 §3.2, §3.3
+// RFC §3.2-03 — YAML 1.2 的标量类型与 x-* 扩展和开放 params 可共存。
 #[test]
 fn yaml_12_scalars_extensions_and_open_params_coexist_with_known_fields() {
     let source = r#"---
@@ -140,7 +140,7 @@ unknown-field: literal prompt"#;
     assert_eq!(parsed.prompt, "unknown-field: literal prompt");
 }
 
-// RFC v1.1 §3.2
+// RFC §3.2-03 — 缺关闭分隔行或 YAML 损坏时在解析头部阶段失败。
 #[test]
 fn incomplete_delimiters_and_malformed_yaml_fail_at_the_header() {
     for source in [

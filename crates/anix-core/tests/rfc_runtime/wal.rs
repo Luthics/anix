@@ -21,7 +21,7 @@ fn run(fixture: &Fixture, vision: &str, input: &str) -> Vec<Value> {
     jsonl(&fixture.capture)
 }
 
-// RFC v1.1 §1.4, §6.2, §9.1, §9.2
+// RFC §6.2-10 — 恢复缺 vision 和 fold_usage 的旧 WAL，已有前缀不被改写。
 #[test]
 fn legacy_wal_without_vision_or_fold_usage_resumes_without_rewriting_the_prefix() {
     let fixture = Fixture::new();
@@ -57,7 +57,7 @@ fn legacy_wal_without_vision_or_fold_usage_resumes_without_rewriting_the_prefix(
     assert_eq!(jsonl(&history).last().unwrap()["text"], "ok");
 }
 
-// RFC v1.1 §3.1, §5.5, §6.2, §9.1
+// RFC §6.2-05 — 两次相同 vision 配置不会重复通知；每次切换仅追加一次并复用冻结提示词。
 #[test]
 fn repeated_resume_appends_one_vision_update_per_change_and_reuses_frozen_text() {
     let fixture = Fixture::new();

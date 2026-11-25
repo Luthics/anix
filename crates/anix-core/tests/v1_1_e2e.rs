@@ -159,7 +159,7 @@ fn configure_child_fds(cmd: &mut Command, attach: Option<(&File, RawFd)>) {
     }
 }
 
-// RFC v1.1 §4.1, §9.5
+// RFC §4.1-05 — 末尾无换行的模型文本与使用量行分行显示。
 #[test]
 fn trace_fd_explicit_only_no_implicit_fd3_and_cycle_events() {
     let root = make_temp_env("trace-fd");
@@ -291,7 +291,8 @@ done
     let _ = fs::remove_dir_all(&root);
 }
 
-// RFC v1.1 §5.2, §6.5, §8.3, §9.5
+// RFC §6.5-06 — 未信任项目配置的外部裁决器时返回 75，不执行该裁决器。
+// RFC §8.3-02 — 项目级裁决器首次运行需取得信任，再次启动按裁决处理工具。
 #[test]
 fn external_approval_decider_trust_gate_and_exit_75() {
     let root = make_temp_env("approval-decider");
@@ -460,7 +461,7 @@ esac
     let _ = fs::remove_dir_all(&root);
 }
 
-// RFC v1.1 §4.4, §5.5, §6.2, §9.6
+// RFC §5.5-02 — vision=false 时 WAL 无图片，有桥接器时保存文字描述，提示词含 MCP 指南。
 #[test]
 fn vision_false_blocks_wal_pollution_and_vision_bridge_translates_and_mcp_tip_present() {
     let root = make_temp_env("vision");
@@ -594,7 +595,7 @@ done
     let _ = fs::remove_dir_all(&root);
 }
 
-// RFC v1.1 §4.1, §4.2, §6.1, §6.2, §7.2, §9.2, §9.5
+// RFC §4.2-02 — 两条 Inbox 消息进入 done/，各产生一个 completed cycle_end，WAL 与 fold 事件记录自动摘要的用量。
 #[test]
 fn aclr_auto_summary_tail_fold_and_coprocess_inbox_lifecycle() {
     let root = make_temp_env("autofold-inbox");
@@ -803,7 +804,7 @@ done
     let _ = fs::remove_dir_all(&root);
 }
 
-// RFC v1.1.1 §3.4, §6.1, §6.2, §9.2, §9.5
+// RFC §6.2-01 — 压缩及恢复后 Provider 与 WAL 使用同一会话标识，msh 环境不继承父会话标识。
 #[test]
 fn test_v1_1_1_session_id_persists_across_wal_resume_checkpoint_and_isolates_msh() {
     let root = make_temp_env("session-id");
@@ -1027,7 +1028,7 @@ timeout_sec = 30
     let _ = fs::remove_dir_all(&root);
 }
 
-// RFC v1.1.2 §6.3, §6.5, §7.1, §7.2, §8.2, §9.1, §9.5
+// RFC §6.5-08 — 默认超时返回后台句柄并继续任务，显式强杀返回工具错误并继续推理。
 #[test]
 fn test_v1_1_2_msh_per_call_timeout_yield_bg_notification_and_kill_on_timeout() {
     let root = make_temp_env("msh-bg-v112");
@@ -1228,7 +1229,17 @@ done
     let _ = fs::remove_dir_all(&root);
 }
 
-// RFC v1.2.0 §3.1, §3.3, §3.4, §4.1, §4.3, §4.4, §6.2, §9.1, §9.5
+// RFC §3.4-08 — 脚本正文引用未挂载的 ANIX_OUT 时给出迁移提示。
+// RFC §3.4-09 — 无 shell 或禁止执行时请求工具直通，启动失败且不写 WAL。
+// RFC §4.1-16 — 默认只向管道交付最终回复，禁用工具时可串联两级脚本。
+// RFC §4.1-17 — explicit 逐字节交付工具输出，none 保持零字节并允许磁盘副作用。
+// RFC §4.3-06 — reply 模式下真实 shell 观察到 fd 4 关闭且 ANIX_OUT 缺失。
+// RFC §6.2-19 — 恢复旧 WAL 时默认 reply 在尾部通知原 explicit 契约发生变化。
+// RFC §3.4-11 — 配置无法解析的 shell 时返回 2，目标 WAL 不被创建。
+// RFC §4.1-18 — 带工具的轮次及失败轮次的部分文本进入诊断流，stdout 只交付成功终轮的回复。
+// RFC §4.4-04 — shell=none 的系统提示声明无工具，省略 runtime_tips 与 available_skills。
+// RFC §9.1-22 — 纯文本请求中 header.tools 为空，meta.output_mode 为 reply。
+// RFC §9.5-14 — run_start 记录本次真实生效的 shell=none 与 output=reply。
 #[test]
 fn test_v1_2_0_orthogonal_output_contracts_and_shell_none() {
     let root = make_temp_env("v120-output");

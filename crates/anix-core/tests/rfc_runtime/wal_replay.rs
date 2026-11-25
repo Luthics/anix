@@ -30,7 +30,7 @@ fn replay(path: &Path) -> anix_core::wal::ReplayedSession {
     WalStore::open(path).unwrap().load_active_window().unwrap()
 }
 
-// RFC v1.1 §6.2
+// RFC §6.2-13 — 对最后一条记录的每个内部字节截断，失败时原 WAL 不变。
 #[test]
 fn every_partial_byte_write_of_a_final_record_fails_without_modifying_history() {
     let dir = TempDir::new();
@@ -54,7 +54,7 @@ fn every_partial_byte_write_of_a_final_record_fails_without_modifying_history() 
     assert_eq!(replay(&committed).messages.len(), 2);
 }
 
-// RFC v1.1 §6.2, §6.5
+// RFC §6.2-13 — 最后记录 JSON 完整但缺 LF 时，恢复追加不能粘连两个 JSON 对象。
 #[test]
 fn resuming_a_complete_last_object_without_lf_never_joins_two_wal_records() {
     let fx = Fixture::new();
@@ -104,7 +104,7 @@ fn resuming_a_complete_last_object_without_lf_never_joins_two_wal_records() {
     expect_code(&run("resume again"), 0);
 }
 
-// RFC v1.1 §6.2
+// RFC §6.2-08 — 构造倒读缓冲区边界上的 checkpoint，检查回放不会触碰更早的损坏记录。
 #[test]
 fn checkpoint_short_circuits_archived_history_and_handles_reverse_read_boundaries() {
     let dir = TempDir::new();
@@ -132,7 +132,7 @@ fn checkpoint_short_circuits_archived_history_and_handles_reverse_read_boundarie
     }
 }
 
-// RFC v1.1 §6.1, §6.2
+// RFC §6.2-14 — 重叠 fold 保留存活前缀，剪枝后也不回收已用 turn_id。
 #[test]
 fn overlapping_folds_keep_the_surviving_prefix_and_never_recycle_turn_ids() {
     let dir = TempDir::new();
@@ -168,7 +168,8 @@ fn overlapping_folds_keep_the_surviving_prefix_and_never_recycle_turn_ids() {
     assert_eq!(actual, expected.map(|(t, s)| (t, s.to_owned())));
 }
 
-// RFC v1.1 §6.2, §6.5
+// RFC §6.2-17 — 末尾损坏或分节版本不受支持时，不进入正常推理。
+// RFC §6.5-05 — 不兼容的 WAL 分节版本在推理前以 2 退出。
 #[test]
 fn cli_rejects_corrupted_tails_and_unknown_section_versions_before_inference() {
     for (kind, version, suffix, code) in [
@@ -191,7 +192,8 @@ fn cli_rejects_corrupted_tails_and_unknown_section_versions_before_inference() {
     }
 }
 
-// RFC v1.1 §6.2
+// RFC §6.2-09 — 独占非阻塞锁、冲突时退出并诊断。
+// RFC §6.5-04 — 第二进程争用 WAL 的非阻塞锁时以 1 退出。
 #[test]
 fn nonblocking_wal_lock_excludes_second_process_and_is_released_on_close() {
     let fx = Fixture::new();
@@ -210,7 +212,8 @@ fn nonblocking_wal_lock_excludes_second_process_and_is_released_on_close() {
     assert_eq!(jsonl(&path)[0]["type"], "session_init");
 }
 
-// RFC v1.1 §6.2, §9.1
+// RFC §6.2-10 — 恢复时复用首次冻结的 system，仅在有配置变更时追加通知。
+// RFC §9.1-18 — 检测到配置漂移时保留首次冻结 system，尾部追加 runtime_update。
 #[test]
 fn resumed_session_reuses_frozen_prefix_and_appends_configuration_drift_once() {
     let fx = Fixture::new();
@@ -360,7 +363,12 @@ impl FoldHistory {
     }
 }
 
-// RFC v1.1 §6.1, §6.2, §9.1, §9.2
+// RFC §6.1-02 — 连续三次折叠后将每个存活消息锚点与独立回放结果比较。
+// RFC §6.1-08 — 对每个存活锚点执行折叠，与独立正向回放的前缀及摘要比较。
+// RFC §6.2-14 — 对连续折叠后的所有有效锚点，用正向模型核对活跃消息与水位。
+// RFC §6.2-15 — 每轮剪枝后将会话累计用量与正向模型比较。
+// RFC §6.2-18 — 正序回放与前向参考模型逐轮对照。
+// RFC §9.1-17 — 把不同存活锚点的折叠结果与独立模型比较，检查摘要位置。
 #[test]
 fn all_live_anchors_across_three_successive_folds_match_forward_replay_and_usage() {
     let initial = FoldHistory {
@@ -391,7 +399,7 @@ fn all_live_anchors_across_three_successive_folds_match_forward_replay_and_usage
     }
 }
 
-// RFC v1.1 §6.1, §6.2, §9.1
+// RFC §6.1-02 — uint64 标识耗尽时检查已经提交的锚点不会被复用。
 #[test]
 fn running_out_of_uint64_turn_ids_never_reuses_a_committed_anchor() {
     let fx = Fixture::new();
@@ -433,7 +441,8 @@ fn running_out_of_uint64_turn_ids_never_reuses_a_committed_anchor() {
     assert!(!exhausted.status.success());
 }
 
-// RFC v1.1 §6.2, §9.1
+// RFC §6.2-11 — 从不完整的 checkpoint 恢复时不得交付缺失冻结上下文的请求。
+// RFC §9.1-16 — 逐条截断 checkpoint，检查只在已具备完整前缀时才派发。
 #[test]
 fn checkpoint_recovery_only_dispatches_a_complete_context_at_each_record_boundary() {
     let old = [
@@ -510,7 +519,7 @@ fn checkpoint_recovery_only_dispatches_a_complete_context_at_each_record_boundar
     );
 }
 
-// RFC v1.1 §6.2, §9.1
+// RFC §6.2-10 — 在首次分节各记录边界模拟中断，检查未冻结 system 时不向 Provider 派发。
 #[test]
 fn initial_section_interruption_never_dispatches_without_a_frozen_system_message() {
     let initial = [
@@ -564,7 +573,8 @@ fn initial_section_interruption_never_dispatches_without_a_frozen_system_message
     }
 }
 
-// RFC v1.1 §6.1, §6.2, §6.5, §9.1
+// RFC §6.1-03 — 恢复时使用最后存活 assistant 的 usage 对下一请求执行硬上限判断。
+// RFC §6.1-05 — fold 后的水位回落。
 #[test]
 fn resume_uses_the_last_surviving_assistant_usage_for_the_hard_limit() {
     // The input is short enough to fit entirely under 1024 tokens by any
@@ -630,7 +640,7 @@ fn resume_uses_the_last_surviving_assistant_usage_for_the_hard_limit() {
     }
 }
 
-// RFC v1.1.1 §4.4, §6.2, §9.1
+// RFC §6.2-05 — 从 session_init 和 checkpoint 恢复，stderr、approval、vision 的八种变更组合只在首次变化时产生一条尾部通知。
 #[test]
 fn each_combination_of_stderr_approval_and_vision_drift_creates_one_tail_update() {
     for (kind, anchor) in [("session_init", 0), ("checkpoint", 20)] {

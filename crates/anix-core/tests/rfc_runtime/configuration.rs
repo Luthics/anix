@@ -6,7 +6,7 @@ use serde_json::json;
 
 use super::{Fixture, expect_code, jsonl};
 
-// RFC v1.1 §3.3
+// RFC §3.3-02 — 遍历允许与禁止的字符，检查显式 name 的 ASCII 字母、数字及 . _ - 边界。
 #[test]
 fn agent_name_has_exactly_the_documented_ascii_alphabet() {
     for byte in 0..=127u8 {
@@ -29,7 +29,11 @@ fn agent_name_has_exactly_the_documented_ascii_alphabet() {
     }
 }
 
-// RFC v1.1 §3.3
+// RFC §3.3-03 — 错误类型的 provider 字段在解析阶段拒绝。
+// RFC §3.3-04 — model 输入必须满足字符串约束。
+// RFC §3.3-06 — 验证 max_tokens 的整数类型、下限及 uint32 上界。
+// RFC §3.3-09 — 未知 approval 枚举值不能解析为有效 Frontmatter。
+// RFC §3.3-10 — 拒绝 stderr 的未知枚举值或错误类型。
 #[test]
 fn declared_fields_validate_type_enums_and_uint32_boundaries() {
     for (field, valid, invalid) in [
@@ -86,7 +90,8 @@ fn declared_fields_validate_type_enums_and_uint32_boundaries() {
     }
 }
 
-// RFC v1.1 §3.3, §6.1
+// RFC §3.1-07 — 按比例取整或使用绝对阈值，0 与达到上限的配置关闭自动压缩。
+// RFC §3.3-08 — 小数阈值向下取整，整数表示绝对值，0 或超过上下文时禁用。
 #[test]
 fn threshold_fraction_floors_absolute_threshold_and_disable_cases() {
     for (input, limit, expected) in [
@@ -111,7 +116,8 @@ fn threshold_fraction_floors_absolute_threshold_and_disable_cases() {
     }
 }
 
-// RFC v1.1 §3.4, §8.2
+// RFC §3.3-04 — 在五层配置的 32 种子集中检查最高优先级的 model。
+// RFC §3.4-02 — 枚举五层配置开关的 32 种子集，读取 Provider 接到的模型与输出上限。
 #[test]
 fn every_subset_of_five_layers_selects_highest_priority_model_and_output_limit() {
     const MOCK: &str = "\n[providers.fixture]\nbin = 'record-provider'\nmode='oneshot'\n";
@@ -176,7 +182,12 @@ fn every_subset_of_five_layers_selects_highest_priority_model_and_output_limit()
     }
 }
 
-// RFC v1.1 §3.3, §3.4, §7.1, §8.2
+// RFC §3.1-06 — 逐一启用五层覆盖的组合，检查最后生效的 Provider 与 shell。
+// RFC §3.1-07 — 从五层值的组合读取生效的轮数、Token 预算和压缩配置。
+// RFC §3.1-11 — 在配置层组合中读取解析后的 idle_timeout 值。
+// RFC §3.3-09 — 逐层指定 approval，检查解析出的有效策略及无覆盖的默认值。
+// RFC §3.3-10 — 逐层指定 stderr，检查生效模式及无覆盖的默认值。
+// RFC §3.4-02 — 对全部 32 种配置组合，核对可观测的标量和布尔选项。
 #[test]
 fn scalar_settings_resolve_for_every_subset_of_the_five_override_layers() {
     use anix_core::cli::Cli;
@@ -346,7 +357,9 @@ fn scalar_settings_resolve_for_every_subset_of_the_five_override_layers() {
     }
 }
 
-// RFC v1.1 §3.3, §9.1
+// RFC §3.1-07 — 单轮输出等于上下文预算时拒绝，0 不进入 IR。
+// RFC §3.3-07 — 0 不写入 header，非零上限必须严格小于有效上下文预算。
+// RFC §9.1-06 — 单轮限制为 0 时 header 省略该字段，合法非零值按原值写入。
 #[test]
 fn output_limit_is_strictly_below_effective_context_budget_zero_omits_it() {
     let fx = Fixture::new();
@@ -385,7 +398,8 @@ fn output_limit_is_strictly_below_effective_context_budget_zero_omits_it() {
     }
 }
 
-// RFC v1.1 §3.1, §3.4, §9.1
+// RFC §3.3-12 — params 的扩展键与浅合并。
+// RFC §3.4-07 — CLI 中的 JSON 参数按键覆盖，未冲突的键及值类型保留。
 #[test]
 fn params_merge_by_key_and_cli_values_preserve_json_types() {
     let fx = Fixture::new();
@@ -430,7 +444,9 @@ fn params_merge_by_key_and_cli_values_preserve_json_types() {
     );
 }
 
-// RFC v1.1 §3.4
+// RFC §3.1-05 — ANIX_CONTEXT 为空串时即使脚本声明 context 也不创建 WAL。
+// RFC §3.3-11 — 环境将 context 显式置空时关闭文件持久化。
+// RFC §3.4-04 — 显式空串覆盖会话路径。
 #[test]
 fn empty_context_override_is_distinct_from_an_unset_variable() {
     for (env_path, cli_path, expected) in [
@@ -464,7 +480,7 @@ fn empty_context_override_is_distinct_from_an_unset_variable() {
     }
 }
 
-// RFC v1.1 §8.1
+// RFC §8.1-04 — 按最近配置、Git 仓库及 HOME 边界分别检查向上查找结果。
 #[test]
 fn project_search_stops_at_nearest_configuration_git_or_home_boundary() {
     let fx = Fixture::new();
@@ -515,7 +531,9 @@ fn project_search_stops_at_nearest_configuration_git_or_home_boundary() {
     );
 }
 
-// RFC v1.1 §2, §3.4, §8.2, §9.2
+// RFC §3.3-03 — 模拟已注册的 Provider 读取所选配置及注入值。
+// RFC §9.1-01 — oneshot Provider 从进程环境读取所选模型。
+// RFC §9.2-09 — 有效 model、base URL、timeout 与密钥来源。
 #[test]
 fn provider_resolution_injects_model_base_url_timeout_and_env_or_fallback_key() {
     use super::executable;
@@ -570,7 +588,9 @@ printf '%s\n' '{"type":"text_delta","text":"ok"}' '{"type":"done","finish_reason
     }
 }
 
-// RFC v1.1 §3.4, §5.1
+// RFC §3.1-08 — 对照 ANIX_YES、ANIX_APPROVAL 与 CLI，检查命令的磁盘副作用及拒绝结果。
+// RFC §3.4-03 — 识别 ANIX_YES 的 1 与 true，并检查与 CLI 审批覆盖的组合。
+// RFC §5.1-01 — 用环境别名与 CLI 切换审批策略，检查是否产生预期的命令副作用。
 #[test]
 fn environment_approval_aliases_and_cli_override_produce_the_expected_tool_effects() {
     use super::{scripted_provider, success_text, tool, with_tools};
@@ -618,7 +638,7 @@ fn environment_approval_aliases_and_cli_override_produce_the_expected_tool_effec
     }
 }
 
-// RFC v1.1 §3.4, §6.5
+// RFC §3.4-03 — 非法环境配置以 2 退出且不启动 Provider。
 #[test]
 fn invalid_resolved_environment_values_exit_two_before_contacting_the_provider() {
     for (key, value) in [
@@ -646,7 +666,7 @@ fn invalid_resolved_environment_values_exit_two_before_contacting_the_provider()
     }
 }
 
-// RFC v1.1 §8.2, §6.5
+// RFC §6.5-05 — 全局或项目 TOML 出现未知键时以 2 退出且未推理。
 #[test]
 fn global_and_project_config_reject_unknown_keys_before_any_inference() {
     for where_ in ["config/anix", ".anix"] {
@@ -693,7 +713,7 @@ fn global_and_project_config_reject_unknown_keys_before_any_inference() {
     }
 }
 
-// RFC v1.1 §3.3, §3.2, §6.5
+// RFC §3.3-08 — 在 uint32 最大值两侧探测绝对阈值，溢出应先被拒绝。
 #[test]
 fn absolute_frontmatter_threshold_must_fit_uint32_before_the_disable_rule_applies() {
     let mut unexpected = Vec::new();
@@ -727,7 +747,7 @@ fn absolute_frontmatter_threshold_must_fit_uint32_before_the_disable_rule_applie
     );
 }
 
-// RFC v1.1 §3.1, §3.4, §9.1
+// RFC §3.1-09 — --param 的 JSON 转为对应类型，无法解析时保留原字符串。
 #[test]
 fn cli_params_preserve_json_literals_and_the_exact_fallback_string() {
     let fx = Fixture::new();
@@ -764,7 +784,7 @@ fn cli_params_preserve_json_literals_and_the_exact_fallback_string() {
     assert_eq!(jsonl(&fx.capture)[0]["params"], params);
 }
 
-// RFC v1.1 §3.1, §6.5
+// RFC §3.1-09 — 缺少有效 KEY=VALUE 时使用错误码 2，WAL 与 Provider 请求均不存在。
 #[test]
 fn malformed_cli_param_stops_before_provider_or_wal_creation() {
     for param in ["without-separator", "=value", ""] {
@@ -789,7 +809,10 @@ fn malformed_cli_param_stops_before_provider_or_wal_creation() {
     }
 }
 
-// RFC v1.1 §3.3, §3.4, §6.2, §8.1, §9.1
+// RFC §3.1-05 — 不同工作目录下运行同一脚本，使用各自的相对 WAL 路径。
+// RFC §3.3-11 — 同一脚本从两个 cwd 启动时，各自生成对应的相对 WAL。
+// RFC §8.1-04 — 从两个 cwd 调用同一脚本时使用各自项目配置。
+// RFC §9.1-08 — 从不同 cwd 启动时，实际 Provider header.meta.cwd 记录各自目录。
 #[test]
 fn a_shared_script_resolves_its_context_and_project_configuration_from_each_cwd() {
     let fx = Fixture::new();
@@ -854,7 +877,9 @@ fn a_shared_script_resolves_its_context_and_project_configuration_from_each_cwd(
     assert!(!scripts.join("session.jsonl").exists());
 }
 
-// RFC v1.1 §3.1, §3.3, §3.4, §8.2, §9.1, §9.2
+// RFC §3.3-12 — params 的扩展键与浅合并。
+// RFC §3.4-07 — 只合并被选中 Provider 的 params，同名对象整体替换。
+// RFC §8.2-01 — 所选 Provider 的 params 浅合并。
 #[test]
 fn only_the_selected_providers_defaults_feed_the_shallow_params_merge() {
     let fx = Fixture::new();
@@ -932,7 +957,8 @@ tree = {from_project_b = 4}
     }
 }
 
-// RFC v1.1 §2, §8.2, §9.2
+// RFC §2-02 — Provider 的命令名依次查找 PATH 和私有目录，显式路径直接执行。
+// RFC §3.1-06 — 配置为名称时按 PATH、libexec 查找 Provider，带斜杠时直接使用该路径。
 #[test]
 fn a_named_provider_searches_path_then_libexec_while_a_path_executes_directly() {
     use super::executable;
@@ -998,7 +1024,9 @@ fn a_named_provider_searches_path_then_libexec_while_a_path_executes_directly() 
     run("driver", Some("libexec"));
 }
 
-// RFC v1.1 §8.1, §4.1, §8.3
+// RFC §8.1-01 — XDG_CONFIG_HOME 与 HOME 回退。
+// RFC §8.1-02 — XDG_STATE_HOME 与 HOME 回退。
+// RFC §8.1-03 — 分别设置 XDG 变量，检查 runtime 目录及其他目录独立回退。
 #[test]
 fn each_xdg_directory_resolves_independently_when_other_overrides_are_absent() {
     use anix_core::config::AgentPaths;
@@ -1057,7 +1085,7 @@ fn each_xdg_directory_resolves_independently_when_other_overrides_are_absent() {
     assert_eq!(paths.journal_socket_path(), runtime.join("journal.sock"));
 }
 
-// RFC v1.1 §9.1, §9.2
+// RFC §9.1-01 — 更换模型时只改变 Provider 环境，Canonical IR 不含 model。
 #[test]
 fn selected_model_changes_the_provider_environment_without_entering_the_ir() {
     let fx = Fixture::new();

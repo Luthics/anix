@@ -31,7 +31,10 @@ fn result(id: &str, tid: u64) -> Value {
     json!({"role":"tool","turn_id":tid,"tool_call_id":id,"text":"result"})
 }
 
-// RFC v1.1 §9.1
+// RFC §9.1-01 — header 必填字段不得移入消息或其他对象。
+// RFC §9.1-03 — 删除或移位必填 header 字段应拒绝。
+// RFC §9.1-05 — 从 header 移除 tools 应导致 IR 无效。
+// RFC §9.1-19 — 要求首行 header 及后续消息的位置和字段类型合法。
 #[test]
 fn required_header_fields_and_types_cannot_be_dropped_or_moved() {
     let body = message("user", 1, "x");
@@ -63,7 +66,8 @@ fn required_header_fields_and_types_cannot_be_dropped_or_moved() {
     assert!(IrStream::from_jsonl(&input(&header(), &[header(), body])).is_err());
 }
 
-// RFC v1.1 §9.1
+// RFC §9.1-07 — 对 header.params 和 meta 逐项验证 wire 类型。
+// RFC §9.1-08 — 验证 meta 的 cwd、stderr_mode 与预算字段的类型。
 #[test]
 fn meta_and_header_options_have_their_declared_wire_types() {
     let body = [message("user", 1, "go")];
@@ -98,7 +102,7 @@ fn meta_and_header_options_have_their_declared_wire_types() {
     }
 }
 
-// RFC v1.1 §9.1, §9.2
+// RFC §9.1-12 — 非对象的 arguments 或 provider_opaque 不应通过已校验 IR 的序列化。
 #[test]
 fn validated_ir_only_serializes_objects_for_arguments_and_provider_opaque() {
     let mut violations = Vec::new();
@@ -151,7 +155,8 @@ fn validated_ir_only_serializes_objects_for_arguments_and_provider_opaque() {
     );
 }
 
-// RFC v1.1 §9.1
+// RFC §9.1-02 — 逐行解码真实样例，保留冻结正文、扩展字段和附件引用。
+// RFC §9.1-09 — IR 样例中的未知扩展字段在解码后保留。
 #[test]
 fn golden_ir_accepts_extensions_and_keeps_frozen_text_and_attachment_references() {
     let mut h = header();
@@ -180,7 +185,8 @@ fn golden_ir_accepts_extensions_and_keeps_frozen_text_and_attachment_references(
     assert_eq!(actual, expected);
 }
 
-// RFC v1.1 §9.1
+// RFC §9.1-13 — tool 结果必须连续且与对应调用一一配对。
+// RFC §9.1-19 — 连续 tool 结果与同批调用一一对应。
 #[test]
 fn tool_replies_form_a_bijection_and_are_contiguous() {
     for first in ["a", "b", "other"] {
@@ -208,7 +214,7 @@ fn tool_replies_form_a_bijection_and_are_contiguous() {
     }
 }
 
-// RFC v1.1 §9.1
+// RFC §9.1-19 — 重复调用 ID 不能由同一个工具结果同时闭合。
 #[test]
 fn a_single_tool_result_cannot_close_two_calls_with_the_same_id() {
     for id in ["call-a", "call-b"] {
@@ -218,7 +224,9 @@ fn a_single_tool_result_cannot_close_two_calls_with_the_same_id() {
     }
 }
 
-// RFC v1.1 §9.1
+// RFC §9.1-02 — 分别删除或改错四种角色的必填字段，解码应失败。
+// RFC §9.1-11 — user 缺必填字段或 turn_id 型别错误时拒绝。
+// RFC §9.1-13 — tool 消息缺少必需的调用标识时拒绝。
 #[test]
 fn required_message_fields_and_turn_id_types_hold_for_all_four_roles() {
     for (row, required) in [
@@ -253,7 +261,7 @@ fn required_message_fields_and_turn_id_types_hold_for_all_four_roles() {
     }
 }
 
-// RFC v1.1 §9.1
+// RFC §9.1-12 — reasoning 或 opaque 单独存在时不能替代 text 或 tool_calls。
 #[test]
 fn assistant_requires_text_or_calls_even_with_reasoning_or_opaque_state() {
     for extra in [
@@ -272,7 +280,7 @@ fn assistant_requires_text_or_calls_even_with_reasoning_or_opaque_state() {
     }
 }
 
-// RFC v1.1 §9.1, §6.2
+// RFC §9.1-19 — 普通轮次严格递增，仅 checkpoint 特例可共享锚点。
 #[test]
 fn ordinary_turns_increase_strictly_and_checkpoint_anchor_may_be_shared() {
     assert!(valid(&[
@@ -292,7 +300,7 @@ fn ordinary_turns_increase_strictly_and_checkpoint_anchor_may_be_shared() {
     }
 }
 
-// RFC v1.1 §1.4, §9.1, §9.2
+// RFC §9.1-01 — 协进程在请求信封传入 model，内嵌消息不变。
 #[test]
 fn coprocess_envelope_wraps_the_same_ir_without_moving_model_into_history() {
     let mut head = header();

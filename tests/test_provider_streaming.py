@@ -98,7 +98,7 @@ class ProviderStreaming(unittest.TestCase):
         self.assertEqual((events[-1]["type"], events[-1]["exit_code"]), ("run_end", 130))
         self.assertEqual(ends[0]["usage"], events[-1]["usage"])
 
-    # RFC v1.1 §9.1, §9.2
+    # RFC §9.2-02 — 覆盖 model 和 timeout_sec 后下一帧回到环境值，前一超时不会传染。
     def test_coprocess_overrides_apply_to_one_frame_then_environment_defaults_resume(self):
         provider = self.root / ".local/libexec/anix/anix-provider-openai-responses"
         messages = [{"role": "system", "turn_id": 0, "text": "frozen\n🦀"},
@@ -194,7 +194,7 @@ class ProviderStreaming(unittest.TestCase):
             self.assertEqual((child.returncode, out, err), (0, b"", b""))
             return http.requests
 
-    # RFC v1.1.1 §4.3, §7.1, §9.1, §9.2, §9.5
+    # RFC §9.5-04 — 模型只看清洗后文本，私有 wire 文件保留命令实际输出的 ANSI 字节。
     def test_wire_trace_keeps_raw_msh_output_while_the_model_receives_cleaned_text(self):
         label = "trace-color-sample"
         raw = f"\x1b[31m{label}\x1b[0m\n"
@@ -226,7 +226,8 @@ class ProviderStreaming(unittest.TestCase):
         self.assertTrue(json.dumps(raw)[1:-1] in encoded_trace,
                       f"expected the original shell output in the wire trace, observed {actual!r}")
 
-    # RFC v1.1 §6.5, §7.1, §9.2, §9.5
+    # RFC §6.5-01 — 第一轮的长 msh 命令可超过 Provider 时限，后续请求仍然成功。
+    # RFC §9.2-08 — 工具执行发生在两轮 HTTP 请求之间，不占用下一请求的超时预算。
     def test_long_msh_can_outlive_the_provider_timeout_between_two_requests(self):
         prefix = "printf started > marker\n#"
         suffix = "\n/bin/sleep 4\nprintf finished"
@@ -258,7 +259,8 @@ class ProviderStreaming(unittest.TestCase):
         self.assertEqual([e["type"] for e in self.rows("trace") if e["type"] in observed],
                          ["llm_request_start", "tool_start", "tool_end", "llm_request_start"])
 
-    # RFC v1.1 §6.1, §6.5, §7.1, §9.1, §9.2, §9.5
+    # RFC §1.4-01 — 显式请求 kill_on_timeout 时，下一轮 Provider 收到工具超时错误。
+    # RFC §6.5-01 — 显式强杀超时后，把工具错误送入下一次 Provider 请求。
     def test_msh_timeout_is_delivered_to_the_next_provider_turn_as_a_tool_error(self):
         def request_tool(peer):
             peer.begin_stream()
@@ -287,7 +289,7 @@ class ProviderStreaming(unittest.TestCase):
         self.assertEqual([(e["reason"], e["exit_code"]) for e in events if e["type"] == "cycle_end"],
                          [("completed", 0)])
 
-    # RFC v1.1 §7.1, §9.2, §9.5
+    # RFC §9.2-08 — 缓慢发送工具参数，参数完整前不启动 shell。
     def test_paced_msh_arguments_finish_before_the_shell_runs(self):
         suffix = "\nprintf ok"
         cmd = "printf x >> marker\n#".ljust(32768 - len(suffix), "a") + suffix
@@ -313,7 +315,7 @@ class ProviderStreaming(unittest.TestCase):
         self.assertTrue(outputs[0]["output"].endswith("exit=0\nok"))
         self.assertFalse(any(e["type"] == "provider_error" for e in self.rows("trace")))
 
-    # RFC v1.1 §4.1, §6.2, §9.2, §9.5
+    # RFC §9.5-13 — 下一帧尚未发送时上一帧已在 Trace 中可见；完成前 WAL 没有 assistant，完成后才提交。
     def test_each_delta_reaches_trace_before_the_upstream_sends_its_next_frame(self):
         sent = [("response.reasoning_summary_text.delta", "reasoning_delta", "先看"),
                 ("response.output_text.delta", "text_delta", "前🙂"),
@@ -346,7 +348,7 @@ class ProviderStreaming(unittest.TestCase):
         usage = [r["usage"] for r in trace if r["type"] == "llm_response"]
         self.assertEqual([(u["input_tokens"], u["output_tokens"]) for u in usage], [(8, 3)])
 
-    # RFC v1.1 §4.3, §6.2, §9.1, §9.2
+    # RFC §9.2-14 — 多次交错工具调用结束后的实际 HTTP 请求保留此前的不透明推理状态。
     def test_interleaved_calls_and_opaque_state_round_trip_through_the_real_tool_results(self):
         reasoning = {"type": "reasoning", "id": "reason-1", "summary": [],
                      "encrypted_content": "local-fixture+/="}
@@ -405,7 +407,8 @@ class ProviderStreaming(unittest.TestCase):
             self.assertEqual(outputs[call_id], row["text"])
             self.assertEqual(row["text"], f"[t{row['turn_id']}] exit=0\n{call_id.removeprefix('call-')}")
 
-    # RFC v1.1 §6.2, §9.2, §9.5
+    # RFC §9.2-15 — 对 429、503 先记录错误，再向真实本地端点重发同一请求。
+    # RFC §9.5-05 — 逐个检查 HTTP 429、503 对应的 provider_error，provider_stderr 字段均为字符串。
     def test_http_429_and_503_are_traced_by_the_core_before_replaying_the_request(self):
         def reject(status):
             def reply(peer):
@@ -438,7 +441,7 @@ class ProviderStreaming(unittest.TestCase):
         self.assertEqual([r["text"] for r in self.rows("history") if r.get("role") == "assistant"], ["success"])
         self.assertFalse(any(r["type"] in ("text_delta", "reasoning_delta") for r in self.rows("trace")))
 
-    # RFC v1.1 §3.1, §3.2, §4.1, §4.2
+    # RFC §4.1-02 — 无参数且 stdin 为终端时等待实际 EOF，再将输入交给 Provider。
     def test_executable_script_on_path_and_by_relative_name_obeys_tty_eof_rules(self):
         scripts = self.root / ".config/anix/agents"
         scripts.mkdir(parents=True)
@@ -488,7 +491,7 @@ printf '%s\\n' '{"type":"text_delta","text":"fixture reply"}' '{"type":"done","f
                     users = [r["text"] for r in self.rows("request") if r.get("role") == "user"]
                     self.assertEqual(users, [expected])
 
-    # RFC v1.1 §3.1, §4.1, §6.4, §6.5, §9.2, §9.5
+    # RFC §6.4-01 — 等待 Provider 时中断，原 shell 可继续执行管道。
     def test_keyboard_interrupt_returns_to_the_same_shell_while_waiting_for_provider(self):
         example = Path(__file__).resolve().parents[1] / "examples/bash.agent"
         (self.root / "bash.agent").symlink_to(example)
@@ -545,7 +548,7 @@ printf '%s\\n' '{"type":"text_delta","text":"fixture reply"}' '{"type":"done","f
                             self.check_interrupted_cycle("initial", 1)
                     os.write(master, b"exit\n")
 
-    # RFC v1.1 §4.1, §6.3, §6.4, §6.5, §9.2, §9.5
+    # RFC §6.4-01 — 在 Provider 已关 stdout、进程仍未退出时中断，原 shell 恢复且状态为 130。
     def test_keyboard_interrupt_reaches_a_provider_that_closed_stdout_before_exit(self):
         (self.root / "bash.agent").symlink_to(Path(__file__).resolve().parents[1] / "examples/bash.agent")
         config = self.root / ".config/anix"
@@ -585,7 +588,7 @@ printf finished > natural-exit
                           (self.root / "result").read_text()), (True, False, "130"), output)
         self.check_interrupted_cycle("initial", 1)
 
-    # RFC v1.1 §4.1, §4.2, §6.2, §6.4, §6.5, §9.2, §9.5
+    # RFC §4.2-02 — 成功消息先提交，下一条被中断时仍可识别已完成的轮次。
     def test_inbox_commits_one_message_then_interrupts_the_next_in_the_same_coprocess(self):
         config = self.root / ".config/anix"
         config.mkdir(parents=True)

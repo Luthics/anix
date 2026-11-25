@@ -2,7 +2,7 @@
 use anix_proto::provider::ProviderEvent;
 use serde_json::{Value, json};
 
-// RFC v1.1 §9.2
+// RFC §9.2-12 — 逐个覆盖五项计数器的 uint64 边界并拒绝非整数。
 #[test]
 fn each_usage_counter_accepts_the_full_uint64_range_and_requires_integer_values() {
     let counts = [
@@ -51,7 +51,7 @@ fn each_usage_counter_accepts_the_full_uint64_range_and_requires_integer_values(
     }
 }
 
-// RFC v1.1 §9.2
+// RFC §9.2-12 — 即使三个明细齐全也不能缺少 input_tokens 或 output_tokens。
 #[test]
 fn usage_requires_both_totals_even_when_all_three_details_are_present() {
     let full = json!({"type":"usage","input_tokens":19,"output_tokens":7,

@@ -25,7 +25,8 @@ fn exit_report(fx: &Fixture) -> Value {
     serde_json::from_slice(&fs::read(fx.dir.0.join("exit.json")).unwrap()).unwrap()
 }
 
-// RFC v1.1 §6.1, §6.2, §9.2, §9.3, §9.5
+// RFC §9.2-10 — 逐一组合可选计数，核对 WAL、Trace、on-exit 与不含 usage 的 IR。
+// RFC §9.2-11 — 枚举可选用量字段的每个子集，核对最终累计总量。
 #[test]
 fn each_subset_of_optional_usage_details_preserves_inclusive_totals_through_exit() {
     // Odd counts above the exact-integer range of binary64 and above u32.
@@ -94,7 +95,8 @@ fn each_subset_of_optional_usage_details_preserves_inclusive_totals_through_exit
     }
 }
 
-// RFC v1.1 §6.1, §6.2, §9.2, §9.3
+// RFC §6.1-03 — 对照显式报告 0 和未报告 usage 的水位与预算判定。
+// RFC §9.2-12 — 显式零 usage 与未上报 usage 在预算恢复中产生可区分结果。
 #[test]
 fn a_reported_zero_watermark_and_an_unreported_usage_use_different_budget_baselines() {
     for reported in [false, true] {
@@ -134,7 +136,7 @@ fn a_reported_zero_watermark_and_an_unreported_usage_use_different_budget_baseli
     }
 }
 
-// RFC v1.1 §9.2, §6.1, §9.3, §9.5
+// RFC §9.2-13 — 失败重试已产生的费用各计一次，成功轮次水位不被抬高。
 #[test]
 fn retry_usage_counts_every_charged_attempt_without_inflating_the_final_watermark() {
     let fx = Fixture::new();
@@ -193,7 +195,11 @@ fn retry_usage_counts_every_charged_attempt_without_inflating_the_final_watermar
     }
 }
 
-// RFC v1.1 §6.1, §6.2, §9.2, §9.3, §9.5
+// RFC §6.1-04 — 全量压缩后恢复会话，确认压缩器费用不抬高活跃窗口水位。
+// RFC §6.1-07 — 显式全量压缩后出现新分节，新进程从压缩上下文继续。
+// RFC §6.1-11 — 会话与内置压缩请求的实际使用量可分别核对。
+// RFC §9.2-10 — 全量压缩、恢复后的各类用量记录与实际各轮费用相符。
+// RFC §9.3-03 — on-exit 得到主运行及压缩器的累计费用，与 WAL/Trace 对齐。
 #[test]
 fn full_compaction_and_resume_account_for_every_call_without_inflating_watermark() {
     let fx = Fixture::new();
@@ -316,7 +322,10 @@ fn full_compaction_and_resume_account_for_every_call_without_inflating_watermark
     assert!(!restored.iter().any(|r| r.get("usage").is_some()));
 }
 
-// RFC v1.1 §6.1, §6.2, §9.1
+// RFC §6.1-01 — 从同批工具的消息锚点折叠时回退到对应 assistant。
+// RFC §6.1-08 — 锚点回退到闭合工具调用的 assistant，剪去触发折叠的工具轮次。
+// RFC §6.2-11 — 局部 fold 后保留原始系统前缀。
+// RFC §9.1-17 — 从工具锚点发起 fold，回退到对应 assistant 并插入 user 摘要。
 #[test]
 fn tail_fold_aligns_to_assistant_and_removes_the_triggering_tool_call() {
     let fx = Fixture::new();
@@ -369,7 +378,9 @@ fn tail_fold_aligns_to_assistant_and_removes_the_triggering_tool_call() {
     assert!(restored[4]["turn_id"].as_u64().unwrap() > to);
 }
 
-// RFC v1.1 §6.1, §9.1
+// RFC §6.1-10 — 外部压缩器只收 IR、输出须为非空 UTF-8、故障退出。
+// RFC §6.1-12 — 检查外部压缩器 stdin 中的 IR 工具列表为空。
+// RFC §8.2-02 — 配置外部压缩器时从其 stdin/stdout 交付 IR 和摘要。
 #[test]
 fn external_compactor_receives_tool_free_ir_and_empty_or_failed_summary_is_fatal() {
     for (script, code) in [
@@ -438,7 +449,7 @@ fn initial_watermark(input: &str) -> u64 {
     exit_report(&fx)["context"]["tokens"].as_u64().unwrap()
 }
 
-// RFC v1.1 §6.1
+// RFC §6.1-04 — 按 UTF-8 字节长度检查新窗口的三字节估算边界。
 #[test]
 fn fresh_window_counts_utf8_bytes_in_groups_of_three() {
     let readings: Vec<_> = (0..7)
@@ -454,7 +465,9 @@ fn fresh_window_counts_utf8_bytes_in_groups_of_three() {
     assert_eq!(initial_watermark("x🦀"), readings[4]);
 }
 
-// RFC v1.1 §6.1, §6.5
+// RFC §3.3-06 — 等于有效预算时可调用 Provider，超过时在首次请求之前退出。
+// RFC §6.1-06 — 水位等于上限时可推理，超过上限时首次 Provider 请求被阻止。
+// RFC §6.5-07 — 首轮就超过硬上限时返回 124，Provider 未被调用。
 #[test]
 fn hard_limit_allows_equality_and_blocks_the_first_provider_request_above_it() {
     let input = "z".repeat(3600);
@@ -484,7 +497,7 @@ fn hard_limit_allows_equality_and_blocks_the_first_provider_request_above_it() {
     }
 }
 
-// RFC v1.1 §6.1
+// RFC §6.1-06 — 先压缩再按新窗口复查硬上限，仍超限时停止推理。
 #[test]
 fn auto_compaction_runs_before_inference_and_rechecks_the_new_window_against_the_cap() {
     let input = "a".repeat(3600);
@@ -543,7 +556,9 @@ fn auto_compaction_runs_before_inference_and_rechecks_the_new_window_against_the
     }
 }
 
-// RFC v1.1 §6.1, §8.2
+// RFC §6.1-11 — 内置压缩器读取配置的 Provider、模型及字面或文件提示词。
+// RFC §6.1-12 — 检查内置压缩器发给 Provider 的请求无工具。
+// RFC §8.2-02 — 内置压缩器根据配置选择 Provider、模型与提示词。
 #[test]
 fn builtin_compactor_uses_configured_provider_model_and_literal_or_file_prompt() {
     for from_file in [false, true] {
@@ -605,7 +620,13 @@ printf '%s\n' '{"type":"text_delta","text":"local summary"}' '{"type":"done","fi
     }
 }
 
-// RFC v1.1 §6.1, §6.2, §9.1, §9.2, §9.3
+// RFC §6.1-07 — 连续两个 checkpoint 只累计一次旧用量，并在新分节刷新系统前缀。
+// RFC §6.2-11 — 完整压缩重新运行钩子并刷新系统前缀。
+// RFC §6.2-12 — 跨两次 checkpoint 恢复会话时逐项核对累计用量。
+// RFC §6.2-15 — 跨两个 checkpoint 核对被剪枝轮次费用只累加一次。
+// RFC §6.2-17 — 回放到最新 checkpoint 后核对跨分节累计用量。
+// RFC §9.1-16 — 两次完整压缩后的 IR 都以新冻结 system 与 user 摘要开头。
+// RFC §9.2-13 — 跨两个 checkpoint 的旧用量不重复累加。
 #[test]
 fn two_checkpoints_carry_folded_usage_once_and_refresh_the_prefix_across_processes() {
     let fx = Fixture::new();
@@ -867,7 +888,8 @@ fn request_auto_fold(plugin_response: &str) -> TailFold {
     }
 }
 
-// RFC v1.1 §6.1, §6.2, §7.2, §9.1
+// RFC §6.1-14 — 外部自动摘要器收到对齐的无工具子窗口，恢复后的 IR 只保留返回的摘要。
+// RFC §7.2-01 — 运行时接收无摘要 fold 帧，调用摘要器并将其结果用于折叠。
 #[test]
 fn external_auto_fold_receives_the_aligned_tail_and_replays_only_its_summary() {
     let case = request_auto_fold("printf 'two tools · 已归档'");
@@ -897,7 +919,7 @@ fn external_auto_fold_receives_the_aligned_tail_and_replays_only_its_summary() {
     }
 }
 
-// RFC v1.1 §6.1, §6.2, §7.2, §9.1
+// RFC §6.1-15 — 自动摘要失败或为空时保留旧窗口，向模型返回工具错误。
 #[test]
 fn empty_or_failed_auto_summary_keeps_the_subwindow_and_reports_a_tool_error() {
     for response in [":", "printf discarded; exit 7"] {

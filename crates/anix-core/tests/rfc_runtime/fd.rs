@@ -56,7 +56,7 @@ fn assert_trace(text: &str) {
     );
 }
 
-// RFC v1.1 §3.1, §3.4, §4.1, §9.5
+// RFC §4.1-09 — 有效 CLI trace FD 覆盖环境设定，只有被选中的 FD 收到 JSONL。
 #[test]
 fn only_the_explicit_trace_sink_receives_jsonl_and_cli_precedes_environment() {
     for (cli, env, selected) in [
@@ -89,7 +89,7 @@ fn only_the_explicit_trace_sink_receives_jsonl_and_cli_precedes_environment() {
     }
 }
 
-// RFC v1.1 §3.1, §4.1, §9.1, §9.5
+// RFC §4.1-08 — 可读写的显式 Trace FD 不进入静态输入。
 #[test]
 fn each_read_write_trace_fd_is_excluded_from_the_ordered_initial_user_input() {
     for selected in 4..=9 {
@@ -131,7 +131,7 @@ fn each_read_write_trace_fd_is_excluded_from_the_ordered_initial_user_input() {
     }
 }
 
-// RFC v1.1 §3.1, §3.4, §4.1, §6.5
+// RFC §4.1-09 — 传入不可写或未打开的 trace FD 时返回 2，Provider 未被调用。
 #[test]
 fn invalid_trace_fd_reports_usage_to_stderr_before_invoking_the_provider() {
     for fd in [0, 1, 2, 7, 8] {

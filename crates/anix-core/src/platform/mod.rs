@@ -114,7 +114,7 @@ pub unsafe fn apply_prepared_sandbox_in_child(sb: &PreparedSandbox) -> io::Resul
 mod tests {
     use super::*;
 
-    // RFC v1.1 §10.2
+    // RFC §10.2-03 — 检查 /dev/fd 可用；Linux 测试主机还须报告 pidfd 支持及 Landlock ABI ≥ 1。
     #[test]
     fn probes_platform_capabilities() {
         let caps = probe_capabilities();

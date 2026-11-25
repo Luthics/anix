@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, codex/rfc-conformance]
   pull_request:
-    branches: [main]
+    branches: [main, codex/rfc-conformance]
 
 permissions:
   contents: read
@@ -26,7 +26,16 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --all -- --check
-      - run: python3 scripts/rfc-test-index.py --check
+
+  rfc-links:
+    name: RFC traceability
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check both directions and regenerate indexes in memory
+        run: python3 -B scripts/rfc-test-index.py --check
+      - name: Prove broken links and missing assertions fail validation
+        run: python3 -B -m unittest discover -s scripts -p 'test_rfc_index.py' -v
 
   check-test:
     name: Clippy & Test (${{ matrix.os }})
@@ -46,6 +55,8 @@ jobs:
       - name: Build workspace
         id: build
         run: cargo build --workspace
+      - name: Verify RFC tables against the CLI and execute every marked assertion
+        run: python3 -B scripts/check-rfc-assertions.py
       - name: Smoke test binaries
         run: |
           ./target/debug/anix --version

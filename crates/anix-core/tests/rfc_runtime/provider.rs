@@ -15,7 +15,7 @@ fn traced(fx: &Fixture) -> std::process::Output {
     ]))
 }
 
-// RFC v1.1 §9.2, §9.5
+// RFC §9.2-15 — 同一请求至多重试三次，按 1/2/4 秒退避并保留最终 stderr。
 #[test]
 fn retryable_failures_exhaust_three_backoffs_and_preserve_the_request_and_final_stderr() {
     let fx = Fixture::new();
@@ -131,7 +131,7 @@ fn check_terminal_failure(script: &str, timeout: u64, status: i32, single_attemp
     );
 }
 
-// RFC v1.1 §9.2, §6.5
+// RFC §9.2-15 — 永久错误只调用一次 Provider，退出时向 stderr 转发其诊断。
 #[test]
 fn nonretryable_error_preserves_provider_stderr_without_another_attempt() {
     check_terminal_failure(
@@ -142,7 +142,7 @@ fn nonretryable_error_preserves_provider_stderr_without_another_attempt() {
     );
 }
 
-// RFC v1.1 §9.2, §6.2
+// RFC §6.5-04 — Provider 未发终结帧就 EOF，主进程退出 1 并报告诊断。
 #[test]
 fn clean_provider_eof_without_done_preserves_stderr_and_discards_partial_text() {
     check_terminal_failure(
@@ -153,13 +153,13 @@ fn clean_provider_eof_without_done_preserves_stderr_and_discards_partial_text() 
     );
 }
 
-// RFC v1.1 §9.2, §6.5
+// RFC §6.5-07 — Provider 请求超时后返回 124，且不重试。
 #[test]
 fn provider_timeout_maps_to_124_without_a_retry() {
     check_terminal_failure("exec /bin/sleep 15", 3, 124, true);
 }
 
-// RFC v1.1 §9.2, §6.2
+// RFC §9.2-14 — 同一 Provider 恢复时回放 opaque，切换 Provider 后应去掉私有字段。
 #[test]
 fn opaque_round_trips_with_the_same_provider_and_is_removed_before_a_provider_switch() {
     let fx = Fixture::new();
@@ -229,7 +229,8 @@ fn opaque_round_trips_with_the_same_provider_and_is_removed_before_a_provider_sw
     }
 }
 
-// RFC v1.1.1 §3.3, §6.5, §9.5
+// RFC §3.3-01 — 最后一轮完成返回 0，仍需推理时返回 124，均不再请求 Provider。
+// RFC §6.5-07 — 最后一轮已用尽但仍需推理时返回 124。
 #[test]
 fn max_turns_allows_completion_on_the_last_request_and_stops_unfinished_work() {
     for limit in [1, 2] {

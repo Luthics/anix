@@ -11,7 +11,7 @@ use std::path::Path;
 const PROMPT: &str = "private-fixture-system-text";
 const KEY: &str = "trace-test-placeholder-credential";
 
-// RFC v1.1.1 §5.1, §6.1, §9.5
+// RFC §9.5-09 — 审批和实际执行分别发出事件，已应用的 fold 也写入 Trace。
 #[test]
 fn events_distinguish_tool_approval_from_execution_and_record_an_applied_fold() {
     for policy in ["auto", "deny"] {
@@ -142,7 +142,7 @@ fn verify(trace: &str, deltas: Option<bool>, wire: bool) {
     }
 }
 
-// RFC v1.1.1 §9.5, §4.1
+// RFC §9.5-10 — 对独立 FD 比较 events、deltas、wire 记录内容，三种级别均排除 Provider 密钥。
 #[test]
 fn explicit_fd_separates_events_deltas_and_wire_and_omits_provider_key() {
     for (level, deltas, wire) in [
@@ -196,7 +196,7 @@ fn explicit_fd_separates_events_deltas_and_wire_and_omits_provider_key() {
     }
 }
 
-// RFC v1.1.1 §4.1, §9.5
+// RFC §9.5-11 — 未指定显式 FD 时 journal 收到生命周期事件，wire 内容不会发往共享 socket。
 #[test]
 fn journal_without_an_explicit_fd_receives_lifecycle_events_and_no_wire_records() {
     for level in [None, Some("wire")] {
@@ -232,7 +232,7 @@ fn journal_without_an_explicit_fd_receives_lifecycle_events_and_no_wire_records(
     }
 }
 
-// RFC v1.1.1 §9.5
+// RFC §9.5-01 — 采集端在第一条记录前或期间断开，Payload、stderr 和退出码保持一致。
 #[test]
 fn disconnected_trace_recipient_does_not_change_payload_stderr_or_exit_status() {
     use std::os::fd::OwnedFd;
@@ -284,7 +284,7 @@ fn disconnected_trace_recipient_does_not_change_payload_stderr_or_exit_status() 
     }
 }
 
-// RFC v1.1.1 §4.1, §9.5
+// RFC §9.5-12 — 同时存在显式 Trace FD 和 journal 时，记录写入指定 FD。
 #[test]
 fn explicit_trace_fd_takes_precedence_over_an_available_journal() {
     let fx = fixture();

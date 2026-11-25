@@ -107,7 +107,8 @@ class ProviderDialects(unittest.TestCase):
         self.assertEqual([e["type"] for e in events if e["type"] in TERMINAL], kinds, events)
         self.assertEqual(events[-1]["type"], kinds[-1], events)
 
-    # RFC v1.1 §6.2, §9.1, §9.2
+    # RFC §9.1-10 — 首条系统文本字节保真与尾部系统消息映射。
+    # RFC §9.1-18 — 对三个实际 HTTP 方言核对冻结首条文本及后续 runtime_update 的顺序。
     def test_frozen_prefix_and_runtime_update_remain_in_order_on_each_upstream(self):
         frozen = "  冻结\r\n\n前缀\t "
         update = "<runtime_update>\n切换\t</runtime_update>"
@@ -143,7 +144,8 @@ class ProviderDialects(unittest.TestCase):
                                  ["user", "assistant", "user"])
                 self.assertIn(items[2][0], ["user", "system", "developer"] if dialect != "anthropic" else ["user"])
 
-    # RFC v1.1 §9.1, §9.2
+    # RFC §9.1-11 — 含 media 的 user 消息转换为与原文件字节一致的 HTTP 图片。
+    # RFC §9.1-14 — 逐个发送 PNG、JPEG、WebP、GIF，核对实际上游请求的 MIME 和解码字节。
     def test_user_and_tool_images_reach_upstream_with_declared_mime_and_exact_bytes(self):
         samples = [(f"image/{ext}", (SAMPLES / f"blue.{ext}").read_bytes())
                    for ext in ("webp", "png", "jpeg", "gif")]
@@ -170,7 +172,7 @@ class ProviderDialects(unittest.TestCase):
                 for attachment in attachments:
                     self.assertNotIn(attachment["path"], json.dumps(body, ensure_ascii=False))
 
-    # RFC v1.1 §9.1, §9.2
+    # RFC §9.1-15 — 同一协进程按请求重开图片，替换后读取新字节、删除后给出可恢复错误。
     def test_coprocess_reopens_replaced_media_and_recovers_after_unlink(self):
         path = self.root / "same image"
         blue = (SAMPLES / "blue.gif").read_bytes()
@@ -193,7 +195,7 @@ class ProviderDialects(unittest.TestCase):
                 self.assertEqual([list(pictures(b)) for b in bodies],
                                  [[("image/gif", blue)], [("image/gif", gold)], []])
 
-    # RFC v1.1 §6.5, §9.1, §9.2
+    # RFC §9.1-15 — 文件不可读或缺失时 oneshot 在 HTTP 前失败。
     def test_oneshot_unreadable_and_missing_paths_fail_before_dispatch(self):
         denied = self.root / "private"
         denied.write_bytes((SAMPLES / "blue.png").read_bytes())
@@ -211,7 +213,7 @@ class ProviderDialects(unittest.TestCase):
                     self.assertEqual(events[-1]["code"], "media_not_found")
                     self.assertIs(events[-1]["retryable"], False)
 
-    # RFC v1.1 §5.5, §9.2
+    # RFC §5.5-06 — 上游拒绝媒体时产生专属且不可重试的错误。
     def test_upstream_media_rejection_is_distinct_from_auth_and_transient_failures(self):
         image = user("see", media=[{"mime": "image/png", "path": str(SAMPLES / "blue.png")}])
         cases = [(400, image, "model does not support image inputs", False, True),
@@ -238,7 +240,7 @@ class ProviderDialects(unittest.TestCase):
                         self.assertEqual(error["code"] == "unsupported_media", unsupported)
                         self.assertTrue(error["message"])
 
-    # RFC v1.1 §9.2
+    # RFC §9.2-18 — 上游正文中途断流后本轮以 error 收尾，同一协进程可处理下一帧。
     def test_partial_text_then_upstream_eof_yields_error_and_coprocess_accepts_next_request(self):
         partials = {
             "openai-responses": sse({"type": "response.output_text.delta", "delta": "半"}),
@@ -267,7 +269,7 @@ class ProviderDialects(unittest.TestCase):
                                              if e["type"] == "text_delta"), "半")
 
 
-    # RFC v1.1 §6.5, §9.1, §9.2
+    # RFC §9.1-04 — 不支持的 IR 版本在 HTTP 请求前被检测。
     def test_unsupported_ir_version_is_diagnosed_before_http_in_both_modes(self):
         for dialect in DIALECTS:
             for mode in ("oneshot", "coprocess"):
@@ -283,7 +285,7 @@ class ProviderDialects(unittest.TestCase):
                     if mode == "oneshot":
                         self.assertEqual(proc.returncode, 2)
 
-    # RFC v1.1 §9.1, §9.2
+    # RFC §9.2-18 — 跨帧工具参数最终产生一条 tool_call，保留原始 ID 和参数内容。
     def test_fragmented_tool_arguments_produce_one_call_with_the_original_id(self):
         call_id = "call-42"
         parts = ['{"cmd":', '"echo 雪"}']
@@ -325,7 +327,7 @@ class ProviderDialects(unittest.TestCase):
                 self.assertEqual((call["id"], call["name"], call["arguments"]),
                                  (call_id, "msh", {"cmd": "echo 雪"}))
 
-    # RFC v1.1 §9.2
+    # RFC §9.2-11 — 从实际 HTTP 方言读取大整数和缓存明细，核对包含式总量。
     def test_inclusive_usage_preserves_wide_counts_and_available_cache_details(self):
         total = (1 << 32) + 100
         responses = sse({"type": "response.completed", "response": {"usage": {
@@ -351,7 +353,7 @@ class ProviderDialects(unittest.TestCase):
                 self.assertEqual(usage.get("cache_write_tokens", 0), 3 if dialect == "anthropic" else 0)
                 self.assertEqual(usage.get("reasoning_tokens", 0), 0 if dialect == "anthropic" else 11)
 
-    # RFC v1.1.1 §6.2, §9.2, §9.5
+    # RFC §9.2-04 — 从同一 WAL 多次启动并切换 Provider，实际 HTTP 请求均带持久化的会话标识。
     def test_wal_session_reaches_http_across_cli_restarts_and_provider_switches(self):
         config = self.root / ".config/anix"
         config.mkdir(parents=True)
@@ -403,7 +405,7 @@ class ProviderDialects(unittest.TestCase):
         self.assertEqual(ids[:3], [ids[0]] * 3)
         self.assertNotEqual(ids[3], ids[0])
 
-    # RFC v1.1.1 §1.4, §9.2
+    # RFC §9.2-02 — 检查 oneshot 环境与协进程逐帧 session_id 覆盖的实际 HTTP 路由。
     def test_session_routing_works_in_oneshot_and_per_envelope_in_coprocess(self):
         for dialect in DIALECTS:
             for mode in ("oneshot", "coprocess"):
@@ -429,7 +431,7 @@ class ProviderDialects(unittest.TestCase):
                             else:
                                 self.assertNotIn("prompt_cache_key", body)
 
-    # RFC v1.1.1 §9.2
+    # RFC §9.2-04 — 运行中重命名或禁用指定的路由头，只影响当前请求。
     def test_header_rename_and_disable_apply_only_to_the_current_request(self):
         cases = [({}, "x-session-id"), ({"session_header": "X-Fixture-Route"}, "x-fixture-route"),
                  ({"session_header": False}, None), ({"session_header": None}, None),
@@ -452,7 +454,7 @@ class ProviderDialects(unittest.TestCase):
                     else:
                         self.assertNotIn("prompt_cache_key", body)
 
-    # RFC v1.1.1 §9.2
+    # RFC §9.2-05 — Responses 原生缓存键支持默认、字符串、布尔值及 null。
     def test_responses_cache_key_has_native_string_boolean_and_null_semantics(self):
         cases = [({}, "session"), ({"prompt_cache_key": True}, "session"),
                  ({"prompt_cache_key": "explicit"}, "explicit"),
@@ -470,7 +472,8 @@ class ProviderDialects(unittest.TestCase):
             else:
                 self.assertEqual(body["prompt_cache_key"], expected)
 
-    # RFC v1.1.1 §9.2
+    # RFC §9.2-06 — 兼容 Chat 端点的两个 Body 路由字段分别按需启用。
+    # RFC §9.2-07 — Anthropic 只发送路由头，Body 保持协议格式。
     def test_chat_cache_fields_are_independent_opt_ins_and_anthropic_keeps_them_out_of_the_body(self):
         # Absence and explicit null are separate inputs to the provider.
         omitted = object()

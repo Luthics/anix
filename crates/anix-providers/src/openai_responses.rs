@@ -629,7 +629,9 @@ mod tests {
     use anix_proto::IR_VERSION;
     use anix_proto::ir::{HeaderTag, IrHeader, IrMeta, StderrMode};
 
-    // RFC v1.1 §9.1, §9.2
+    // RFC §3.3-07 — 有 max_output_tokens 的 IR 经 Responses 转换后写入上游请求。
+    // RFC §9.1-06 — Responses 请求把 header 的输出预算映射为对应上游参数。
+    // RFC §9.1-07 — 在接收的 Responses HTTP 请求中检查推理等参数映射。
     #[test]
     fn builds_responses_request_with_frozen_instructions_and_reasoning_effort() {
         let stream = IrStream {
@@ -663,7 +665,7 @@ mod tests {
         assert_eq!(body["input"][1]["role"], "user");
     }
 
-    // RFC v1.1 §9.2
+    // RFC §9.2-18 — Responses SSE 分别解码正文、工具调用和 usage 帧。
     #[test]
     fn parses_responses_sse_text_tool_and_usage() {
         let sse = concat!(

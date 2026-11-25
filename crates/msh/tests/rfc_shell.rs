@@ -29,7 +29,8 @@ fn take_artifact(path: &Path, extension: &str) -> Vec<u8> {
     bytes
 }
 
-// RFC v1.1 §7.1
+// RFC §7.1-03 — 逐字节检查 NUL 的 8192 字节窗口及窗口外非法 UTF-8。
+// RFC §7.1-04 — 对探测边界内外的 NUL 和非法 UTF-8 检查分类结果。
 #[test]
 fn nul_probe_is_exactly_8192_bytes_utf8_validation_covers_the_entire_stream() {
     for (offset, byte, suppressed) in [
@@ -60,7 +61,7 @@ fn nul_probe_is_exactly_8192_bytes_utf8_validation_covers_the_entire_stream() {
     }
 }
 
-// RFC v1.1 §7.1
+// RFC §7.1-06 — CSI 终结字节、OSC 终止方式和回车覆盖。
 #[test]
 fn ansi_csi_final_byte_range_osc_terminators_and_carriage_return_overwrites() {
     for final_byte in 0x40..=0x7e {
@@ -101,7 +102,7 @@ fn assert_fold_counts(summary: &str, path: &Path, exit_code: &str, omitted: &str
     );
 }
 
-// RFC v1.1 §7.1
+// RFC §7.1-07 — 等于行数阈值时保留全部；超过时核对首尾、行数和完整文件。
 #[test]
 fn line_limit_is_inclusive_and_fold_preserves_exact_head_tail_count_and_full_text() {
     for count in [199, 200, 201, 403] {
@@ -137,7 +138,7 @@ fn line_limit_is_inclusive_and_fold_preserves_exact_head_tail_count_and_full_tex
     }
 }
 
-// RFC v1.1 §7.1
+// RFC §7.1-07 — 越过字节阈值时单独触发折叠，多字节内容的保存文件无损。
 #[test]
 fn byte_limit_independent_from_line_limit_preserves_multibyte_file() {
     for size in [8191, 8192, 8193] {
@@ -172,7 +173,7 @@ fn msh(script: &str) -> Command {
     c
 }
 
-// RFC v1.1 §7.1
+// RFC §7.1-07 — 环境变量覆盖阈值后，按清洗后的行数和字节数触发折叠。
 #[test]
 fn cli_applies_environment_limits_to_cleaned_lines_and_bytes_before_saving_output() {
     let cmd = r#"i=1
@@ -214,7 +215,7 @@ exit 23"#;
     }
 }
 
-// RFC v1.1 §7.1
+// RFC §7.1-02 — 对照真实子 shell 的六个非交互变量，同时验证合并双流及退出状态。
 #[test]
 fn cli_forces_noninteractive_environment_merges_streams_and_propagates_status() {
     let mut cmd = msh(
@@ -236,7 +237,9 @@ fn cli_forces_noninteractive_environment_merges_streams_and_propagates_status() 
     assert!(res.stderr.is_empty());
 }
 
-// RFC v1.1 §7.1
+// RFC §7.1-03 — 真实 msh 在 ANSI 清洗和折叠前先识别二进制输出。
+// RFC §7.1-04 — 检查保存的二进制原始字节和熔断提示，标准输出不含原始数据。
+// RFC §7.1-05 — 二进制输出单行说明。
 #[test]
 fn cli_suppresses_raw_bytes_before_ansi_filtering_or_folding() {
     let out = msh(r#"printf '\211PNG\r\n\032\n\033[31m\000'"#)
@@ -261,7 +264,7 @@ fn cli_suppresses_raw_bytes_before_ansi_filtering_or_folding() {
     );
 }
 
-// RFC v1.1 §6.5, §7.1
+// RFC §7.1-09 — 独立 msh 的环境变量配置前台等待时长及显式强杀。
 #[test]
 fn timeout_reports_124_before_a_finite_longer_command_completes() {
     let start = Instant::now();
@@ -275,7 +278,7 @@ fn timeout_reports_124_before_a_finite_longer_command_completes() {
     assert!(!result.stdout.is_empty());
 }
 
-// RFC v1.1 §7.1
+// RFC §7.1-07 — 用无配置的真实 msh 检查 200 行、8192 字节及各自的相邻值。
 #[test]
 fn unconfigured_msh_folds_only_above_200_lines_or_8192_bytes() {
     // Stay clear of overlapping head/tail ranges, including in byte-only cases.
