@@ -194,6 +194,38 @@ class ProviderStreaming(unittest.TestCase):
             self.assertEqual((child.returncode, out, err), (0, b"", b""))
             return http.requests
 
+    # RFC v1.1.1 §4.3, §7.1, §9.1, §9.2, §9.5
+    def test_wire_trace_keeps_raw_msh_output_while_the_model_receives_cleaned_text(self):
+        label = "trace-color-sample"
+        raw = f"\x1b[31m{label}\x1b[0m\n"
+        # The command itself contains printable octal escape sequences. Only the
+        # executed shell produces the actual color bytes we look for in Trace.
+        command = r"printf '\033[31mtrace-color-sample\033[0m\n' | /usr/bin/tee emitted"
+
+        def request_tool(peer):
+            peer.begin_stream()
+            peer.msh_call(command)
+            peer.finish_stream()
+
+        def finish(peer):
+            peer.begin_stream()
+            peer.event({"type": "response.output_text.delta", "delta": "done"})
+            peer.finish_stream()
+
+        requests = self.run_anix("wire", [request_tool, finish], options=("-y",))
+        self.assertEqual((self.root / "emitted").read_bytes(), raw.encode())
+        tool, = [r for r in self.rows("history") if r.get("role") == "tool"]
+        self.assertEqual(tool["text"].split("\n", 1)[1], label + "\n")
+        upstream, = [i for i in requests[1]["input"] if i["type"] == "function_call_output"]
+        self.assertEqual(upstream["output"], tool["text"])
+        self.assertEqual((self.root / "trace").stat().st_mode & 0o777, 0o600)
+        events = self.rows("trace")
+        # Search JSON string content without relying on a particular wire event name.
+        encoded_trace = json.dumps(events)
+        actual = [e["raw_output"] for e in events if "raw_output" in e]
+        self.assertTrue(json.dumps(raw)[1:-1] in encoded_trace,
+                      f"expected the original shell output in the wire trace, observed {actual!r}")
+
     # RFC v1.1 §6.5, §7.1, §9.2, §9.5
     def test_long_msh_can_outlive_the_provider_timeout_between_two_requests(self):
         prefix = "printf started > marker\n#"

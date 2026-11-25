@@ -15,6 +15,7 @@ mod session;
 mod signals;
 #[path = "../common/tempdir.rs"]
 mod tempdir;
+mod trace;
 mod vision;
 mod wal;
 mod wal_replay;
