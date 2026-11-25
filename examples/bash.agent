@@ -10,4 +10,4 @@ compact_threshold: 0.8
 approval: auto
 stderr: auto
 ---
-你是 Bash 专家，相应用户的指令
+你是 Bash 专家，响应用户的指令

@@ -28,8 +28,34 @@ pub enum TranslateError {
 pub fn build_responses_request(stream: &IrStream, model: &str) -> Result<Value, TranslateError> {
     let mut instructions: Option<String> = None;
     let mut input_items: Vec<Value> = Vec::new();
+    let mut pending_tool_media: Vec<(String, MediaAttachment)> = Vec::new();
+
+    let flush_tool_media = |pending: &mut Vec<(String, MediaAttachment)>,
+                            items: &mut Vec<Value>|
+     -> Result<(), TranslateError> {
+        if pending.is_empty() {
+            return Ok(());
+        }
+        let call_ids: Vec<String> = pending.iter().map(|(id, _)| id.clone()).collect();
+        let mut content = vec![json!({
+            "type": "input_text",
+            "text": format!("[attached visual media from tool call(s): {}]", call_ids.join(", "))
+        })];
+        for (_, m) in pending.drain(..) {
+            content.push(encode_media_part(&m)?);
+        }
+        items.push(json!({
+            "type": "message",
+            "role": "user",
+            "content": content
+        }));
+        Ok(())
+    };
 
     for msg in &stream.messages {
+        if !matches!(msg, IrMessage::Tool { .. }) {
+            flush_tool_media(&mut pending_tool_media, &mut input_items)?;
+        }
         match msg {
             IrMessage::System { text, .. } => {
                 if instructions.is_none() {
@@ -98,26 +124,23 @@ pub fn build_responses_request(stream: &IrStream, model: &str) -> Result<Value, 
                 media,
                 ..
             } => {
-                if media.is_empty() {
-                    input_items.push(json!({
-                        "type": "function_call_output",
-                        "call_id": tool_call_id,
-                        "output": text
-                    }));
-                } else {
-                    let mut parts = vec![json!({ "type": "input_text", "text": text })];
-                    for m in media {
-                        parts.push(encode_media_part(m)?);
-                    }
-                    input_items.push(json!({
-                        "type": "function_call_output",
-                        "call_id": tool_call_id,
-                        "output": parts
-                    }));
+                // Always emit plain string `output` in `function_call_output` and flush any
+                // attached visual media in a follow-up `role: "user"` item right after the
+                // contiguous tool-output batch. vLLM / OpenAI-compatible Responses endpoints
+                // silently drop `input_image` parts inside `function_call_output`, whereas
+                // `role: "user"` `input_image` works uniformly across OpenAI, DeepSeek, and vLLM.
+                input_items.push(json!({
+                    "type": "function_call_output",
+                    "call_id": tool_call_id,
+                    "output": text
+                }));
+                for m in media {
+                    pending_tool_media.push((tool_call_id.clone(), m.clone()));
                 }
             }
         }
     }
+    flush_tool_media(&mut pending_tool_media, &mut input_items)?;
 
     let mut body = Map::new();
     body.insert("model".into(), Value::String(model.to_owned()));

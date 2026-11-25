@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-tools"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "clap",
  "image",
@@ -489,7 +489,7 @@ dependencies = [
 
 [[package]]
 name = "msh"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "libc",
  "os-agent-proto",
@@ -527,7 +527,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "os-agent-core"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "clap",
  "libc",
@@ -545,7 +545,7 @@ dependencies = [
 
 [[package]]
 name = "os-agent-proto"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -594,7 +594,7 @@ dependencies = [
 
 [[package]]
 name = "provider-openai-responses"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "base64 0.22.1",
  "os-agent-proto",
