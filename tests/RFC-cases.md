@@ -117,6 +117,48 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 | [`each_read_write_trace_fd_is_excluded_from_the_ordered_initial_user_input`](../crates/anix-core/tests/rfc_runtime/fd.rs#L94) | [§3.1](../docs/v1.1.0-RFC.md?plain=1#L62) · [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
 | [`invalid_trace_fd_reports_usage_to_stderr_before_invoking_the_provider`](../crates/anix-core/tests/rfc_runtime/fd.rs#L136) | [§3.1](../docs/v1.1.0-RFC.md?plain=1#L62) · [§3.4](../docs/v1.1.0-RFC.md?plain=1#L129) · [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) |
 
+## `crates/anix-core/tests/rfc_runtime/inbox.rs`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`concurrent_publications_wait_for_tool_closure_and_preserve_each_complete_body`](../crates/anix-core/tests/rfc_runtime/inbox.rs#L19) | [§4.2](../docs/v1.1.0-RFC.md?plain=1#L179) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) |
+| [`a_publisher_can_queue_work_while_the_initial_cli_task_is_running`](../crates/anix-core/tests/rfc_runtime/inbox.rs#L120) | [§4.2](../docs/v1.1.0-RFC.md?plain=1#L179) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`idle_timeout_starts_after_the_last_job_finishes_and_releases_the_wal`](../crates/anix-core/tests/rfc_runtime/inbox.rs#L179) | [§4.2](../docs/v1.1.0-RFC.md?plain=1#L179) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) |
+| [`oneshot_nonzero_after_done_discards_uncommitted_calls_and_preserves_later_jobs`](../crates/anix-core/tests/rfc_runtime/inbox.rs#L265) | [§4.2](../docs/v1.1.0-RFC.md?plain=1#L179) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+| [`an_idle_inbox_sleeps_without_periodic_wakeups_then_consumes_a_publication`](../crates/anix-core/tests/rfc_runtime/inbox.rs#L336) | [§4.2](../docs/v1.1.0-RFC.md?plain=1#L179) · [§6.3](../docs/v1.1.0-RFC.md?plain=1#L380) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
+
+## `crates/anix-core/tests/rfc_runtime/io.rs`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`cli_version_usage_and_success_have_distinct_stream_contracts`](../crates/anix-core/tests/rfc_runtime/io.rs#L8) | [§3.1](../docs/v1.1.0-RFC.md?plain=1#L62) · [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) |
+| [`args_stdin_and_sparse_extra_descriptors_are_ordered_and_trace_is_separate`](../crates/anix-core/tests/rfc_runtime/io.rs#L35) | [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
+| [`repeated_payload_redirection_appends_raw_bytes_in_both_stderr_modes`](../crates/anix-core/tests/rfc_runtime/io.rs#L87) | [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) · [§4.3](../docs/v1.1.0-RFC.md?plain=1#L194) |
+| [`tool_receives_control_channels_tools_path_and_no_parent_model_or_wal`](../crates/anix-core/tests/rfc_runtime/io.rs#L149) | [§2](../docs/v1.1.0-RFC.md?plain=1#L44) · [§3.4](../docs/v1.1.0-RFC.md?plain=1#L129) · [§4.3](../docs/v1.1.0-RFC.md?plain=1#L194) |
+| [`script_arguments_accept_an_optional_separator_and_preserve_option_like_literals`](../crates/anix-core/tests/rfc_runtime/io.rs#L186) | [§3.1](../docs/v1.1.0-RFC.md?plain=1#L62) · [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) |
+| [`every_static_fd_access_mode_is_probed_and_consumed_input_files_are_closed_before_spawn`](../crates/anix-core/tests/rfc_runtime/io.rs#L207) | [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) · [§4.3](../docs/v1.1.0-RFC.md?plain=1#L194) |
+| [`shell_environment_contains_only_observability_effective_approval_and_routed_fds`](../crates/anix-core/tests/rfc_runtime/io.rs#L280) | [§3.4](../docs/v1.1.0-RFC.md?plain=1#L129) · [§4.3](../docs/v1.1.0-RFC.md?plain=1#L194) |
+
+## `crates/anix-core/tests/rfc_runtime/provider.rs`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`retryable_failures_exhaust_three_backoffs_and_preserve_the_request_and_final_stderr`](../crates/anix-core/tests/rfc_runtime/provider.rs#L20) | [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
+| [`nonretryable_error_preserves_provider_stderr_without_another_attempt`](../crates/anix-core/tests/rfc_runtime/provider.rs#L136) | [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) |
+| [`clean_provider_eof_without_done_preserves_stderr_and_discards_partial_text`](../crates/anix-core/tests/rfc_runtime/provider.rs#L147) | [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) |
+| [`provider_timeout_maps_to_124_without_a_retry`](../crates/anix-core/tests/rfc_runtime/provider.rs#L158) | [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) |
+| [`opaque_round_trips_with_the_same_provider_and_is_removed_before_a_provider_switch`](../crates/anix-core/tests/rfc_runtime/provider.rs#L164) | [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) |
+
+## `crates/anix-core/tests/rfc_runtime/signals.rs`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`interruption_reaps_the_provider_discards_partial_assistant_and_releases_lock`](../crates/anix-core/tests/rfc_runtime/signals.rs#L12) | [§6.4](../docs/v1.1.0-RFC.md?plain=1#L388) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) |
+| [`idle_process_holds_wal_and_usr2_snapshots_exact_ir_at_a_safe_boundary`](../crates/anix-core/tests/rfc_runtime/signals.rs#L50) | [§4.2](../docs/v1.1.0-RFC.md?plain=1#L179) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§6.4](../docs/v1.1.0-RFC.md?plain=1#L388) |
+| [`usr1_forces_one_tool_free_compaction_before_the_next_inbox_inference`](../crates/anix-core/tests/rfc_runtime/signals.rs#L117) | [§6.4](../docs/v1.1.0-RFC.md?plain=1#L388) · [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) |
+| [`interruption_waits_three_seconds_then_stops_a_provider_that_handles_term_without_exiting`](../crates/anix-core/tests/rfc_runtime/signals.rs#L170) | [§6.4](../docs/v1.1.0-RFC.md?plain=1#L388) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) |
+| [`abrupt_parent_exit_stops_the_active_provider_or_shell_child`](../crates/anix-core/tests/rfc_runtime/signals.rs#L210) | [§10.2](../docs/v1.1.0-RFC.md?plain=1#L698) |
+
 ## `crates/anix-core/tests/rfc_runtime/vision.rs`
 
 | 测试 | RFC 条款 |
@@ -133,6 +175,23 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 | --- | --- |
 | [`legacy_wal_without_vision_or_fold_usage_resumes_without_rewriting_the_prefix`](../crates/anix-core/tests/rfc_runtime/wal.rs#L23) | [§1.4](../docs/v1.1.0-RFC.md?plain=1#L33) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
 | [`repeated_resume_appends_one_vision_update_per_change_and_reuses_frozen_text`](../crates/anix-core/tests/rfc_runtime/wal.rs#L59) | [§3.1](../docs/v1.1.0-RFC.md?plain=1#L62) · [§5.5](../docs/v1.1.0-RFC.md?plain=1#L279) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+
+## `crates/anix-core/tests/rfc_runtime/wal_replay.rs`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`every_partial_byte_write_of_a_final_record_fails_without_modifying_history`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L35) | [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) |
+| [`resuming_a_complete_last_object_without_lf_never_joins_two_wal_records`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L59) | [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) |
+| [`checkpoint_short_circuits_archived_history_and_handles_reverse_read_boundaries`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L109) | [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) |
+| [`overlapping_folds_keep_the_surviving_prefix_and_never_recycle_turn_ids`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L137) | [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) |
+| [`cli_rejects_corrupted_tails_and_unknown_section_versions_before_inference`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L173) | [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) |
+| [`nonblocking_wal_lock_excludes_second_process_and_is_released_on_close`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L196) | [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) |
+| [`resumed_session_reuses_frozen_prefix_and_appends_configuration_drift_once`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L215) | [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`all_live_anchors_across_three_successive_folds_match_forward_replay_and_usage`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L365) | [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+| [`running_out_of_uint64_turn_ids_never_reuses_a_committed_anchor`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L396) | [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`checkpoint_recovery_only_dispatches_a_complete_context_at_each_record_boundary`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L438) | [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`initial_section_interruption_never_dispatches_without_a_frozen_system_message`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L515) | [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`resume_uses_the_last_surviving_assistant_usage_for_the_hard_limit`](../crates/anix-core/tests/rfc_runtime/wal_replay.rs#L569) | [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
 
 ## `crates/anix-core/tests/v1_1_e2e.rs`
 

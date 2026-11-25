@@ -1,15 +1,21 @@
 //! RFC v1.1 runtime conformance through the installed CLI contract and local providers.
 
+mod background;
 mod compaction;
 mod configuration;
 mod control;
 mod fd;
 #[path = "../common/fixture.rs"]
 mod fixture;
+mod inbox;
+mod io;
+mod provider;
+mod signals;
 #[path = "../common/tempdir.rs"]
 mod tempdir;
 mod vision;
 mod wal;
+mod wal_replay;
 
 use fixture::Fixture;
 use tempdir::TempDir;
