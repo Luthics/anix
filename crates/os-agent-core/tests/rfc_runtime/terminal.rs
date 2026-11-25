@@ -72,6 +72,10 @@ impl Pty {
 }
 
 fn terminal_command(fx: &Fixture) -> Command {
+    terminal_program(fx, env!("CARGO_BIN_EXE_agent"))
+}
+
+fn terminal_program(fx: &Fixture, program: &str) -> Command {
     // As in a user's shell, the session leader outlives the foreground command.
     // Publish its status before the kernel tears down the controlling terminal.
     let mut cmd = fx.command_for("/bin/sh");
@@ -88,7 +92,7 @@ printf '%s' "$rc" > "$HOME/status.tmp"
 exit "$rc"
 "#,
         "terminal-session",
-        env!("CARGO_BIN_EXE_agent"),
+        program,
     ]);
     cmd
 }
@@ -193,6 +197,56 @@ fn tty_stdin_uses_args_immediately_or_reads_input_through_eof() {
                 "terminal message\n"
             }
         );
+    }
+}
+
+// RFC §1.2, §3.1, §4.1
+#[test]
+fn executable_script_on_path_reads_tty_until_eof_only_without_arguments() {
+    for arg in [None, Some("from argv")] {
+        let fx = Fixture::new();
+        let home = &fx.dir.0;
+        fs::rename(home.join("config"), home.join(".config")).unwrap();
+        let scripts = home.join(".config/agent/agents");
+        let bin = home.join(".local/bin");
+        let cwd = home.join("other-project");
+        fs::create_dir_all(&bin).unwrap();
+        fs::create_dir(&cwd).unwrap();
+        std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_agent"), bin.join("agent")).unwrap();
+        super::executable(
+            &scripts.join("xx.agent"),
+            "#!/usr/bin/env agent\nscript on PATH\n",
+        );
+        super::executable(
+            &home.join(".config/agent/hooks/pre-context.d/90-ready"),
+            "#!/bin/sh\n/bin/cat\n: > \"$HOME/ready\"\n",
+        );
+        let pty = Pty::open();
+        let mut cmd = terminal_program(&fx, "xx.agent");
+        cmd.current_dir(&cwd)
+            .env_remove("XDG_CONFIG_HOME")
+            .env(
+                "PATH",
+                std::env::join_paths([scripts.as_path(), bin.as_path(), home.as_path()]).unwrap(),
+            )
+            .args(arg)
+            .stdin(pty.slave.try_clone().unwrap())
+            .stdout(Stdio::null())
+            .stderr(pty.slave.try_clone().unwrap());
+        let mut running = pty.spawn(cmd, home);
+        let expected = if arg.is_some() {
+            "<args>from argv</args>"
+        } else {
+            super::background::until("script startup", || home.join("ready").exists());
+            assert!(!fx.capture.exists());
+            running.send(b"first line\n");
+            running.send(b"second line\n\x04");
+            "first line\nsecond line\n"
+        };
+        running.finish(0);
+        let ir = jsonl(&fx.capture);
+        assert_eq!(ir[1]["text"], "script on PATH");
+        assert_eq!(ir.last().unwrap()["text"], expected);
     }
 }
 

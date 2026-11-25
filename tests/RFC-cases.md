@@ -222,11 +222,12 @@
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`tty_stdin_uses_args_immediately_or_reads_input_through_eof`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L169) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) |
-| [`approval_choices_use_dev_tty_and_preserve_piped_stdin`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L201) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) · [§5.2](../docs/v1.0.0-RFC.md?plain=1#L189) |
-| [`unsuccessful_or_empty_terminal_edit_runs_neither_original_nor_edited_command`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L307) | [§5.2](../docs/v1.0.0-RFC.md?plain=1#L189) |
-| [`always_approval_is_scoped_to_executable_and_pid_even_with_the_same_wal`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L346) | [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) · [§5.2](../docs/v1.0.0-RFC.md?plain=1#L189) |
-| [`detached_session_requiring_approval_fails_with_42_without_executing_tool`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L408) | [§5.3](../docs/v1.0.0-RFC.md?plain=1#L198) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
+| [`tty_stdin_uses_args_immediately_or_reads_input_through_eof`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L173) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) |
+| [`executable_script_on_path_reads_tty_until_eof_only_without_arguments`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L205) | [§1.2](../docs/v1.0.0-RFC.md?plain=1#L15) · [§3.1](../docs/v1.0.0-RFC.md?plain=1#L39) · [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) |
+| [`approval_choices_use_dev_tty_and_preserve_piped_stdin`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L255) | [§4.1](../docs/v1.0.0-RFC.md?plain=1#L121) · [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) · [§5.2](../docs/v1.0.0-RFC.md?plain=1#L189) |
+| [`unsuccessful_or_empty_terminal_edit_runs_neither_original_nor_edited_command`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L361) | [§5.2](../docs/v1.0.0-RFC.md?plain=1#L189) |
+| [`always_approval_is_scoped_to_executable_and_pid_even_with_the_same_wal`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L400) | [§5.1](../docs/v1.0.0-RFC.md?plain=1#L183) · [§5.2](../docs/v1.0.0-RFC.md?plain=1#L189) |
+| [`detached_session_requiring_approval_fails_with_42_without_executing_tool`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L462) | [§5.3](../docs/v1.0.0-RFC.md?plain=1#L198) · [§6.4](../docs/v1.0.0-RFC.md?plain=1#L278) |
 
 ## `crates/os-agent-core/tests/rfc_runtime/trace.rs`
 

@@ -9,7 +9,7 @@
 
 | 条款与验收点 | 测试或待裁决问题 |
 | --- | --- |
-| [安装后直接通过 shebang 执行](../docs/v1.0.0-RFC.md?plain=1#L19) | [`test_installed_pipeline_and_fold`](../tests/test_distribution.py#L117) |
+| [安装后直接通过 shebang 执行](../docs/v1.0.0-RFC.md?plain=1#L19) | [`test_installed_pipeline_and_fold`](../tests/test_distribution.py#L117) · [`executable_script_on_path_reads_tty_until_eof_only_without_arguments`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L205) |
 | [核心依赖与进程边界（架构审阅）](../docs/v1.0.0-RFC.md?plain=1#L20) | [`crates/os-agent-core/Cargo.toml`](../crates/os-agent-core/Cargo.toml) · [`test_installed_pipeline_and_fold`](../tests/test_distribution.py#L117) |
 
 ## §2
@@ -79,7 +79,7 @@
 
 | 条款与验收点 | 测试或待裁决问题 |
 | --- | --- |
-| [管道等到 EOF，终端有参直接启动、无参等到 Ctrl+D](../docs/v1.0.0-RFC.md?plain=1#L127) | [`args_stdin_and_sparse_extra_descriptors_are_ordered_and_trace_is_separate`](../crates/os-agent-core/tests/rfc_runtime/io.rs#L35) · [`test_open_input_descriptor_defers_inference_until_eof`](../tests/test_shell_pipeline.py#L249) · [`tty_stdin_uses_args_immediately_or_reads_input_through_eof`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L169) · [#12](https://github.com/Luthics/os-agent/issues/12) |
+| [管道等到 EOF，终端有参直接启动、无参等到 Ctrl+D](../docs/v1.0.0-RFC.md?plain=1#L127) | [`args_stdin_and_sparse_extra_descriptors_are_ordered_and_trace_is_separate`](../crates/os-agent-core/tests/rfc_runtime/io.rs#L35) · [`test_open_input_descriptor_defers_inference_until_eof`](../tests/test_shell_pipeline.py#L249) · [`tty_stdin_uses_args_immediately_or_reads_input_through_eof`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L173) · [#12](https://github.com/Luthics/os-agent/issues/12) · [`executable_script_on_path_reads_tty_until_eof_only_without_arguments`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L205) · [#34](https://github.com/Luthics/os-agent/issues/34) |
 | [stdout 只转发显式原始字节](../docs/v1.0.0-RFC.md?plain=1#L128) | [`repeated_payload_redirection_appends_raw_bytes_in_both_stderr_modes`](../crates/os-agent-core/tests/rfc_runtime/io.rs#L87) · [`test_stdout_and_stderr_terminal_modes_are_independent`](../tests/test_shell_pipeline.py#L462) |
 | [两种 stderr 模式、静态终端汇总与会话计费](../docs/v1.0.0-RFC.md?plain=1#L129) | [`test_stdout_and_stderr_terminal_modes_are_independent`](../tests/test_shell_pipeline.py#L462) · [`full_compaction_and_resume_account_for_every_call_without_inflating_watermark`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L194) |
 | [可写 fd 3 优先，其余情况走 journal 或静默](../docs/v1.0.0-RFC.md?plain=1#L130) | [`regular_fd3_separates_events_deltas_and_wire_and_omits_provider_key`](../crates/os-agent-core/tests/rfc_runtime/trace.rs#L118) · [`journal_receives_events_on_fd3_fallback_and_never_receives_wire_ir`](../crates/os-agent-core/tests/rfc_runtime/trace.rs#L175) |
@@ -123,23 +123,23 @@
 | --- | --- |
 | [auto 与环境别名放行工具](../docs/v1.0.0-RFC.md?plain=1#L185) | [`environment_approval_aliases_and_cli_override_produce_the_expected_tool_effects`](../crates/os-agent-core/tests/rfc_runtime/configuration.rs#L574) |
 | [deny 命中或拒绝、错误结果与退出 42](../docs/v1.0.0-RFC.md?plain=1#L186) | [`deny_and_fail_on_deny_differ_in_exit_status_tool_reply_and_side_effects`](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs#L89) · [#9](https://github.com/Luthics/os-agent/issues/9) |
-| [ask 的白名单与本 PID 的 Always 决策](../docs/v1.0.0-RFC.md?plain=1#L187) | [`always_approval_is_scoped_to_executable_and_pid_even_with_the_same_wal`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L346) · [`approval_choices_use_dev_tty_and_preserve_piped_stdin`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L201) · [#9](https://github.com/Luthics/os-agent/issues/9) |
+| [ask 的白名单与本 PID 的 Always 决策](../docs/v1.0.0-RFC.md?plain=1#L187) | [`always_approval_is_scoped_to_executable_and_pid_even_with_the_same_wal`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L400) · [`approval_choices_use_dev_tty_and_preserve_piped_stdin`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L255) · [#9](https://github.com/Luthics/os-agent/issues/9) |
 
 ## §5.2
 
 | 条款与验收点 | 测试或待裁决问题 |
 | --- | --- |
-| [从控制终端审批，保留外部 stdin](../docs/v1.0.0-RFC.md?plain=1#L191) | [`approval_choices_use_dev_tty_and_preserve_piped_stdin`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L201) |
-| [本次允许](../docs/v1.0.0-RFC.md?plain=1#L193) | [`approval_choices_use_dev_tty_and_preserve_piped_stdin`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L201) |
-| [拒绝理由写入返回模型的工具消息](../docs/v1.0.0-RFC.md?plain=1#L194) | [`approval_choices_use_dev_tty_and_preserve_piped_stdin`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L201) |
-| [Always 仅作用于同一 PID 和可执行程序](../docs/v1.0.0-RFC.md?plain=1#L195) | [`always_approval_is_scoped_to_executable_and_pid_even_with_the_same_wal`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L346) |
-| [编辑后执行、0600、清理与取消](../docs/v1.0.0-RFC.md?plain=1#L196) | [`approval_choices_use_dev_tty_and_preserve_piped_stdin`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L201) · [`unsuccessful_or_empty_terminal_edit_runs_neither_original_nor_edited_command`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L307) · [#10](https://github.com/Luthics/os-agent/issues/10) |
+| [从控制终端审批，保留外部 stdin](../docs/v1.0.0-RFC.md?plain=1#L191) | [`approval_choices_use_dev_tty_and_preserve_piped_stdin`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L255) |
+| [本次允许](../docs/v1.0.0-RFC.md?plain=1#L193) | [`approval_choices_use_dev_tty_and_preserve_piped_stdin`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L255) |
+| [拒绝理由写入返回模型的工具消息](../docs/v1.0.0-RFC.md?plain=1#L194) | [`approval_choices_use_dev_tty_and_preserve_piped_stdin`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L255) |
+| [Always 仅作用于同一 PID 和可执行程序](../docs/v1.0.0-RFC.md?plain=1#L195) | [`always_approval_is_scoped_to_executable_and_pid_even_with_the_same_wal`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L400) |
+| [编辑后执行、0600、清理与取消](../docs/v1.0.0-RFC.md?plain=1#L196) | [`approval_choices_use_dev_tty_and_preserve_piped_stdin`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L255) · [`unsuccessful_or_empty_terminal_edit_runs_neither_original_nor_edited_command`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L361) · [#10](https://github.com/Luthics/os-agent/issues/10) |
 
 ## §5.3
 
 | 条款与验收点 | 测试或待裁决问题 |
 | --- | --- |
-| [无控制终端立即诊断并以 42 退出](../docs/v1.0.0-RFC.md?plain=1#L200) | [`detached_session_requiring_approval_fails_with_42_without_executing_tool`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L408) |
+| [无控制终端立即诊断并以 42 退出](../docs/v1.0.0-RFC.md?plain=1#L200) | [`detached_session_requiring_approval_fails_with_42_without_executing_tool`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L462) |
 
 ## §6.1
 
@@ -193,7 +193,7 @@
 | [0 与已刷新的 payload](../docs/v1.0.0-RFC.md?plain=1#L282) | [`repeated_payload_redirection_appends_raw_bytes_in_both_stderr_modes`](../crates/os-agent-core/tests/rfc_runtime/io.rs#L87) |
 | [1 对应 Provider、WAL I/O 和锁冲突](../docs/v1.0.0-RFC.md?plain=1#L283) | [`clean_provider_eof_without_done_preserves_stderr_and_discards_partial_text`](../crates/os-agent-core/tests/rfc_runtime/provider.rs#L144) · [`test_wal_append_failure_preserves_the_prefix_and_reopens_according_to_tail_state`](../tests/test_shell_pipeline.py#L163) · [`nonblocking_wal_lock_excludes_second_process_and_is_released_on_close`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L196) |
 | [2 对应参数、配置或协议版本错误](../docs/v1.0.0-RFC.md?plain=1#L284) | [`invalid_file_bytes_and_yaml_report_usage_errors_to_stderr`](../crates/os-agent-core/tests/rfc_3_2/cli.rs#L90) · [`global_and_project_config_reject_unknown_keys_before_any_inference`](../crates/os-agent-core/tests/rfc_runtime/configuration.rs#L648) · [`cli_rejects_corrupted_tails_and_unknown_section_versions_before_inference`](../crates/os-agent-core/tests/rfc_runtime/wal.rs#L173) |
-| [42 对应审批及信任失败](../docs/v1.0.0-RFC.md?plain=1#L285) | [`detached_session_requiring_approval_fails_with_42_without_executing_tool`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L408) · [`new_and_modified_project_hooks_require_explicit_trust`](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs#L201) |
+| [42 对应审批及信任失败](../docs/v1.0.0-RFC.md?plain=1#L285) | [`detached_session_requiring_approval_fails_with_42_without_executing_tool`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L462) · [`new_and_modified_project_hooks_require_explicit_trust`](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs#L201) |
 | [124 对应预算及 Provider 超时，单次工具超时可继续](../docs/v1.0.0-RFC.md?plain=1#L286) | [`max_turns_stops_before_another_request_and_success_on_last_turn_is_allowed`](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs#L135) · [`hard_limit_allows_equality_and_blocks_the_first_provider_request_above_it`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L437) · [`provider_timeout_maps_to_124_without_a_retry`](../crates/os-agent-core/tests/rfc_runtime/provider.rs#L155) · [`test_real_shell_timeout_returns_an_error_tool_result_and_inference_continues`](../tests/test_shell_pipeline.py#L527) |
 | [INT 清理后退出 130](../docs/v1.0.0-RFC.md?plain=1#L287) | [`interruption_reaps_the_provider_discards_partial_assistant_and_releases_lock`](../crates/os-agent-core/tests/rfc_runtime/signals.rs#L12) |
 | [TERM 清理后退出 143](../docs/v1.0.0-RFC.md?plain=1#L288) | [`interruption_reaps_the_provider_discards_partial_assistant_and_releases_lock`](../crates/os-agent-core/tests/rfc_runtime/signals.rs#L12) |
@@ -234,7 +234,7 @@
 | 条款与验收点 | 测试或待裁决问题 |
 | --- | --- |
 | [defaults 字段和配置层优先级](../docs/v1.0.0-RFC.md?plain=1#L336) | [`scalar_settings_resolve_for_every_subset_of_the_five_override_layers`](../crates/os-agent-core/tests/rfc_runtime/configuration.rs#L181) · [`every_subset_of_five_layers_selects_highest_priority_model_and_output_limit`](../crates/os-agent-core/tests/rfc_runtime/configuration.rs#L116) · [`global_and_project_config_reject_unknown_keys_before_any_inference`](../crates/os-agent-core/tests/rfc_runtime/configuration.rs#L648) |
-| [白名单、命令首词与多词条目](../docs/v1.0.0-RFC.md?plain=1#L349) | [`deny_and_fail_on_deny_differ_in_exit_status_tool_reply_and_side_effects`](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs#L89) · [`always_approval_is_scoped_to_executable_and_pid_even_with_the_same_wal`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L346) · [#9](https://github.com/Luthics/os-agent/issues/9) |
+| [白名单、命令首词与多词条目](../docs/v1.0.0-RFC.md?plain=1#L349) | [`deny_and_fail_on_deny_differ_in_exit_status_tool_reply_and_side_effects`](../crates/os-agent-core/tests/rfc_runtime/lifecycle.rs#L89) · [`always_approval_is_scoped_to_executable_and_pid_even_with_the_same_wal`](../crates/os-agent-core/tests/rfc_runtime/terminal.rs#L400) · [#9](https://github.com/Luthics/os-agent/issues/9) |
 | [Provider 解析、base URL、超时和凭据来源](../docs/v1.0.0-RFC.md?plain=1#L352) | [`provider_resolution_injects_model_base_url_timeout_and_env_or_fallback_key`](../crates/os-agent-core/tests/rfc_runtime/configuration.rs#L520) · [`a_named_provider_searches_path_then_libexec_while_a_path_executes_directly`](../crates/os-agent-core/tests/rfc_runtime/configuration.rs#L928) |
 | [所选 Provider 的 params 浅合并](../docs/v1.0.0-RFC.md?plain=1#L359) | [`only_the_selected_providers_defaults_feed_the_shallow_params_merge`](../crates/os-agent-core/tests/rfc_runtime/configuration.rs#L851) |
 | [内置及外部压缩器选取](../docs/v1.0.0-RFC.md?plain=1#L362) | [`builtin_compactor_uses_configured_provider_model_and_literal_or_file_prompt`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L526) · [`external_compactor_receives_tool_free_ir_and_empty_or_failed_summary_is_fatal`](../crates/os-agent-core/tests/rfc_runtime/compaction.rs#L350) |
