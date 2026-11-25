@@ -1,13 +1,15 @@
-//! Structured JSONL Trace sink (`fd 3` / `$XDG_RUNTIME_DIR/agent/journal.sock`, Section 9.5).
+//! Structured JSONL Trace sink (`--trace-fd=<N>` / `AGENT_TRACE_FD=<N>` /
+//! `$XDG_RUNTIME_DIR/agent/journal.sock`, v1.1 §§4.1 & 9.5).
 //!
-//! - Lazy activation: disabled unless `fd 3` is writable or `journal.sock` exists.
+//! - Explicit activation: NEVER probes `fd 3` implicitly; only writes to an explicitly configured
+//!   `--trace-fd` / `AGENT_TRACE_FD`, or connects to `$XDG_RUNTIME_DIR/agent/journal.sock` if present.
 //! - EPIPE / broken pipe silently closes the trace sink without blocking or changing exit codes.
 //! - `wire` level is strictly forbidden on shared `journal.sock`.
 
 use std::env;
 use std::fs::File;
 use std::io::Write;
-use std::os::unix::io::FromRawFd;
+use std::os::unix::io::{FromRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
@@ -21,7 +23,7 @@ use crate::platform::posix;
 #[derive(Debug)]
 enum TraceSink {
     Disabled,
-    Fd3(File),
+    Fd(File),
     JournalSock(UnixStream),
 }
 
@@ -35,32 +37,41 @@ pub struct Tracer {
 }
 
 impl Tracer {
-    /// Claim inherited writable `fd 3` immediately before opening any internal file descriptors.
-    pub fn take_inherited_fd3() -> Option<File> {
-        if posix::fd_is_writable(3) {
-            let _ = posix::set_cloexec(3);
-            // SAFETY: `fd 3` was explicitly opened writable by the caller and is claimed once.
-            Some(unsafe { File::from_raw_fd(3) })
-        } else {
-            None
+    /// Claim an explicitly configured writable trace FD (`--trace-fd=<N>` / `AGENT_TRACE_FD=<N>`)
+    /// immediately BEFORE opening any internal file descriptors (v1.1 §4.1).
+    ///
+    /// Returns `Err` if `fd` is invalid (`< 3`) or not open and writable.
+    pub fn take_configured_fd(fd: RawFd) -> Result<File, String> {
+        if fd < 3 {
+            return Err(format!("invalid trace fd `{fd}` (must be >= 3)"));
         }
+        if !posix::fd_is_writable(fd) {
+            return Err(format!("trace fd `{fd}` is not open for writing"));
+        }
+        let _ = posix::set_cloexec(fd);
+        // SAFETY: `fd` was explicitly specified by the caller, verified open & writable, and claimed once.
+        Ok(unsafe { File::from_raw_fd(fd) })
     }
 
-    /// Initialize Tracer from a pre-claimed `fd 3` or fallback to `$XDG_RUNTIME_DIR/agent/journal.sock`.
-    pub fn init(agent_name: impl Into<String>, fd3: Option<File>, journal_sock: &Path) -> Self {
+    /// Initialize Tracer from an explicitly claimed trace FD or fallback to `$XDG_RUNTIME_DIR/agent/journal.sock`.
+    pub fn init(
+        agent_name: impl Into<String>,
+        trace_file: Option<File>,
+        journal_sock: &Path,
+    ) -> Self {
         let agent_name = agent_name.into();
         let pid = std::process::id();
         let ppid = posix::current_ppid();
         let env_level = parse_trace_level_env();
 
-        if let Some(file) = fd3 {
+        if let Some(file) = trace_file {
             let level = env_level.unwrap_or(TraceLevel::Deltas);
             return Self {
                 agent_name,
                 pid,
                 ppid,
                 level,
-                sink: TraceSink::Fd3(file),
+                sink: TraceSink::Fd(file),
             };
         }
 
@@ -145,7 +156,7 @@ impl Tracer {
 
         let write_result = match &mut self.sink {
             TraceSink::Disabled => return,
-            TraceSink::Fd3(f) => f.write_all(line.as_bytes()).and_then(|_| f.flush()),
+            TraceSink::Fd(f) => f.write_all(line.as_bytes()).and_then(|_| f.flush()),
             TraceSink::JournalSock(s) => s.write_all(line.as_bytes()),
         };
 

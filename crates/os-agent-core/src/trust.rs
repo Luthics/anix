@@ -203,10 +203,19 @@ fn collect_trust_targets(input: &Path, paths: &AgentPaths) -> Result<Vec<PathBuf
         }
     }
 
-    // 2. Project-configured `[compact].bin` and `[providers.<name>].bin` in `.agent/config.toml`.
+    // 2. Project-configured `[approval].bin`, `[vision].bin`, `[compact].bin`, and
+    //    `[providers.<name>].bin` in `.agent/config.toml` (v1.1 §8.3).
     let cfg_path = agent_dir.join("config.toml");
     if let Ok(Some(cfg)) = load_config_file(&cfg_path) {
-        if let Some(bin) = cfg.compact.bin.as_deref().filter(|s| !s.trim().is_empty()) {
+        for bin in [
+            cfg.approval.bin.as_deref(),
+            cfg.vision.bin.as_deref(),
+            cfg.compact.bin.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|s| !s.trim().is_empty())
+        {
             let resolved_bin = paths.resolve_component_bin(bin, Some(project_root));
             if resolved_bin.is_file() {
                 targets.push(resolved_bin);

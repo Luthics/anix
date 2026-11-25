@@ -76,6 +76,7 @@ pub struct AgentFrontmatter {
     pub name: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub vision: Option<bool>,
     pub shell: Option<String>,
     pub max_turns: Option<u32>,
     pub max_tokens: Option<u32>,
@@ -214,6 +215,13 @@ fn parse_yaml_frontmatter(yaml_block: &str) -> Result<AgentFrontmatter, Frontmat
                     });
                 }
                 fm.model = Some(s);
+            }
+            "vision" => {
+                let b = v.as_bool().ok_or_else(|| FrontmatterError::InvalidValue {
+                    field: "vision",
+                    reason: "expected boolean (`true` or `false`)".into(),
+                })?;
+                fm.vision = Some(b);
             }
             "shell" => {
                 let s = expect_string("shell", v)?;

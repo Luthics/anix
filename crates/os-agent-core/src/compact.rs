@@ -1,5 +1,6 @@
-//! Token budget tracking, auto-compaction trigger, and `[compact]` strategy resolution
-//! (external `[compact].bin` vs built-in Provider summarizer) (Section 6.1).
+//! Token budget tracking, auto-compaction trigger, `aclr -t <N>` auto-summary tail folding,
+//! and `[compact]` strategy resolution (external `[compact].bin` vs built-in Provider summarizer)
+//! (v1.1 Section 6.1).
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -16,9 +17,10 @@ use serde_json::{Map, Value};
 use thiserror::Error;
 
 use crate::config::ResolvedConfig;
+use crate::fd::StderrTracker;
 use crate::hooks::{self, HookError};
-use crate::platform::posix;
-use crate::provider::{self, ProviderError};
+use crate::platform::{self, ChildWaitOutcome, posix};
+use crate::provider::{self, ProviderError, ProviderPool};
 use crate::signal::SignalState;
 use crate::trace::Tracer;
 use crate::trust::{self, TrustError};
@@ -26,6 +28,9 @@ use crate::wal::{WalError, WalStore};
 
 const DEFAULT_COMPACT_PROMPT: &str = "\
 Summarize the conversation so far into a concise, factual checkpoint. Preserve all user goals, key decisions, verified facts, file paths, command outcomes, constraints, and remaining open tasks. Output plain text only.";
+
+const DEFAULT_FOLD_PROMPT: &str = "\
+Summarize ONLY this folded tail segment concisely and factually so earlier turns remain valid. Preserve verified findings, failed approaches to avoid repeating, file paths, and key command results. Output plain text only.";
 
 #[derive(Debug, Error)]
 pub enum CompactError {
@@ -44,7 +49,7 @@ pub enum CompactError {
 impl CompactError {
     pub fn exit_code(&self) -> ExitCode {
         match self {
-            Self::Trust(_) => ExitCode::PermissionDenied,
+            Self::Trust(_) => ExitCode::TempFail,
             Self::Provider(e) => e.exit_code(),
             Self::Hook(e) => e.exit_code(),
             Self::Wal(e) => e.exit_code(),
@@ -60,9 +65,7 @@ impl CompactError {
 /// 3. Otherwise (fresh session or right after `checkpoint` with no surviving assistant yet):
 ///    `ceil(total_window_bytes / 3)`.
 ///
-/// Built-in compactor usage is NEVER included in `T_cur`; after `aclr -t` tail folding pops
-/// trailing turns, the baseline automatically falls back to the last surviving assistant before
-/// the fold boundary.
+/// Built-in compactor / auto-fold summarizer usage is NEVER included in `T_cur`.
 pub fn estimate_context_tokens(
     messages: &[IrMessage],
     assistant_usages: &BTreeMap<u64, TokenUsage>,
@@ -117,35 +120,31 @@ pub fn run_full_compaction(
     reason: &str,
     wal: &mut WalStore,
     signals: &SignalState,
+    provider_pool: &mut ProviderPool,
+    stderr_tracker: &StderrTracker,
     tracer: &mut Tracer,
 ) -> Result<CompactionOutcome, CompactError> {
     if cfg.stderr == StderrMode::Auto {
-        eprintln!("[agent] compacting context ({reason})...");
+        stderr_tracker.writeln_line(&format!("[agent] compacting context ({reason})..."));
     }
 
-    // Build tool-less Canonical IR copy for compaction (Section 6.1.4: no `msh` tool).
-    let compact_ir = IrStream {
-        header: IrHeader {
-            ir_version: IR_VERSION,
-            record_type: HeaderTag::Header,
-            tools: Vec::new(),
-            max_output_tokens: None,
-            params: BTreeMap::new(),
-            meta: IrMeta {
-                stderr_mode: cfg.stderr,
-                cwd: cfg.paths.cwd.display().to_string(),
-                turn_budget: None,
-                extra: BTreeMap::new(),
-            },
-            extra: BTreeMap::new(),
-        },
-        messages: current_messages.to_vec(),
-    };
+    let compact_ir = build_toolless_ir(cfg, current_messages.to_vec());
 
     let (summary, compact_usage) = if let Some(ref bin_spec) = cfg.compact.bin {
-        (run_external_compactor(cfg, bin_spec, &compact_ir)?, None)
+        (
+            run_external_compactor(cfg, bin_spec, &compact_ir, signals)?,
+            None,
+        )
     } else {
-        run_builtin_compactor(cfg, compact_ir, signals, tracer)?
+        run_builtin_compactor(
+            cfg,
+            compact_ir,
+            None,
+            signals,
+            provider_pool,
+            stderr_tracker,
+            tracer,
+        )?
     };
 
     let summary = summary.trim().to_owned();
@@ -179,7 +178,13 @@ pub fn run_full_compaction(
         },
         messages: vec![IrMessage::system(checkpoint_turn, script_prompt)],
     };
-    let refreshed_ir = hooks::run_pre_context(seed_ir, &cfg.paths, cfg.stderr)?;
+    let refreshed_ir = hooks::run_pre_context(
+        seed_ir,
+        &cfg.paths,
+        cfg.stderr,
+        cfg.vision,
+        cfg.vision_bridge.bin.is_some(),
+    )?;
     let fresh_system_text = refreshed_ir
         .messages
         .iter()
@@ -207,6 +212,7 @@ pub fn run_full_compaction(
         config: WalConfigSnapshot {
             stderr: Some(cfg.stderr),
             approval: Some(cfg.approval),
+            vision: Some(cfg.vision),
         },
         compact_usage: normalized_compact,
         cumulative_usage: Some(normalized_cumulative),
@@ -238,10 +244,75 @@ pub fn run_full_compaction(
     })
 }
 
+/// Auto-summarize ONLY the aligned tail sub-window `from_turn..=current_turn` for `aclr -t <N>`
+/// (omitted summary) using `[compact]` precedence without touching frozen prefix turns (v1.1 §6.1).
+pub fn summarize_tail_fold(
+    cfg: &ResolvedConfig,
+    tail_messages: &[IrMessage],
+    signals: &SignalState,
+    provider_pool: &mut ProviderPool,
+    stderr_tracker: &StderrTracker,
+    tracer: &mut Tracer,
+) -> Result<(String, Option<TokenUsage>), CompactError> {
+    if tail_messages.is_empty() {
+        return Err(CompactError::Failed(
+            "no messages in tail fold sub-window".into(),
+        ));
+    }
+
+    let sub_ir = build_toolless_ir(cfg, tail_messages.to_vec());
+
+    let (summary, fold_usage) = if let Some(ref bin_spec) = cfg.compact.bin {
+        (
+            run_external_compactor(cfg, bin_spec, &sub_ir, signals)?,
+            None,
+        )
+    } else {
+        run_builtin_compactor(
+            cfg,
+            sub_ir,
+            Some(DEFAULT_FOLD_PROMPT),
+            signals,
+            provider_pool,
+            stderr_tracker,
+            tracer,
+        )?
+    };
+
+    let trimmed = summary.trim().to_owned();
+    if trimmed.is_empty() {
+        return Err(CompactError::Failed(
+            "auto-fold compactor returned an empty summary".into(),
+        ));
+    }
+    Ok((trimmed, fold_usage))
+}
+
+fn build_toolless_ir(cfg: &ResolvedConfig, messages: Vec<IrMessage>) -> IrStream {
+    IrStream {
+        header: IrHeader {
+            ir_version: IR_VERSION,
+            record_type: HeaderTag::Header,
+            tools: Vec::new(),
+            max_output_tokens: None,
+            params: BTreeMap::new(),
+            meta: IrMeta {
+                stderr_mode: cfg.stderr,
+                cwd: cfg.paths.cwd.display().to_string(),
+                turn_budget: None,
+                extra: BTreeMap::new(),
+            },
+            extra: BTreeMap::new(),
+        },
+        messages,
+    }
+}
+
 fn run_external_compactor(
     cfg: &ResolvedConfig,
     bin_spec: &str,
     compact_ir: &IrStream,
+    signals: &SignalState,
 ) -> Result<String, CompactError> {
     let base_dir = cfg
         .paths
@@ -295,9 +366,24 @@ fn run_external_compactor(
         s
     });
 
-    let status = child
-        .wait()
-        .map_err(|e| CompactError::Failed(format!("failed waiting on [compact].bin: {e}")))?;
+    let status = loop {
+        if let Some(code) = signals.termination_exit_code() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(CompactError::Provider(ProviderError::Interrupted(code)));
+        }
+        match platform::wait_child_until(&mut child, None, Some(signals.wakeup_fd()))
+            .map_err(|e| CompactError::Failed(format!("failed waiting on [compact].bin: {e}")))?
+        {
+            ChildWaitOutcome::Exited(st) => break st,
+            ChildWaitOutcome::SignalWakeup => {
+                signals.drain_wakeup();
+                continue;
+            }
+            ChildWaitOutcome::TimedOut => continue,
+        }
+    };
+
     let stdout_bytes = out_handle.join().unwrap_or_default();
     let stderr_str = err_handle.join().unwrap_or_default();
 
@@ -320,10 +406,14 @@ fn run_external_compactor(
     Ok(stdout)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_builtin_compactor(
     cfg: &ResolvedConfig,
     mut compact_ir: IrStream,
+    override_default_prompt: Option<&str>,
     signals: &SignalState,
+    provider_pool: &mut ProviderPool,
+    stderr_tracker: &StderrTracker,
     tracer: &mut Tracer,
 ) -> Result<(String, Option<TokenUsage>), CompactError> {
     let provider_name = cfg.compact.provider.as_deref().unwrap_or(&cfg.provider);
@@ -356,7 +446,9 @@ fn run_builtin_compactor(
             ))
         })?
     } else {
-        DEFAULT_COMPACT_PROMPT.to_owned()
+        override_default_prompt
+            .unwrap_or(DEFAULT_COMPACT_PROMPT)
+            .to_owned()
     };
 
     let next_tid = compact_ir
@@ -374,6 +466,8 @@ fn run_builtin_compactor(
         cfg.stderr,
         false,
         signals,
+        provider_pool,
+        stderr_tracker,
         tracer,
     )?;
 

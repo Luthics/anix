@@ -17,7 +17,7 @@ use serde_yaml_ng::Value as YamlValue;
 use thiserror::Error;
 
 use crate::config::AgentPaths;
-use crate::platform::posix;
+use crate::platform::{self, ChildWaitOutcome, posix};
 use crate::trace::Tracer;
 use crate::trust::{self, TrustError};
 
@@ -30,6 +30,7 @@ const BUILTIN_TIPS: &[(&str, &str)] = &[
     ),
     ("how-to-goal.md", include_str!("../tips/how-to-goal.md")),
     ("how-to-loop.md", include_str!("../tips/how-to-loop.md")),
+    ("how-to-mcp.md", include_str!("../tips/how-to-mcp.md")),
     (
         "how-to-sub-agent.md",
         include_str!("../tips/how-to-sub-agent.md"),
@@ -59,7 +60,7 @@ pub enum HookError {
 impl HookError {
     pub fn exit_code(&self) -> ExitCode {
         match self {
-            Self::Trust(_) => ExitCode::PermissionDenied,
+            Self::Trust(_) => ExitCode::TempFail,
             _ => ExitCode::RuntimeError,
         }
     }
@@ -80,6 +81,8 @@ pub fn run_pre_context(
     mut stream: IrStream,
     paths: &AgentPaths,
     stderr_mode: StderrMode,
+    vision_enabled: bool,
+    has_vision_bridge: bool,
 ) -> Result<IrStream, HookError> {
     let entries = collect_stage_hooks("pre-context.d", paths, true);
 
@@ -87,7 +90,12 @@ pub fn run_pre_context(
         match entry {
             HookEntry::Masked => continue,
             HookEntry::BuiltinPosixRuntime => {
-                apply_builtin_posix_runtime(&mut stream, stderr_mode);
+                apply_builtin_posix_runtime(
+                    &mut stream,
+                    stderr_mode,
+                    vision_enabled,
+                    has_vision_bridge,
+                );
             }
             HookEntry::BuiltinSkills => {
                 apply_builtin_skills(&mut stream, paths);
@@ -215,32 +223,49 @@ fn scan_hook_dir(dir: &Path, from_project: bool, map: &mut BTreeMap<String, Hook
     }
 }
 
-/// Built-in `00-posix-runtime`: deterministically inject POSIX I/O contract (Section 4.4).
-fn apply_builtin_posix_runtime(stream: &mut IrStream, stderr_mode: StderrMode) {
+/// Built-in `00-posix-runtime`: deterministically inject POSIX I/O and vision contract (v1.1 §4.4).
+fn apply_builtin_posix_runtime(
+    stream: &mut IrStream,
+    stderr_mode: StderrMode,
+    vision_enabled: bool,
+    has_vision_bridge: bool,
+) {
+    let vision_line = if vision_enabled {
+        "- Use `aview [--max-dim 1568] [--pages 1-3] <file>` inside `msh` to inspect images/PDFs visually."
+    } else if has_vision_bridge {
+        "- Current model has `vision=false`, backed by a text vision bridge: calling `aview <file>` translates images/PDFs into `<vision_description>` text."
+    } else {
+        "- Current model does NOT support native vision (`vision=false`). Do NOT use `aview` for native image viewing; use text tools (e.g. OCR, `pdftotext`) or delegate to a vision-capable sub-agent (e.g. `vision.agent`)."
+    };
+
     let contract = match stderr_mode {
-        StderrMode::Auto => "\
+        StderrMode::Auto => format!(
+            "\
 <posix_runtime>
 You are running inside the OS Agent POSIX runtime (`stderr=auto`).
 - Your normal text replies are streamed to `stderr` for human observation.
 - Final deliverable payload MUST be written via the `msh` tool to `$AGENT_OUT` (stdout, `fd 1`). Never rely on normal prose for structured deliverables.
 - You may write progress notes or warnings during shell execution to `$AGENT_ERR` (`fd 2`).
 - `$AGENT_OUT` and `$AGENT_ERR` are write-only anonymous pipes: redirect into them (e.g. `> \"$AGENT_OUT\"`), NEVER read, `cat`, `wc`, `head`, or inspect them (reading fails with Permission denied or blocks until timeout).
-- Use `aview [--max-dim 1568] [--pages 1-3] <file>` inside `msh` to inspect images/PDFs visually.
-- Use `aclr -t <turn_id> \"<summary>\"` to fold dead-end tail turns while preserving KV-cache prefix, or `aclr -s` for full compaction.
-</posix_runtime>",
-        StderrMode::Explicit => "\
+{vision_line}
+- Use `aclr -t <turn_id> [\"<summary>\"]` to fold dead-end tail turns while preserving KV-cache prefix (omitting summary auto-summarizes), or `aclr -s` for full compaction.
+</posix_runtime>"
+        ),
+        StderrMode::Explicit => format!(
+            "\
 <posix_runtime>
 You are running inside the OS Agent POSIX runtime (`stderr=explicit`).
-- Your normal text replies are internal thoughts ONLY and are COMPLETELY INVISIBLE to humans (recorded to `fd 3` Trace only).
+- Your normal text replies are internal thoughts ONLY and are COMPLETELY INVISIBLE to humans (recorded to structured Trace only when enabled).
 - Any message, status, or warning intended for humans MUST be explicitly written via `msh` to `$AGENT_ERR` (`fd 2`).
 - Final deliverable payload MUST be written via `msh` to `$AGENT_OUT` (stdout, `fd 1`).
 - `$AGENT_OUT` and `$AGENT_ERR` are write-only anonymous pipes: redirect into them (e.g. `> \"$AGENT_OUT\"`), NEVER read, `cat`, `wc`, `head`, or inspect them (reading fails with Permission denied or blocks until timeout).
-- Use `aview [--max-dim 1568] [--pages 1-3] <file>` inside `msh` to inspect images/PDFs visually.
-- Use `aclr -t <turn_id> \"<summary>\"` to fold dead-end tail turns while preserving KV-cache prefix, or `aclr -s` for full compaction.
-</posix_runtime>",
+{vision_line}
+- Use `aclr -t <turn_id> [\"<summary>\"]` to fold dead-end tail turns while preserving KV-cache prefix (omitting summary auto-summarizes), or `aclr -s` for full compaction.
+</posix_runtime>"
+        ),
     };
 
-    prepend_to_first_system(stream, contract);
+    prepend_to_first_system(stream, &contract);
 }
 
 /// Built-in `20-skills`: scan 6 skill directories in exact priority order and append
@@ -498,14 +523,14 @@ fn run_external_hook(
 
     let status = if let Some(limit) = timeout {
         let deadline = Instant::now() + limit;
-        loop {
-            if let Some(st) = child.try_wait().map_err(|source| HookError::Io {
+        match platform::wait_child_until(&mut child, Some(deadline), None).map_err(|source| {
+            HookError::Io {
                 hook: name.to_owned(),
                 source,
-            })? {
-                break st;
             }
-            if Instant::now() >= deadline {
+        })? {
+            ChildWaitOutcome::Exited(st) => st,
+            ChildWaitOutcome::TimedOut | ChildWaitOutcome::SignalWakeup => {
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(HookError::Failed {
@@ -514,7 +539,6 @@ fn run_external_hook(
                     stderr: format!("hook timed out after {}s", limit.as_secs()),
                 });
             }
-            thread::sleep(Duration::from_millis(15));
         }
     } else {
         child.wait().map_err(|source| HookError::Io {

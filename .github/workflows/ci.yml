@@ -42,11 +42,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Clippy (-D warnings)
         run: cargo xclippy
-      - name: Unit tests
-        run: cargo xtest
-      - name: Smoke test binaries
+      - name: Build & test workspace
         run: |
           cargo build --workspace
+          cargo xtest
+      - name: Smoke test binaries
+        run: |
           ./target/debug/agent --version
           ./target/debug/agent-provider --version
           test "$(./target/debug/msh -c 'echo ok')" = "ok"

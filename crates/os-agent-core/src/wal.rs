@@ -256,9 +256,13 @@ impl WalStore {
                     from_turn,
                     to_turn,
                     summary,
+                    fold_usage,
                     ..
                 } => {
                     max_turn_id = max_turn_id.max(to_turn).max(from_turn);
+                    if let Some(ref fu) = fold_usage {
+                        window_usage.add_assign(fu);
+                    }
                     if to_turn < skip_ge {
                         collected_rev.push(IrMessage::user(
                             from_turn,
@@ -719,6 +723,7 @@ mod tests {
                     config: WalConfigSnapshot {
                         stderr: None,
                         approval: None,
+                        vision: None,
                     },
                 })
                 .unwrap();

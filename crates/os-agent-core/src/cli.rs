@@ -50,6 +50,14 @@ pub struct Cli {
     #[arg(long = "shell")]
     pub shell: Option<String>,
 
+    /// Explicitly declare that the active model supports native vision (`vision=true`).
+    #[arg(long = "vision", overrides_with = "no_vision")]
+    pub vision: bool,
+
+    /// Explicitly declare that the active model does NOT support native vision (`vision=false`).
+    #[arg(long = "no-vision", overrides_with = "vision")]
+    pub no_vision: bool,
+
     #[arg(long = "max-turns")]
     pub max_turns: Option<u32>,
 
@@ -72,7 +80,7 @@ pub struct Cli {
     #[arg(short = 'y', long = "yes")]
     pub yes: bool,
 
-    /// Exit with code 42 immediately when `approval=deny` blocks a command.
+    /// Exit with code 75 (`EX_TEMPFAIL`) immediately when `approval=deny` blocks a command.
     #[arg(long = "fail-on-deny")]
     pub fail_on_deny: bool,
 
@@ -86,6 +94,10 @@ pub struct Cli {
     /// Equivalent to `--stderr explicit`.
     #[arg(short = 'q', long = "quiet")]
     pub quiet: bool,
+
+    /// Explicit writable file descriptor number (`>= 3`) for structured JSONL Trace output (v1.1 §4.1).
+    #[arg(long = "trace-fd", value_name = "N")]
+    pub trace_fd: Option<i32>,
 
     /// Maildir-style Inbox queue directory (`--inbox <DIR>`).
     #[arg(long = "inbox")]

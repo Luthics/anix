@@ -165,8 +165,12 @@ fn check_config(paths: &AgentPaths) -> Option<ProviderConfig> {
         .unwrap_or_else(|| "openai-responses".into());
 
     let mut provs = default_providers();
-    merge_providers(&mut provs, &global_cfg.providers, false);
-    merge_providers(&mut provs, &project_cfg.providers, true);
+    if let Err(err) = merge_providers(&mut provs, &global_cfg.providers, false)
+        .and_then(|_| merge_providers(&mut provs, &project_cfg.providers, true))
+    {
+        eprintln!("[FAIL] 2. provider config invalid: {err}");
+        return None;
+    }
 
     let Some(prov) = provs.get(&default_prov_name) else {
         eprintln!("[FAIL] 2. default provider `{default_prov_name}` not found in [providers.*]");

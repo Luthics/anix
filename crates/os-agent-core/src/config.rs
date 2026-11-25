@@ -4,9 +4,11 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
+use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
 
 use os_agent_proto::ir::{ApprovalMode, StderrMode};
+use os_agent_proto::provider::ProviderMode;
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -24,6 +26,8 @@ const DEFAULT_COMPACT_THRESHOLD: CompactThreshold = CompactThreshold::Ratio(0.8)
 const DEFAULT_PROVIDER_TIMEOUT_SEC: u64 = 120;
 const DEFAULT_MSH_TIMEOUT_SEC: u64 = 120;
 const DEFAULT_IDLE_TIMEOUT_SEC: u64 = 300;
+const DEFAULT_APPROVAL_DECIDER_TIMEOUT_SEC: u64 = 30;
+const DEFAULT_VISION_BRIDGE_TIMEOUT_SEC: u64 = 60;
 
 pub const DEFAULT_SAFE_COMMANDS: &[&str] = &[
     "ls",
@@ -206,7 +210,7 @@ pub fn discover_project_agent_dir(cwd: &Path, home_dir: &Path) -> Option<PathBuf
     }
 }
 
-/// Raw `config.toml` file structure (strict: rejects unknown fields per Section 6.4).
+/// Raw `config.toml` file structure (strict: rejects unknown fields per Section 6.5).
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RawConfigFile {
@@ -214,6 +218,8 @@ pub struct RawConfigFile {
     pub defaults: RawDefaults,
     #[serde(default)]
     pub approval: RawApproval,
+    #[serde(default)]
+    pub vision: RawVisionConfig,
     #[serde(default)]
     pub providers: BTreeMap<String, RawProviderConfig>,
     #[serde(default)]
@@ -227,6 +233,7 @@ pub struct RawConfigFile {
 pub struct RawDefaults {
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub vision: Option<bool>,
     pub shell: Option<String>,
     pub max_turns: Option<u32>,
     pub max_tokens: Option<u32>,
@@ -241,15 +248,26 @@ pub struct RawDefaults {
 #[serde(deny_unknown_fields)]
 pub struct RawApproval {
     pub safe_commands: Option<Vec<String>>,
+    pub bin: Option<String>,
+    pub timeout_sec: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawVisionConfig {
+    pub bin: Option<String>,
+    pub timeout_sec: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RawProviderConfig {
     pub bin: Option<String>,
+    pub mode: Option<String>,
     pub base_url: Option<String>,
     pub api_key: Option<String>,
     pub api_key_env: Option<String>,
+    pub vision: Option<bool>,
     pub timeout_sec: Option<u64>,
     pub params: Option<toml::Table>,
 }
@@ -305,9 +323,11 @@ pub enum ApiKeySource {
 pub struct ProviderConfig {
     pub name: String,
     pub bin: String,
+    pub mode: ProviderMode,
     pub base_url: String,
     pub api_key: Option<String>,
     pub api_key_env: String,
+    pub vision: Option<bool>,
     pub timeout_sec: u64,
     pub params: BTreeMap<String, serde_json::Value>,
     /// True if `bin` was defined or overridden in project `.agent/config.toml` (requires `agent trust`).
@@ -319,9 +339,11 @@ impl std::fmt::Debug for ProviderConfig {
         f.debug_struct("ProviderConfig")
             .field("name", &self.name)
             .field("bin", &self.bin)
+            .field("mode", &self.mode)
             .field("base_url", &self.base_url)
             .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
             .field("api_key_env", &self.api_key_env)
+            .field("vision", &self.vision)
             .field("timeout_sec", &self.timeout_sec)
             .field("params", &self.params)
             .field("bin_from_project", &self.bin_from_project)
@@ -357,6 +379,24 @@ impl ProviderConfig {
     }
 }
 
+/// Merged `[approval]` external decider configuration (v1.1 §5.2).
+#[derive(Debug, Clone, Default)]
+pub struct ApprovalDeciderConfig {
+    pub bin: Option<String>,
+    pub timeout_sec: u64,
+    /// True if `bin` came from project `.agent/config.toml` (requires `agent trust`).
+    pub bin_from_project: bool,
+}
+
+/// Merged `[vision]` external image-to-text bridge configuration (v1.1 §5.5).
+#[derive(Debug, Clone, Default)]
+pub struct VisionBridgeConfig {
+    pub bin: Option<String>,
+    pub timeout_sec: u64,
+    /// True if `bin` came from project `.agent/config.toml` (requires `agent trust`).
+    pub bin_from_project: bool,
+}
+
 /// Merged `[compact]` configuration.
 #[derive(Debug, Clone, Default)]
 pub struct CompactConfig {
@@ -376,6 +416,7 @@ pub struct ResolvedConfig {
     pub name: String,
     pub provider: String,
     pub model: String,
+    pub vision: bool,
     pub shell: String,
     pub max_turns: u32,
     pub max_tokens: u32,
@@ -383,8 +424,11 @@ pub struct ResolvedConfig {
     pub compact_threshold: CompactThreshold,
     pub no_compact: bool,
     pub approval: ApprovalMode,
+    pub approval_decider: ApprovalDeciderConfig,
+    pub vision_bridge: VisionBridgeConfig,
     pub fail_on_deny: bool,
     pub stderr: StderrMode,
+    pub trace_fd: Option<RawFd>,
     pub context: Option<PathBuf>,
     pub inbox: Option<PathBuf>,
     pub idle_timeout_sec: u64,
@@ -412,11 +456,13 @@ impl ResolvedConfig {
 
         // 1. Merge providers map (built-in default -> global -> project)
         let mut providers = default_providers();
-        merge_providers(&mut providers, &global.providers, false);
-        merge_providers(&mut providers, &project.providers, true);
+        merge_providers(&mut providers, &global.providers, false)?;
+        merge_providers(&mut providers, &project.providers, true)?;
 
-        // 2. Merge compact config (global -> project)
+        // 2. Merge compact, approval decider, and vision bridge configs (global -> project)
         let compact = merge_compact(&global.compact, &project.compact, &paths.home_dir)?;
+        let approval_decider = merge_approval_decider(&global.approval, &project.approval);
+        let vision_bridge = merge_vision_bridge(&global.vision, &project.vision);
 
         // 3. Merge safe_commands (built-in -> global -> project)
         let safe_commands = project
@@ -588,6 +634,15 @@ impl ResolvedConfig {
 
         let approval = resolve_approval(cli, fm.approval, &project.defaults, &global.defaults)?;
         let stderr = resolve_stderr(cli, fm.stderr, &project.defaults, &global.defaults)?;
+        let active_provider_vision = providers.get(&provider).and_then(|p| p.vision);
+        let vision = resolve_vision(
+            cli,
+            fm.vision,
+            active_provider_vision,
+            project.defaults.vision,
+            global.defaults.vision,
+        )?;
+        let trace_fd = resolve_trace_fd(cli.trace_fd)?;
 
         // Empty-string override rule (Section 3.4):
         // CLI `-c ""` or `AGENT_CONTEXT=""` (set and empty) overrides frontmatter `context`!
@@ -623,6 +678,7 @@ impl ResolvedConfig {
             name,
             provider,
             model,
+            vision,
             shell,
             max_turns,
             max_tokens,
@@ -630,8 +686,11 @@ impl ResolvedConfig {
             compact_threshold,
             no_compact: cli.no_compact,
             approval,
+            approval_decider,
+            vision_bridge,
             fail_on_deny: cli.fail_on_deny,
             stderr,
+            trace_fd,
             context,
             inbox,
             idle_timeout_sec,
@@ -663,9 +722,11 @@ pub fn default_providers() -> BTreeMap<String, ProviderConfig> {
         ProviderConfig {
             name: DEFAULT_PROVIDER.into(),
             bin: "agent-provider-openai-responses".into(),
+            mode: ProviderMode::Coprocess,
             base_url: "https://api.openai.com/v1".into(),
             api_key: None,
             api_key_env: "OPENAI_API_KEY".into(),
+            vision: None,
             timeout_sec: DEFAULT_PROVIDER_TIMEOUT_SEC,
             params: BTreeMap::new(),
             bin_from_project: false,
@@ -678,16 +739,18 @@ pub(crate) fn merge_providers(
     target: &mut BTreeMap<String, ProviderConfig>,
     layer: &BTreeMap<String, RawProviderConfig>,
     is_project: bool,
-) {
+) -> Result<(), ConfigError> {
     for (name, raw) in layer {
         let entry = target
             .entry(name.clone())
             .or_insert_with(|| ProviderConfig {
                 name: name.clone(),
                 bin: format!("agent-provider-{name}"),
+                mode: ProviderMode::Coprocess,
                 base_url: String::new(),
                 api_key: None,
                 api_key_env: String::new(),
+                vision: None,
                 timeout_sec: DEFAULT_PROVIDER_TIMEOUT_SEC,
                 params: BTreeMap::new(),
                 bin_from_project: false,
@@ -697,6 +760,11 @@ pub(crate) fn merge_providers(
             if is_project {
                 entry.bin_from_project = true;
             }
+        }
+        if let Some(ref mode_raw) = raw.mode {
+            entry.mode = ProviderMode::parse_str(mode_raw).map_err(|reason| {
+                ConfigError::Invalid(format!("invalid [providers.{name}].mode: {reason}"))
+            })?;
         }
         if let Some(ref base_url) = raw.base_url {
             entry.base_url = base_url.clone();
@@ -711,6 +779,9 @@ pub(crate) fn merge_providers(
         if let Some(ref api_key_env) = raw.api_key_env {
             entry.api_key_env = api_key_env.clone();
         }
+        if let Some(vision) = raw.vision {
+            entry.vision = Some(vision);
+        }
         if let Some(timeout) = raw.timeout_sec {
             entry.timeout_sec = timeout;
         }
@@ -722,6 +793,7 @@ pub(crate) fn merge_providers(
             }
         }
     }
+    Ok(())
 }
 
 /// Parse `--param KEY=VALUE` (value parsed as JSON literal first, else raw string, Section 3.1).
@@ -797,6 +869,113 @@ fn merge_compact(
         bin,
         bin_from_project,
     })
+}
+
+fn merge_approval_decider(global: &RawApproval, project: &RawApproval) -> ApprovalDeciderConfig {
+    let (bin, bin_from_project) = match project.bin.as_deref().filter(|s| !s.trim().is_empty()) {
+        Some(b) => (Some(b.to_owned()), true),
+        None => (
+            global
+                .bin
+                .as_deref()
+                .filter(|s| !s.trim().is_empty())
+                .map(ToOwned::to_owned),
+            false,
+        ),
+    };
+    let timeout_sec = project
+        .timeout_sec
+        .or(global.timeout_sec)
+        .filter(|&v| v > 0)
+        .unwrap_or(DEFAULT_APPROVAL_DECIDER_TIMEOUT_SEC);
+    ApprovalDeciderConfig {
+        bin,
+        timeout_sec,
+        bin_from_project,
+    }
+}
+
+fn merge_vision_bridge(global: &RawVisionConfig, project: &RawVisionConfig) -> VisionBridgeConfig {
+    let (bin, bin_from_project) = match project.bin.as_deref().filter(|s| !s.trim().is_empty()) {
+        Some(b) => (Some(b.to_owned()), true),
+        None => (
+            global
+                .bin
+                .as_deref()
+                .filter(|s| !s.trim().is_empty())
+                .map(ToOwned::to_owned),
+            false,
+        ),
+    };
+    let timeout_sec = project
+        .timeout_sec
+        .or(global.timeout_sec)
+        .filter(|&v| v > 0)
+        .unwrap_or(DEFAULT_VISION_BRIDGE_TIMEOUT_SEC);
+    VisionBridgeConfig {
+        bin,
+        timeout_sec,
+        bin_from_project,
+    }
+}
+
+fn resolve_vision(
+    cli: &Cli,
+    fm_vision: Option<bool>,
+    provider_vision: Option<bool>,
+    project_default: Option<bool>,
+    global_default: Option<bool>,
+) -> Result<bool, ConfigError> {
+    if cli.vision {
+        return Ok(true);
+    }
+    if cli.no_vision {
+        return Ok(false);
+    }
+    if let Some(raw) = env_non_empty("AGENT_VISION") {
+        return match raw.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" => Ok(true),
+            "0" | "false" => Ok(false),
+            other => Err(ConfigError::Invalid(format!(
+                "invalid AGENT_VISION `{other}` (expected `1`, `true`, `0`, or `false`)"
+            ))),
+        };
+    }
+    if let Some(v) = fm_vision {
+        return Ok(v);
+    }
+    if let Some(v) = provider_vision {
+        return Ok(v);
+    }
+    if let Some(v) = project_default {
+        return Ok(v);
+    }
+    if let Some(v) = global_default {
+        return Ok(v);
+    }
+    Ok(true)
+}
+
+fn resolve_trace_fd(cli_fd: Option<i32>) -> Result<Option<RawFd>, ConfigError> {
+    let fd = match cli_fd {
+        Some(n) => Some(n),
+        None => match env_non_empty("AGENT_TRACE_FD") {
+            Some(raw) => Some(raw.trim().parse::<i32>().map_err(|_| {
+                ConfigError::Invalid(format!(
+                    "invalid AGENT_TRACE_FD `{raw}` (expected integer >= 3)"
+                ))
+            })?),
+            None => None,
+        },
+    };
+    if let Some(n) = fd
+        && n < 3
+    {
+        return Err(ConfigError::Invalid(format!(
+            "invalid trace fd `{n}` (must be >= 3)"
+        )));
+    }
+    Ok(fd)
 }
 
 fn resolve_approval(

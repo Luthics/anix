@@ -1,6 +1,6 @@
-//! External FD 0/1/2/3/4..9 contract, `FD_CLOEXEC` hygiene, anonymous pipe relays
-//! (`fd 4/5/6` for `$AGENT_OUT`, `$AGENT_ERR`, `$AGENT_CTL`), and Maildir-style
-//! `--inbox <DIR>` / `--idle-timeout <SEC>` daemon queue (Section 4).
+//! External FD 0/1/2/4..9 contract, `fd 2` newline tracking, `FD_CLOEXEC` hygiene,
+//! anonymous pipe relays (`fd 4/5/6` for `$AGENT_OUT`, `$AGENT_ERR`, `$AGENT_CTL`),
+//! pure event-driven `msh` wait, and Maildir `--inbox` / `--idle-timeout` queue (v1.1 §§4 & 6.3).
 
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
@@ -8,7 +8,8 @@ use std::os::unix::io::{FromRawFd, RawFd};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -18,15 +19,69 @@ use os_agent_proto::ctl::{CtlFrame, MAX_CTL_FRAME_BYTES};
 use os_agent_proto::exit_code::ExitCode;
 use os_agent_proto::ir::ApprovalMode;
 
-use crate::platform::{self, DirWatcher, PreparedSandbox, posix};
+use crate::platform::{self, ChildWaitOutcome, DirWatcher, PreparedSandbox, posix};
 use crate::signal::SignalState;
 
-/// Drain and immediately close any inherited readable static multi-input FDs (`fd 4..=9`)
-/// BEFORE opening any internal file descriptors (`journal.sock`, `signal-hook`, WAL `flock`, etc.)
-/// so internal FDs can never collide with inherited `fd 4..=9` (Section 4.1).
-pub fn drain_inherited_extra_fds() -> Vec<(RawFd, String)> {
+/// Tracks the trailing byte written to `fd 2` (`stderr`) to enforce the v1.1 §4.1
+/// deterministic newline contract without ever touching `fd 1` (`stdout`).
+#[derive(Debug, Clone, Default)]
+pub struct StderrTracker {
+    needs_newline: Arc<AtomicBool>,
+}
+
+impl StderrTracker {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record raw bytes just written to `fd 2`.
+    pub fn note_bytes(&self, bytes: &[u8]) {
+        if let Some(&last) = bytes.last() {
+            self.needs_newline.store(last != b'\n', Ordering::SeqCst);
+        }
+    }
+
+    /// If the last byte written to `fd 2` was not `\n`, emit a `\n` now.
+    pub fn ensure_newline(&self) {
+        if self.needs_newline.swap(false, Ordering::SeqCst) {
+            let mut err = io::stderr().lock();
+            let _ = err.write_all(b"\n");
+            let _ = err.flush();
+        }
+    }
+
+    /// Emit a complete diagnostic line to `fd 2`, ensuring a clean leading line break first.
+    pub fn writeln_line(&self, line: &str) {
+        self.ensure_newline();
+        let mut err = io::stderr().lock();
+        let _ = writeln!(err, "{line}");
+        let _ = err.flush();
+        self.needs_newline.store(false, Ordering::SeqCst);
+    }
+
+    /// Emit a complete line wrapped in ANSI Dim (`\x1b[2m...\x1b[0m\n`) when `isatty(2)` is true,
+    /// strictly resetting ANSI style BEFORE `\n` (v1.1 §4.1).
+    pub fn writeln_dim_if_tty(&self, line: &str) {
+        self.ensure_newline();
+        let mut err = io::stderr().lock();
+        if posix::isatty(2) {
+            let _ = writeln!(err, "\x1b[2m{line}\x1b[0m");
+        } else {
+            let _ = writeln!(err, "{line}");
+        }
+        let _ = err.flush();
+        self.needs_newline.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Drain and immediately close any inherited readable static multi-input FDs (`fd 4..=9`),
+/// skipping `skip_fd` if `--trace-fd=<N>` claimed a descriptor in that range (v1.1 §4.1).
+pub fn drain_inherited_extra_fds(skip_fd: Option<RawFd>) -> Vec<(RawFd, String)> {
     let mut extras = Vec::new();
     for fd in 4..=9 {
+        if skip_fd == Some(fd) {
+            continue;
+        }
         if posix::fd_is_readable(fd) {
             let mut buf = Vec::new();
             // SAFETY: `fd` is verified open & readable; wrapping in `File` owns and closes it on drop.
@@ -41,9 +96,6 @@ pub fn drain_inherited_extra_fds() -> Vec<(RawFd, String)> {
 
 /// Assemble initial user input from `<SCRIPT_ARGS>`, `fd 0` (`stdin`), and pre-drained `fd 4..=9`
 /// per Section 4.1.
-///
-/// When `skip_tty_stdin` is true (used in `--inbox` mode so interactive startup doesn't block
-/// waiting for Ctrl+D before listening on `new/`), `fd 0` is skipped whenever `isatty(0)` is true.
 pub fn assemble_initial_inputs(
     script_args: &[String],
     extra_fds: &[(RawFd, String)],
@@ -85,22 +137,13 @@ fn read_fd_interruptible(fd: RawFd, signals: &SignalState) -> io::Result<Vec<u8>
                 "interrupted by signal while reading stdin",
             ));
         }
-        let mut pfd = libc::pollfd {
-            fd,
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        // SAFETY: Valid single-element pollfd slice.
-        let rc = unsafe { libc::poll(&mut pfd, 1, 50) };
-        if rc < 0 {
-            let err = io::Error::last_os_error();
-            if err.kind() == io::ErrorKind::Interrupted {
+        match posix::poll_readable_or_signal(fd, signals.wakeup_fd(), None)? {
+            posix::PollFdOutcome::SignalWakeup => {
+                signals.drain_wakeup();
                 continue;
             }
-            return Err(err);
-        }
-        if rc == 0 {
-            continue;
+            posix::PollFdOutcome::TimedOut => continue,
+            posix::PollFdOutcome::FdReady => {}
         }
         // SAFETY: `buf` is a valid writable buffer for `read(2)`.
         let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
@@ -130,7 +173,8 @@ pub struct MshOutput {
 }
 
 /// Spawn `msh -c <cmd>` with anonymous pipe relays for `fd 4` (`$AGENT_OUT` -> external `fd 1`),
-/// `fd 5` (`$AGENT_ERR` -> external `fd 2`), and `fd 6` (`$AGENT_CTL` -> JSONL control frames).
+/// `fd 5` (`$AGENT_ERR` -> external `fd 2`), and `fd 6` (`$AGENT_CTL` -> JSONL control frames),
+/// waiting purely via kernel events (`pidfd`/`kqueue`, zero polling).
 #[allow(clippy::too_many_arguments)]
 pub fn run_msh_command(
     shell_bin: &Path,
@@ -141,15 +185,12 @@ pub fn run_msh_command(
     approval: ApprovalMode,
     sandbox: Option<&PreparedSandbox>,
     signals: &SignalState,
+    stderr_tracker: &StderrTracker,
 ) -> io::Result<MshOutput> {
     let (out_r, out_w) = posix::create_pipe_cloexec()?;
     let (err_r, err_w) = posix::create_pipe_cloexec()?;
     let (ctl_r, ctl_w) = posix::create_pipe_cloexec()?;
 
-    // On Linux, opening `/dev/fd/4` (`/proc/self/fd/4`) with `O_RDONLY` (e.g. `wc -l "$AGENT_OUT"`
-    // or `cat "$AGENT_OUT"`) normally opens the pipe's read end and blocks until timeout instead of
-    // returning EACCES like macOS `fdescfs`. Marking the pipe inode write-only (`0200`) AFTER `out_r`
-    // and `err_r` are already opened makes child `O_RDONLY` opens fail immediately with EACCES.
     #[cfg(target_os = "linux")]
     unsafe {
         let _ = libc::fchmod(out_w, 0o200);
@@ -161,7 +202,7 @@ pub fn run_msh_command(
     let mut err_reader = unsafe { File::from_raw_fd(err_r) };
     let mut ctl_reader = unsafe { File::from_raw_fd(ctl_r) };
 
-    // Relay `$AGENT_OUT` raw bytes -> external `fd 1` (stdout) without O_TRUNC risk.
+    // Relay `$AGENT_OUT` raw bytes -> external `fd 1` (stdout) untouched, zero newline injection.
     let (out_done_tx, out_done_rx) = mpsc::channel::<()>();
     thread::spawn(move || {
         let mut stdout = io::stdout();
@@ -170,12 +211,29 @@ pub fn run_msh_command(
         let _ = out_done_tx.send(());
     });
 
-    // Relay `$AGENT_ERR` raw bytes -> external `fd 2` (stderr) in both auto & explicit modes.
+    // Relay `$AGENT_ERR` raw bytes -> external `fd 2` (stderr) while tracking trailing newline.
     let (err_done_tx, err_done_rx) = mpsc::channel::<()>();
+    let err_tracker = stderr_tracker.clone();
     thread::spawn(move || {
-        let mut stderr = io::stderr();
-        let _ = io::copy(&mut err_reader, &mut stderr);
-        let _ = stderr.flush();
+        let mut buf = [0u8; 8192];
+        let mut wrote_any = false;
+        loop {
+            match err_reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    if !wrote_any {
+                        err_tracker.ensure_newline();
+                        wrote_any = true;
+                    }
+                    let mut stderr = io::stderr().lock();
+                    let _ = stderr.write_all(&buf[..n]);
+                    let _ = stderr.flush();
+                    err_tracker.note_bytes(&buf[..n]);
+                }
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+            }
+        }
         let _ = err_done_tx.send(());
     });
 
@@ -209,9 +267,9 @@ pub fn run_msh_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    // Section 3.4: Clear ALL `AGENT_*` environment variables before spawning `msh`,
-    // keeping ONLY the observability whitelist (`AGENT_LOG`, `AGENT_TRACE_LEVEL`),
-    // then actively inject the parent's resolved `AGENT_APPROVAL` and side-channel vars.
+    // Section 3.4: Clear ALL `AGENT_*` environment variables (including `AGENT_VISION` &
+    // `AGENT_TRACE_FD`) before spawning `msh`, keeping ONLY `AGENT_LOG` & `AGENT_TRACE_LEVEL`,
+    // then actively inject resolved `AGENT_APPROVAL` and side-channel vars.
     for (key, _) in std::env::vars_os() {
         let key_str = key.to_string_lossy();
         if key_str.starts_with("AGENT_") && key_str != "AGENT_LOG" && key_str != "AGENT_TRACE_LEVEL"
@@ -243,7 +301,6 @@ pub fn run_msh_command(
             #[cfg(not(target_os = "linux"))]
             let _ = parent_pid;
 
-            // Safely relocate pipe write FDs to >= 7 first so `dup2` onto 4, 5, 6 never clobbers.
             let tmp_out = dup_above_6(out_w)?;
             let tmp_err = dup_above_6(err_w)?;
             let tmp_ctl = dup_above_6(ctl_w)?;
@@ -303,30 +360,25 @@ pub fn run_msh_command(
     let mut ctl_bytes = Vec::new();
     let mut interrupted_by = None;
 
+    // Pure event-driven child wait (v1.1 §6.3): blocks in `pidfd`/`kqueue` with zero polling.
     let status = loop {
-        while let Ok(c) = stdout_rx.try_recv() {
-            stdout_bytes.extend_from_slice(&c);
-        }
-        while let Ok(c) = stderr_rx.try_recv() {
-            stderr_bytes.extend_from_slice(&c);
-        }
-        while let Ok(c) = ctl_rx.try_recv() {
-            ctl_bytes.extend_from_slice(&c);
-        }
-        if let Some(st) = child.try_wait()? {
-            break st;
-        }
         if let Some(sig_exit) = signals.termination_exit_code() {
             interrupted_by = Some(sig_exit);
             break signals.terminate_active_child_and_wait(&mut child)?;
         }
-        thread::sleep(Duration::from_millis(15));
+        match platform::wait_child_until(&mut child, None, Some(signals.wakeup_fd()))? {
+            ChildWaitOutcome::Exited(st) => break st,
+            ChildWaitOutcome::SignalWakeup => {
+                signals.drain_wakeup();
+                continue;
+            }
+            ChildWaitOutcome::TimedOut => continue,
+        }
     };
 
     signals.clear_active_child_pgid();
 
     if let Some(sig_exit) = interrupted_by {
-        // Immediate return on SIGINT/SIGTERM without waiting on any orphaned grandchild pipes.
         return Ok(MshOutput {
             stdout: String::new(),
             exit_code: sig_exit.as_i32(),
@@ -336,8 +388,6 @@ pub fn run_msh_command(
         });
     }
 
-    // Bounded post-exit drain captures 100% of flushed bytes in <1ms normally while preventing
-    // infinite hangs if a detached grandchild held fd 1/2/4/5/6 open after timeout.
     let drain_deadline = Instant::now() + PIPE_DRAIN_AFTER_EXIT;
     drain_channel_until(&stdout_rx, &mut stdout_bytes, drain_deadline);
     drain_channel_until(&stderr_rx, &mut stderr_bytes, drain_deadline);
@@ -477,7 +527,7 @@ pub struct InboxMessage {
 }
 
 /// Maildir-style atomic directory queue (`tmp/`, `new/`, `cur/`, `done/`, mode `0700`)
-/// watched via Linux `inotify` / macOS `kqueue` with 200ms poll fallback (Section 4.2).
+/// watched via pure event-driven Linux `inotify+epoll` / macOS `kqueue` (v1.1 §§4.2 & 6.3).
 #[derive(Debug)]
 pub struct InboxQueue {
     new_dir: PathBuf,
@@ -488,7 +538,7 @@ pub struct InboxQueue {
 
 impl InboxQueue {
     /// Ensure `<dir>` and `tmp/`, `new/`, `cur/`, `done/` exist with mode `0700` and attach watcher.
-    pub fn open(dir: &Path) -> io::Result<Self> {
+    pub fn open(dir: &Path, sig_fd: Option<RawFd>) -> io::Result<Self> {
         let tmp_dir = dir.join("tmp");
         let new_dir = dir.join("new");
         let cur_dir = dir.join("cur");
@@ -500,7 +550,7 @@ impl InboxQueue {
         posix::ensure_dir_mode(&cur_dir, 0o700)?;
         posix::ensure_dir_mode(&done_dir, 0o700)?;
 
-        let watcher = DirWatcher::watch(&new_dir).ok();
+        let watcher = DirWatcher::watch(&new_dir, sig_fd).ok();
         Ok(Self {
             new_dir,
             cur_dir,
@@ -510,15 +560,17 @@ impl InboxQueue {
     }
 
     /// Wait for the next ASCII-sorted message in `new/`, atomically rename it to `cur/`,
-    /// and return its wrapped payload. Returns `Ok(None)` on `--idle-timeout` expiry or
-    /// `SIGINT`/`SIGTERM`.
+    /// and return its wrapped payload. Invokes `on_idle` ONCE when `new/` is drained empty
+    /// before entering pure event-driven wait with exact remaining timeout (v1.1 §§4.2, 6.3, 9.5).
     pub fn next_message(
         &mut self,
         idle_timeout: Option<Duration>,
         signals: &SignalState,
         on_snapshot: &mut impl FnMut(),
+        on_idle: &mut impl FnMut(),
     ) -> io::Result<Option<InboxMessage>> {
         let idle_start = Instant::now();
+        let mut emitted_idle = false;
 
         loop {
             if signals.termination_exit_code().is_some() {
@@ -538,19 +590,25 @@ impl InboxQueue {
                 return Ok(None);
             }
 
-            // Wait up to 200ms (or remaining idle budget) via inotify/kqueue or sleep fallback.
-            let wait_ms = match idle_timeout {
-                Some(limit) => {
-                    let rem = limit.saturating_sub(idle_start.elapsed());
-                    (rem.as_millis() as i32).clamp(1, 200)
-                }
-                None => 200,
-            };
+            if !emitted_idle {
+                on_idle();
+                emitted_idle = true;
+            }
+
+            // Exact remaining timeout (`None` = infinite block, 0 wakeups/sec; v1.1 §6.3).
+            let remaining = idle_timeout.map(|limit| limit.saturating_sub(idle_start.elapsed()));
+            if remaining.is_some_and(|d| d.is_zero()) {
+                return Ok(None);
+            }
 
             if let Some(ref watcher) = self.watcher {
-                let _ = watcher.wait(wait_ms);
+                let _ = watcher.wait(remaining);
+                signals.drain_wakeup();
             } else {
-                thread::sleep(Duration::from_millis(wait_ms as u64));
+                // Rare fallback only if kernel directory watcher initialization failed.
+                let fallback = remaining.unwrap_or(Duration::from_secs(1));
+                let _ = posix::sleep_or_signal(fallback, signals.wakeup_fd());
+                signals.drain_wakeup();
             }
         }
     }

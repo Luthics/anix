@@ -6,8 +6,10 @@ use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
+use std::process::Child;
+use std::time::{Duration, Instant};
 
-use super::{PlatformCapabilities, SandboxPolicy, posix};
+use super::{ChildWaitOutcome, PlatformCapabilities, SandboxPolicy, posix};
 
 const LANDLOCK_CREATE_RULESET_VERSION: u32 = 1 << 0;
 const LANDLOCK_RULE_PATH_BENEATH: u32 = 1;
@@ -265,14 +267,141 @@ pub unsafe fn set_pdeathsig_sigkill(parent_pid: libc::pid_t) -> io::Result<()> {
     Ok(())
 }
 
-/// Linux `inotify`-backed directory watcher for Maildir `--inbox <DIR>/new/` (Section 4.2).
+/// Event-driven child wait using Linux `pidfd_open(2)` + `epoll(7)` (v1.1 §6.3).
+/// Falls back cleanly to `sig_fd` (`SIGCHLD` wakeup) if `pidfd_open` is unavailable on old kernels.
+pub fn wait_child_until(
+    child: &mut Child,
+    deadline: Option<Instant>,
+    sig_fd: Option<RawFd>,
+) -> io::Result<ChildWaitOutcome> {
+    if let Some(st) = child.try_wait()? {
+        return Ok(ChildWaitOutcome::Exited(st));
+    }
+
+    let pid = child.id() as libc::pid_t;
+    // SAFETY: `pidfd_open(pid, 0)` returns a pollable FD that becomes readable upon child exit.
+    let pidfd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0u32) };
+    if pidfd < 0 {
+        let err = io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::ESRCH) {
+            return Ok(ChildWaitOutcome::Exited(child.wait()?));
+        }
+        // Fallback when `pidfd_open` is unsupported (`ENOSYS`/`EPERM`): wait on `sig_fd` (which
+        // receives `SIGCHLD` + termination signals) with exact remaining timeout.
+        if let Some(sfd) = sig_fd {
+            if let Some(st) = child.try_wait()? {
+                return Ok(ChildWaitOutcome::Exited(st));
+            }
+            let timeout_ms = posix::deadline_to_poll_ms(deadline);
+            if timeout_ms == 0 {
+                return Ok(ChildWaitOutcome::TimedOut);
+            }
+            let mut pfd = libc::pollfd {
+                fd: sfd,
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            // SAFETY: Valid single-element pollfd slice.
+            let rc = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
+            if let Some(st) = child.try_wait()? {
+                return Ok(ChildWaitOutcome::Exited(st));
+            }
+            if rc == 0 {
+                return Ok(ChildWaitOutcome::TimedOut);
+            }
+            return Ok(ChildWaitOutcome::SignalWakeup);
+        }
+        return Ok(ChildWaitOutcome::Exited(child.wait()?));
+    }
+    let pidfd = pidfd as RawFd;
+    let _ = posix::set_cloexec(pidfd);
+
+    // SAFETY: `epoll_create1(EPOLL_CLOEXEC)` creates an isolated kernel event instance.
+    let epfd = unsafe { libc::epoll_create1(libc::EPOLL_CLOEXEC) };
+    if epfd < 0 {
+        let err = io::Error::last_os_error();
+        unsafe { libc::close(pidfd) };
+        return Err(err);
+    }
+
+    let mut ev_pid = libc::epoll_event {
+        events: libc::EPOLLIN as u32,
+        u64: 1,
+    };
+    // SAFETY: Registering `pidfd` on `epfd`.
+    let add_pid = unsafe { libc::epoll_ctl(epfd, libc::EPOLL_CTL_ADD, pidfd, &mut ev_pid) };
+    if add_pid < 0 {
+        let err = io::Error::last_os_error();
+        unsafe {
+            libc::close(epfd);
+            libc::close(pidfd);
+        }
+        return Err(err);
+    }
+
+    if let Some(sfd) = sig_fd {
+        let mut ev_sig = libc::epoll_event {
+            events: libc::EPOLLIN as u32,
+            u64: 2,
+        };
+        // SAFETY: Registering `sig_fd` on `epfd`.
+        let _ = unsafe { libc::epoll_ctl(epfd, libc::EPOLL_CTL_ADD, sfd, &mut ev_sig) };
+    }
+
+    let outcome = loop {
+        // Re-check after registration to close any exit race between `try_wait` and `pidfd_open`.
+        if let Some(st) = child.try_wait()? {
+            break Ok(ChildWaitOutcome::Exited(st));
+        }
+        let timeout_ms = posix::deadline_to_poll_ms(deadline);
+        if timeout_ms == 0 {
+            break Ok(ChildWaitOutcome::TimedOut);
+        }
+        let mut events = [libc::epoll_event { events: 0, u64: 0 }; 2];
+        // SAFETY: `events` is a valid writable array of 2 `epoll_event`s.
+        let n = unsafe { libc::epoll_wait(epfd, events.as_mut_ptr(), 2, timeout_ms) };
+        if n < 0 {
+            let err = io::Error::last_os_error();
+            if err.kind() == io::ErrorKind::Interrupted {
+                if let Some(st) = child.try_wait()? {
+                    break Ok(ChildWaitOutcome::Exited(st));
+                }
+                break Ok(ChildWaitOutcome::SignalWakeup);
+            }
+            break Err(err);
+        }
+        if n == 0 {
+            if let Some(st) = child.try_wait()? {
+                break Ok(ChildWaitOutcome::Exited(st));
+            }
+            break Ok(ChildWaitOutcome::TimedOut);
+        }
+        if let Some(st) = child.try_wait()? {
+            break Ok(ChildWaitOutcome::Exited(st));
+        }
+        let saw_sig = events[..n as usize].iter().any(|e| e.u64 == 2);
+        if saw_sig {
+            break Ok(ChildWaitOutcome::SignalWakeup);
+        }
+    };
+
+    // SAFETY: Close both kernel descriptors unconditionally.
+    unsafe {
+        libc::close(epfd);
+        libc::close(pidfd);
+    }
+    outcome
+}
+
+/// Linux `inotify` + `epoll` directory watcher for Maildir `--inbox <DIR>/new/` (v1.1 §§4.2 & 6.3).
 #[derive(Debug)]
 pub struct DirWatcher {
+    epfd: RawFd,
     ifd: RawFd,
 }
 
 impl DirWatcher {
-    pub fn watch(dir: &Path) -> io::Result<Self> {
+    pub fn watch(dir: &Path, sig_fd: Option<RawFd>) -> io::Result<Self> {
         let cpath = CString::new(dir.as_os_str().as_bytes())
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
 
@@ -296,18 +425,57 @@ impl DirWatcher {
             return Err(err);
         }
 
-        Ok(Self { ifd })
+        // SAFETY: `epoll_create1(EPOLL_CLOEXEC)` multiplexes `inotify` and `sig_fd` with zero polling.
+        let epfd = unsafe { libc::epoll_create1(libc::EPOLL_CLOEXEC) };
+        if epfd < 0 {
+            let err = io::Error::last_os_error();
+            unsafe { libc::close(ifd) };
+            return Err(err);
+        }
+
+        let mut ev_in = libc::epoll_event {
+            events: libc::EPOLLIN as u32,
+            u64: 1,
+        };
+        if unsafe { libc::epoll_ctl(epfd, libc::EPOLL_CTL_ADD, ifd, &mut ev_in) } < 0 {
+            let err = io::Error::last_os_error();
+            unsafe {
+                libc::close(epfd);
+                libc::close(ifd);
+            }
+            return Err(err);
+        }
+
+        if let Some(sfd) = sig_fd {
+            let mut ev_sig = libc::epoll_event {
+                events: libc::EPOLLIN as u32,
+                u64: 2,
+            };
+            let _ = unsafe { libc::epoll_ctl(epfd, libc::EPOLL_CTL_ADD, sfd, &mut ev_sig) };
+        }
+
+        Ok(Self { epfd, ifd })
     }
 
-    /// Block up to `timeout_ms` waiting for directory activity; drains pending events.
-    pub fn wait(&self, timeout_ms: i32) -> io::Result<bool> {
-        let mut pfd = libc::pollfd {
-            fd: self.ifd,
-            events: libc::POLLIN,
-            revents: 0,
+    /// Block with exact `timeout` (`None` = infinite block, 0 wakeups/sec) waiting for directory
+    /// activity or signal wakeup; drains pending inotify events.
+    pub fn wait(&self, timeout: Option<Duration>) -> io::Result<bool> {
+        let timeout_ms = match timeout {
+            None => -1,
+            Some(d) => {
+                let ms = d.as_millis();
+                if d.is_zero() {
+                    0
+                } else if ms == 0 {
+                    1
+                } else {
+                    ms.min(libc::c_int::MAX as u128) as libc::c_int
+                }
+            }
         };
-        // SAFETY: `pfd` points to 1 initialized `pollfd`.
-        let rc = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
+        let mut events = [libc::epoll_event { events: 0, u64: 0 }; 2];
+        // SAFETY: `events` holds 2 writable `epoll_event`s.
+        let rc = unsafe { libc::epoll_wait(self.epfd, events.as_mut_ptr(), 2, timeout_ms) };
         if rc < 0 {
             let err = io::Error::last_os_error();
             if err.kind() == io::ErrorKind::Interrupted {
@@ -319,24 +487,33 @@ impl DirWatcher {
             return Ok(false);
         }
 
-        // Drain all queued inotify events so the fd returns to idle.
-        let mut buf = [0u8; 4096];
-        loop {
-            // SAFETY: Non-blocking read from owned `ifd` into `buf`.
-            let n =
-                unsafe { libc::read(self.ifd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
-            if n <= 0 {
-                break;
+        let mut dir_ready = false;
+        for ev in &events[..rc as usize] {
+            if ev.u64 == 1 {
+                dir_ready = true;
             }
         }
-        Ok(true)
+        if dir_ready {
+            let mut buf = [0u8; 4096];
+            loop {
+                // SAFETY: Non-blocking read from owned `ifd` into `buf`.
+                let n = unsafe {
+                    libc::read(self.ifd, buf.as_mut_ptr() as *mut libc::c_void, buf.len())
+                };
+                if n <= 0 {
+                    break;
+                }
+            }
+        }
+        Ok(dir_ready)
     }
 }
 
 impl Drop for DirWatcher {
     fn drop(&mut self) {
-        // SAFETY: `ifd` is exclusively owned by `DirWatcher`.
+        // SAFETY: Both `epfd` and `ifd` are exclusively owned by `DirWatcher`.
         unsafe {
+            libc::close(self.epfd);
             libc::close(self.ifd);
         }
     }
