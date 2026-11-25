@@ -58,6 +58,39 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 | [`yaml_12_scalars_extensions_and_open_params_coexist_with_known_fields`](../crates/anix-core/tests/rfc_3_2/grammar.rs#L115) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) · [§3.3](../docs/v1.1.0-RFC.md?plain=1#L111) |
 | [`incomplete_delimiters_and_malformed_yaml_fail_at_the_header`](../crates/anix-core/tests/rfc_3_2/grammar.rs#L145) | [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) |
 
+## `crates/anix-core/tests/rfc_runtime/configuration.rs`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`agent_name_has_exactly_the_documented_ascii_alphabet`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L11) | [§3.3](../docs/v1.1.0-RFC.md?plain=1#L111) |
+| [`declared_fields_validate_type_enums_and_uint32_boundaries`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L34) | [§3.3](../docs/v1.1.0-RFC.md?plain=1#L111) |
+| [`threshold_fraction_floors_absolute_threshold_and_disable_cases`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L91) | [§3.3](../docs/v1.1.0-RFC.md?plain=1#L111) · [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) |
+| [`every_subset_of_five_layers_selects_highest_priority_model_and_output_limit`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L116) | [§3.4](../docs/v1.1.0-RFC.md?plain=1#L129) · [§8.2](../docs/v1.1.0-RFC.md?plain=1#L457) |
+| [`scalar_settings_resolve_for_every_subset_of_the_five_override_layers`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L181) | [§3.3](../docs/v1.1.0-RFC.md?plain=1#L111) · [§3.4](../docs/v1.1.0-RFC.md?plain=1#L129) · [§7.1](../docs/v1.1.0-RFC.md?plain=1#L415) · [§8.2](../docs/v1.1.0-RFC.md?plain=1#L457) |
+| [`output_limit_is_strictly_below_effective_context_budget_zero_omits_it`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L347) | [§3.3](../docs/v1.1.0-RFC.md?plain=1#L111) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`params_merge_by_key_and_cli_values_preserve_json_types`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L386) | [§3.1](../docs/v1.1.0-RFC.md?plain=1#L62) · [§3.4](../docs/v1.1.0-RFC.md?plain=1#L129) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`empty_context_override_is_distinct_from_an_unset_variable`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L431) | [§3.4](../docs/v1.1.0-RFC.md?plain=1#L129) |
+| [`project_search_stops_at_nearest_configuration_git_or_home_boundary`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L465) | [§8.1](../docs/v1.1.0-RFC.md?plain=1#L450) |
+| [`provider_resolution_injects_model_base_url_timeout_and_env_or_fallback_key`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L516) | [§2](../docs/v1.1.0-RFC.md?plain=1#L44) · [§3.4](../docs/v1.1.0-RFC.md?plain=1#L129) · [§8.2](../docs/v1.1.0-RFC.md?plain=1#L457) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+| [`environment_approval_aliases_and_cli_override_produce_the_expected_tool_effects`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L571) | [§3.4](../docs/v1.1.0-RFC.md?plain=1#L129) · [§5.1](../docs/v1.1.0-RFC.md?plain=1#L225) |
+| [`invalid_resolved_environment_values_exit_two_before_contacting_the_provider`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L618) | [§3.4](../docs/v1.1.0-RFC.md?plain=1#L129) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) |
+| [`global_and_project_config_reject_unknown_keys_before_any_inference`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L646) | [§8.2](../docs/v1.1.0-RFC.md?plain=1#L457) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) |
+| [`absolute_frontmatter_threshold_must_fit_uint32_before_the_disable_rule_applies`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L691) | [§3.3](../docs/v1.1.0-RFC.md?plain=1#L111) · [§3.2](../docs/v1.1.0-RFC.md?plain=1#L85) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) |
+| [`cli_params_preserve_json_literals_and_the_exact_fallback_string`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L722) | [§3.1](../docs/v1.1.0-RFC.md?plain=1#L62) · [§3.4](../docs/v1.1.0-RFC.md?plain=1#L129) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`malformed_cli_param_stops_before_provider_or_wal_creation`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L759) | [§3.1](../docs/v1.1.0-RFC.md?plain=1#L62) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) |
+| [`a_shared_script_resolves_its_context_and_project_configuration_from_each_cwd`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L784) | [§3.3](../docs/v1.1.0-RFC.md?plain=1#L111) · [§3.4](../docs/v1.1.0-RFC.md?plain=1#L129) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§8.1](../docs/v1.1.0-RFC.md?plain=1#L450) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`only_the_selected_providers_defaults_feed_the_shallow_params_merge`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L849) | [§3.1](../docs/v1.1.0-RFC.md?plain=1#L62) · [§3.3](../docs/v1.1.0-RFC.md?plain=1#L111) · [§3.4](../docs/v1.1.0-RFC.md?plain=1#L129) · [§8.2](../docs/v1.1.0-RFC.md?plain=1#L457) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+| [`a_named_provider_searches_path_then_libexec_while_a_path_executes_directly`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L920) | [§2](../docs/v1.1.0-RFC.md?plain=1#L44) · [§8.2](../docs/v1.1.0-RFC.md?plain=1#L457) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+| [`each_xdg_directory_resolves_independently_when_other_overrides_are_absent`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L986) | [§8.1](../docs/v1.1.0-RFC.md?plain=1#L450) · [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) · [§8.3](../docs/v1.1.0-RFC.md?plain=1#L508) |
+| [`selected_model_changes_the_provider_environment_without_entering_the_ir`](../crates/anix-core/tests/rfc_runtime/configuration.rs#L1045) | [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+
+## `crates/anix-core/tests/rfc_runtime/control.rs`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`concatenated_and_split_media_frames_keep_order_and_tool_identity_after_resume`](../crates/anix-core/tests/rfc_runtime/control.rs#L24) | [§7.2](../docs/v1.1.0-RFC.md?plain=1#L428) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`two_valid_fold_frames_from_one_tool_are_appended_in_arrival_order`](../crates/anix-core/tests/rfc_runtime/control.rs#L93) | [§7.2](../docs/v1.1.0-RFC.md?plain=1#L428) · [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) |
+
 ## `crates/anix-core/tests/rfc_runtime/fd.rs`
 
 | 测试 | RFC 条款 |
@@ -66,12 +99,22 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 | [`each_read_write_trace_fd_is_excluded_from_the_ordered_initial_user_input`](../crates/anix-core/tests/rfc_runtime/fd.rs#L94) | [§3.1](../docs/v1.1.0-RFC.md?plain=1#L62) · [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.5](../docs/v1.1.0-RFC.md?plain=1#L634) |
 | [`invalid_trace_fd_reports_usage_to_stderr_before_invoking_the_provider`](../crates/anix-core/tests/rfc_runtime/fd.rs#L136) | [§3.1](../docs/v1.1.0-RFC.md?plain=1#L62) · [§3.4](../docs/v1.1.0-RFC.md?plain=1#L129) · [§4.1](../docs/v1.1.0-RFC.md?plain=1#L153) · [§6.5](../docs/v1.1.0-RFC.md?plain=1#L398) |
 
+## `crates/anix-core/tests/rfc_runtime/vision.rs`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`vision_resolves_from_cli_env_script_selected_provider_then_defaults`](../crates/anix-core/tests/rfc_runtime/vision.rs#L10) | [§3.1](../docs/v1.1.0-RFC.md?plain=1#L62) · [§3.3](../docs/v1.1.0-RFC.md?plain=1#L111) · [§3.4](../docs/v1.1.0-RFC.md?plain=1#L129) · [§5.5](../docs/v1.1.0-RFC.md?plain=1#L279) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§8.2](../docs/v1.1.0-RFC.md?plain=1#L457) |
+| [`native_vision_keeps_the_attachment_through_resume_and_never_calls_a_bridge`](../crates/anix-core/tests/rfc_runtime/vision.rs#L161) | [§5.5](../docs/v1.1.0-RFC.md?plain=1#L279) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§7.2](../docs/v1.1.0-RFC.md?plain=1#L428) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`no_native_vision_without_a_bridge_returns_the_documented_error_through_resume`](../crates/anix-core/tests/rfc_runtime/vision.rs#L179) | [§5.5](../docs/v1.1.0-RFC.md?plain=1#L279) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§7.2](../docs/v1.1.0-RFC.md?plain=1#L428) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`bridge_gets_one_utf8_json_line_then_eof_and_its_description_survives_resume`](../crates/anix-core/tests/rfc_runtime/vision.rs#L189) | [§5.5](../docs/v1.1.0-RFC.md?plain=1#L279) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§7.2](../docs/v1.1.0-RFC.md?plain=1#L428) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`bridge_nonzero_exit_and_timeout_both_return_stderr_as_a_recoverable_tool_error`](../crates/anix-core/tests/rfc_runtime/vision.rs#L216) | [§5.5](../docs/v1.1.0-RFC.md?plain=1#L279) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§7.2](../docs/v1.1.0-RFC.md?plain=1#L428) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+
 ## `crates/anix-core/tests/rfc_runtime/wal.rs`
 
 | 测试 | RFC 条款 |
 | --- | --- |
-| [`legacy_wal_without_vision_or_fold_usage_resumes_without_rewriting_the_prefix`](../crates/anix-core/tests/rfc_runtime/wal.rs#L32) | [§1.4](../docs/v1.1.0-RFC.md?plain=1#L33) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
-| [`repeated_resume_appends_one_vision_update_per_change_and_reuses_frozen_text`](../crates/anix-core/tests/rfc_runtime/wal.rs#L68) | [§3.1](../docs/v1.1.0-RFC.md?plain=1#L62) · [§5.5](../docs/v1.1.0-RFC.md?plain=1#L279) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
+| [`legacy_wal_without_vision_or_fold_usage_resumes_without_rewriting_the_prefix`](../crates/anix-core/tests/rfc_runtime/wal.rs#L23) | [§1.4](../docs/v1.1.0-RFC.md?plain=1#L33) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+| [`repeated_resume_appends_one_vision_update_per_change_and_reuses_frozen_text`](../crates/anix-core/tests/rfc_runtime/wal.rs#L59) | [§3.1](../docs/v1.1.0-RFC.md?plain=1#L62) · [§5.5](../docs/v1.1.0-RFC.md?plain=1#L279) · [§6.2](../docs/v1.1.0-RFC.md?plain=1#L342) · [§9.1](../docs/v1.1.0-RFC.md?plain=1#L530) |
 
 ## `crates/anix-core/tests/v1_1_e2e.rs`
 
@@ -176,6 +219,19 @@ v1.0 的 198 个用例保存在[上一版测试索引](https://github.com/Luthic
 | [`http_429_and_529_map_to_retryable_errors_and_400_is_non_retryable`](../crates/anix-providers/tests/e2e_mock.rs#L393) | [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
 | [`coprocess_mode_serves_multiple_requests_survives_error_and_exits_0_on_eof`](../crates/anix-providers/tests/e2e_mock.rs#L457) | [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
 | [`http_400_image_rejection_maps_to_unsupported_media_non_retryable`](../crates/anix-providers/tests/e2e_mock.rs#L614) | [§5.5](../docs/v1.1.0-RFC.md?plain=1#L279) · [§9.2](../docs/v1.1.0-RFC.md?plain=1#L568) |
+
+## `crates/anix-tools/tests/rfc_control.rs`
+
+| 测试 | RFC 条款 |
+| --- | --- |
+| [`aclr_emits_a_single_compact_or_fold_frame_with_lossless_json_escaping`](../crates/anix-tools/tests/rfc_control.rs#L40) | [§7.2](../docs/v1.1.0-RFC.md?plain=1#L428) · [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) |
+| [`aclr_without_a_summary_omits_the_field_at_each_valid_turn_id_boundary`](../crates/anix-tools/tests/rfc_control.rs#L57) | [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) · [§7.2](../docs/v1.1.0-RFC.md?plain=1#L428) |
+| [`invalid_aclr_argv_never_submits_a_frame`](../crates/anix-tools/tests/rfc_control.rs#L67) | [§6.1](../docs/v1.1.0-RFC.md?plain=1#L315) · [§7.2](../docs/v1.1.0-RFC.md?plain=1#L428) |
+| [`fold_control_frames_stay_within_64_kib_even_after_json_escaping`](../crates/anix-tools/tests/rfc_control.rs#L86) | [§7.2](../docs/v1.1.0-RFC.md?plain=1#L428) |
+| [`aview_resizes_portrait_landscape_and_square_images_only_when_needed`](../crates/anix-tools/tests/rfc_control.rs#L138) | [§7.2](../docs/v1.1.0-RFC.md?plain=1#L428) |
+| [`aview_file_input_and_stdin_agree_on_image_dimensions`](../crates/anix-tools/tests/rfc_control.rs#L161) | [§7.2](../docs/v1.1.0-RFC.md?plain=1#L428) |
+| [`aview_preserves_image_content_and_orientation_in_the_published_png`](../crates/anix-tools/tests/rfc_control.rs#L176) | [§7.2](../docs/v1.1.0-RFC.md?plain=1#L428) |
+| [`undecodable_input_or_invalid_options_do_not_emit_media`](../crates/anix-tools/tests/rfc_control.rs#L220) | [§7.2](../docs/v1.1.0-RFC.md?plain=1#L428) |
 
 ## `crates/msh/tests/rfc_shell.rs`
 

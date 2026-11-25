@@ -1,15 +1,6 @@
-use super::fixture::Fixture;
+use super::{Fixture, jsonl};
 use serde_json::{Value, json};
 use std::fs;
-use std::path::Path;
-
-fn records(path: &Path) -> Vec<Value> {
-    let data = fs::read_to_string(path).unwrap();
-    assert!(data.ends_with('\n'), "incomplete final record in {path:?}");
-    data.lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect()
-}
 
 fn run(fixture: &Fixture, vision: &str, input: &str) -> Vec<Value> {
     let result =
@@ -24,7 +15,7 @@ fn run(fixture: &Fixture, vision: &str, input: &str) -> Vec<Value> {
         "{:?}",
         String::from_utf8_lossy(&result.stderr)
     );
-    records(&fixture.capture)
+    jsonl(&fixture.capture)
 }
 
 // RFC v1.1 §1.4, §6.2, §9.1, §9.2
@@ -60,7 +51,7 @@ fn legacy_wal_without_vision_or_fold_usage_resumes_without_rewriting_the_prefix(
         Some("folded-away-user" | "folded-away-answer")
     )));
     assert!(fs::read(&history).unwrap().starts_with(old.as_bytes()));
-    assert_eq!(records(&history).last().unwrap()["text"], "ok");
+    assert_eq!(jsonl(&history).last().unwrap()["text"], "ok");
 }
 
 // RFC v1.1 §3.1, §5.5, §6.2, §9.1
@@ -71,7 +62,7 @@ fn repeated_resume_appends_one_vision_update_per_change_and_reuses_frozen_text()
     let history = root.join("history");
     fs::write(root.join("case.anix"), "frozen").unwrap();
     run(&fixture, "--no-vision", "first");
-    assert_eq!(records(&history)[0]["config"]["vision"], false);
+    assert_eq!(jsonl(&history)[0]["config"]["vision"], false);
     fs::write(root.join("case.anix"), "later edit").unwrap();
     for (option, expected) in [
         ("--vision", vec![true]),
@@ -81,7 +72,7 @@ fn repeated_resume_appends_one_vision_update_per_change_and_reuses_frozen_text()
         let prefix = fs::read(&history).unwrap();
         let ir = run(&fixture, option, "next");
         assert!(fs::read(&history).unwrap().starts_with(&prefix));
-        let wal = records(&history);
+        let wal = jsonl(&history);
         let updates: Vec<_> = wal
             .iter()
             .filter(|r| r["type"] == "runtime_update")
