@@ -447,10 +447,10 @@
 
 | 测试 | RFC 原文 | 本测试的预期结果 |
 | --- | --- | --- |
-| [`builds_responses_request_with_frozen_instructions_and_reasoning_effort`](../crates/anix-providers/src/openai_responses.rs#L636) | [§3.3-07](../docs/RFC.md?plain=1#L131) | 有 max_output_tokens 的 IR 经 Responses 转换后写入上游请求。 |
-| [`builds_responses_request_with_frozen_instructions_and_reasoning_effort`](../crates/anix-providers/src/openai_responses.rs#L636) | [§9.1-06](../docs/RFC.md?plain=1#L578) | Responses 请求把 header 的输出预算映射为对应上游参数。 |
-| [`builds_responses_request_with_frozen_instructions_and_reasoning_effort`](../crates/anix-providers/src/openai_responses.rs#L636) | [§9.1-07](../docs/RFC.md?plain=1#L579) | 在接收的 Responses HTTP 请求中检查推理等参数映射。 |
-| [`parses_responses_sse_text_tool_and_usage`](../crates/anix-providers/src/openai_responses.rs#L670) | [§9.2-18](../docs/RFC.md?plain=1#L625) | Responses SSE 分别解码正文、工具调用和 usage 帧。 |
+| [`builds_responses_request_with_frozen_developer_prefix_and_reasoning_effort`](../crates/anix-providers/src/openai_responses.rs#L644) | [§3.3-07](../docs/RFC.md?plain=1#L131) | 有 max_output_tokens 的 IR 经 Responses 转换后写入上游请求。 |
+| [`builds_responses_request_with_frozen_developer_prefix_and_reasoning_effort`](../crates/anix-providers/src/openai_responses.rs#L644) | [§9.1-06](../docs/RFC.md?plain=1#L578) | Responses 请求把 header 的输出预算映射为对应上游参数。 |
+| [`builds_responses_request_with_frozen_developer_prefix_and_reasoning_effort`](../crates/anix-providers/src/openai_responses.rs#L644) | [§9.1-07](../docs/RFC.md?plain=1#L579) | 在接收的 Responses HTTP 请求中检查推理等参数映射。 |
+| [`parses_responses_sse_text_tool_and_usage`](../crates/anix-providers/src/openai_responses.rs#L685) | [§9.2-18](../docs/RFC.md?plain=1#L625) | Responses SSE 分别解码正文、工具调用和 usage 帧。 |
 
 ## `crates/anix-providers/tests/e2e_mock.rs`
 
@@ -459,12 +459,12 @@
 | [`version_flag_works_for_base_binary_and_busybox_symlinks`](../crates/anix-providers/tests/e2e_mock.rs#L202) | [§2-04](../docs/RFC.md?plain=1#L59) | 真实主程序和三个方言软链均能输出版本并成功退出。 |
 | [`unsupported_ir_version_exits_2`](../crates/anix-providers/tests/e2e_mock.rs#L232) | [§9.1-04](../docs/RFC.md?plain=1#L575) | oneshot 读取不兼容 ir_version 时报告诊断并以 2 退出。 |
 | [`busybox_symlink_openai_responses_end_to_end`](../crates/anix-providers/tests/e2e_mock.rs#L251) | [§2-04](../docs/RFC.md?plain=1#L59) | 通过 Responses 软链请求本地端点，检查返回的协议帧。 |
-| [`busybox_symlink_openai_compat_end_to_end_and_unauthenticated_local`](../crates/anix-providers/tests/e2e_mock.rs#L289) | [§2-04](../docs/RFC.md?plain=1#L59) | 通过 Chat 软链请求免鉴权本地端点并检查响应帧。 |
-| [`busybox_symlink_anthropic_end_to_end_with_inclusive_usage_and_headers`](../crates/anix-providers/tests/e2e_mock.rs#L328) | [§2-04](../docs/RFC.md?plain=1#L59) | Anthropic 软链请求携带预期 HTTP 头，usage 帧包含缓存用量。 |
-| [`http_429_and_529_map_to_retryable_errors_and_400_is_non_retryable`](../crates/anix-providers/tests/e2e_mock.rs#L394) | [§9.2-15](../docs/RFC.md?plain=1#L659) | HTTP 429/529 转换为可重试错误，普通 400 不重试。 |
-| [`coprocess_mode_serves_multiple_requests_survives_error_and_exits_0_on_eof`](../crates/anix-providers/tests/e2e_mock.rs#L458) | [§9.2-18](../docs/RFC.md?plain=1#L625) | 同一协进程处理多个请求，错误后仍能响应，stdin EOF 后以 0 退出。 |
-| [`http_400_image_rejection_maps_to_unsupported_media_non_retryable`](../crates/anix-providers/tests/e2e_mock.rs#L615) | [§5.5-06](../docs/RFC.md?plain=1#L321) | 本地模拟上游拒绝图片，驱动返回 unsupported_media 且 retryable=false。 |
-| [`session_affinity_headers_and_body_mapping_across_all_dialects`](../crates/anix-providers/tests/e2e_mock.rs#L674) | [§9.2-04](../docs/RFC.md?plain=1#L631) | 对三个 HTTP 方言核对默认 session header 与各自的 body 映射。 |
+| [`busybox_symlink_openai_compat_end_to_end_and_unauthenticated_local`](../crates/anix-providers/tests/e2e_mock.rs#L294) | [§2-04](../docs/RFC.md?plain=1#L59) | 通过 Chat 软链请求免鉴权本地端点并检查响应帧。 |
+| [`busybox_symlink_anthropic_end_to_end_with_inclusive_usage_and_headers`](../crates/anix-providers/tests/e2e_mock.rs#L333) | [§2-04](../docs/RFC.md?plain=1#L59) | Anthropic 软链请求携带预期 HTTP 头，usage 帧包含缓存用量。 |
+| [`http_429_and_529_map_to_retryable_errors_and_400_is_non_retryable`](../crates/anix-providers/tests/e2e_mock.rs#L399) | [§9.2-15](../docs/RFC.md?plain=1#L659) | HTTP 429/529 转换为可重试错误，普通 400 不重试。 |
+| [`coprocess_mode_serves_multiple_requests_survives_error_and_exits_0_on_eof`](../crates/anix-providers/tests/e2e_mock.rs#L463) | [§9.2-18](../docs/RFC.md?plain=1#L625) | 同一协进程处理多个请求，错误后仍能响应，stdin EOF 后以 0 退出。 |
+| [`http_400_image_rejection_maps_to_unsupported_media_non_retryable`](../crates/anix-providers/tests/e2e_mock.rs#L620) | [§5.5-06](../docs/RFC.md?plain=1#L321) | 本地模拟上游拒绝图片，驱动返回 unsupported_media 且 retryable=false。 |
+| [`session_affinity_headers_and_body_mapping_across_all_dialects`](../crates/anix-providers/tests/e2e_mock.rs#L679) | [§9.2-04](../docs/RFC.md?plain=1#L631) | 对三个 HTTP 方言核对默认 session header 与各自的 body 映射。 |
 
 ## `crates/anix-tools/tests/rfc_control.rs`
 
@@ -606,21 +606,23 @@
 | --- | --- | --- |
 | [`test_frozen_prefix_and_runtime_update_remain_in_order_on_each_upstream`](../tests/test_provider_dialects.py#L112) | [§9.1-10](../docs/RFC.md?plain=1#L583) | 首条系统文本字节保真与尾部系统消息映射。 |
 | [`test_frozen_prefix_and_runtime_update_remain_in_order_on_each_upstream`](../tests/test_provider_dialects.py#L112) | [§9.1-18](../docs/RFC.md?plain=1#L593) | 对三个实际 HTTP 方言核对冻结首条文本及后续 runtime_update 的顺序。 |
-| [`test_user_and_tool_images_reach_upstream_with_declared_mime_and_exact_bytes`](../tests/test_provider_dialects.py#L149) | [§9.1-11](../docs/RFC.md?plain=1#L584) | 含 media 的 user 消息转换为与原文件字节一致的 HTTP 图片。 |
-| [`test_user_and_tool_images_reach_upstream_with_declared_mime_and_exact_bytes`](../tests/test_provider_dialects.py#L149) | [§9.1-14](../docs/RFC.md?plain=1#L588) | 逐个发送 PNG、JPEG、WebP、GIF，核对实际上游请求的 MIME 和解码字节。 |
-| [`test_coprocess_reopens_replaced_media_and_recovers_after_unlink`](../tests/test_provider_dialects.py#L176) | [§9.1-15](../docs/RFC.md?plain=1#L589) | 同一协进程按请求重开图片，替换后读取新字节、删除后给出可恢复错误。 |
-| [`test_oneshot_unreadable_and_missing_paths_fail_before_dispatch`](../tests/test_provider_dialects.py#L199) | [§9.1-15](../docs/RFC.md?plain=1#L589) | 文件不可读或缺失时 oneshot 在 HTTP 前失败。 |
-| [`test_upstream_media_rejection_is_distinct_from_auth_and_transient_failures`](../tests/test_provider_dialects.py#L217) | [§5.5-06](../docs/RFC.md?plain=1#L321) | 上游拒绝媒体时产生专属且不可重试的错误。 |
-| [`test_partial_text_then_upstream_eof_yields_error_and_coprocess_accepts_next_request`](../tests/test_provider_dialects.py#L244) | [§9.2-18](../docs/RFC.md?plain=1#L625) | 上游正文中途断流后本轮以 error 收尾，同一协进程可处理下一帧。 |
-| [`test_unsupported_ir_version_is_diagnosed_before_http_in_both_modes`](../tests/test_provider_dialects.py#L273) | [§9.1-04](../docs/RFC.md?plain=1#L575) | 不支持的 IR 版本在 HTTP 请求前被检测。 |
-| [`test_fragmented_tool_arguments_produce_one_call_with_the_original_id`](../tests/test_provider_dialects.py#L289) | [§9.2-18](../docs/RFC.md?plain=1#L625) | 跨帧工具参数最终产生一条 tool_call，保留原始 ID 和参数内容。 |
-| [`test_inclusive_usage_preserves_wide_counts_and_available_cache_details`](../tests/test_provider_dialects.py#L331) | [§9.2-11](../docs/RFC.md?plain=1#L655) | 从实际 HTTP 方言读取大整数和缓存明细，核对包含式总量。 |
-| [`test_wal_session_reaches_http_across_cli_restarts_and_provider_switches`](../tests/test_provider_dialects.py#L357) | [§9.2-04](../docs/RFC.md?plain=1#L631) | 从同一 WAL 多次启动并切换 Provider，实际 HTTP 请求均带持久化的会话标识。 |
-| [`test_session_routing_works_in_oneshot_and_per_envelope_in_coprocess`](../tests/test_provider_dialects.py#L409) | [§9.2-02](../docs/RFC.md?plain=1#L624) | 检查 oneshot 环境与协进程逐帧 session_id 覆盖的实际 HTTP 路由。 |
-| [`test_header_rename_and_disable_apply_only_to_the_current_request`](../tests/test_provider_dialects.py#L435) | [§9.2-04](../docs/RFC.md?plain=1#L631) | 运行中重命名或禁用指定的路由头，只影响当前请求。 |
-| [`test_responses_cache_key_has_native_string_boolean_and_null_semantics`](../tests/test_provider_dialects.py#L458) | [§9.2-05](../docs/RFC.md?plain=1#L632) | Responses 原生缓存键支持默认、字符串、布尔值及 null。 |
-| [`test_chat_cache_fields_are_independent_opt_ins_and_anthropic_keeps_them_out_of_the_body`](../tests/test_provider_dialects.py#L477) | [§9.2-06](../docs/RFC.md?plain=1#L633) | 兼容 Chat 端点的两个 Body 路由字段分别按需启用。 |
-| [`test_chat_cache_fields_are_independent_opt_ins_and_anthropic_keeps_them_out_of_the_body`](../tests/test_provider_dialects.py#L477) | [§9.2-07](../docs/RFC.md?plain=1#L634) | Anthropic 只发送路由头，Body 保持协议格式。 |
+| [`test_user_and_tool_images_reach_upstream_with_declared_mime_and_exact_bytes`](../tests/test_provider_dialects.py#L152) | [§9.1-11](../docs/RFC.md?plain=1#L584) | 含 media 的 user 消息转换为与原文件字节一致的 HTTP 图片。 |
+| [`test_user_and_tool_images_reach_upstream_with_declared_mime_and_exact_bytes`](../tests/test_provider_dialects.py#L152) | [§9.1-14](../docs/RFC.md?plain=1#L588) | 逐个发送 PNG、JPEG、WebP、GIF，核对实际上游请求的 MIME 和解码字节。 |
+| [`test_coprocess_reopens_replaced_media_and_recovers_after_unlink`](../tests/test_provider_dialects.py#L179) | [§9.1-15](../docs/RFC.md?plain=1#L589) | 同一协进程按请求重开图片，替换后读取新字节、删除后给出可恢复错误。 |
+| [`test_oneshot_unreadable_and_missing_paths_fail_before_dispatch`](../tests/test_provider_dialects.py#L202) | [§9.1-15](../docs/RFC.md?plain=1#L589) | 文件不可读或缺失时 oneshot 在 HTTP 前失败。 |
+| [`test_upstream_media_rejection_is_distinct_from_auth_and_transient_failures`](../tests/test_provider_dialects.py#L220) | [§5.5-06](../docs/RFC.md?plain=1#L321) | 上游拒绝媒体时产生专属且不可重试的错误。 |
+| [`test_partial_text_then_upstream_eof_yields_error_and_coprocess_accepts_next_request`](../tests/test_provider_dialects.py#L247) | [§9.2-18](../docs/RFC.md?plain=1#L625) | 上游正文中途断流后本轮以 error 收尾，同一协进程可处理下一帧。 |
+| [`test_unsupported_ir_version_is_diagnosed_before_http_in_both_modes`](../tests/test_provider_dialects.py#L276) | [§9.1-04](../docs/RFC.md?plain=1#L575) | 不支持的 IR 版本在 HTTP 请求前被检测。 |
+| [`test_fragmented_tool_arguments_produce_one_call_with_the_original_id`](../tests/test_provider_dialects.py#L292) | [§9.2-18](../docs/RFC.md?plain=1#L625) | 跨帧工具参数最终产生一条 tool_call，保留原始 ID 和参数内容。 |
+| [`test_inclusive_usage_preserves_wide_counts_and_available_cache_details`](../tests/test_provider_dialects.py#L334) | [§9.2-11](../docs/RFC.md?plain=1#L655) | 从实际 HTTP 方言读取大整数和缓存明细，核对包含式总量。 |
+| [`test_wal_session_reaches_http_across_cli_restarts_and_provider_switches`](../tests/test_provider_dialects.py#L360) | [§9.2-04](../docs/RFC.md?plain=1#L631) | 从同一 WAL 多次启动并切换 Provider，实际 HTTP 请求均带持久化的会话标识。 |
+| [`test_session_routing_works_in_oneshot_and_per_envelope_in_coprocess`](../tests/test_provider_dialects.py#L412) | [§9.2-02](../docs/RFC.md?plain=1#L624) | 检查 oneshot 环境与协进程逐帧 session_id 覆盖的实际 HTTP 路由。 |
+| [`test_header_rename_and_disable_apply_only_to_the_current_request`](../tests/test_provider_dialects.py#L438) | [§9.2-04](../docs/RFC.md?plain=1#L631) | 运行中重命名或禁用指定的路由头，只影响当前请求。 |
+| [`test_responses_cache_key_has_native_string_boolean_and_null_semantics`](../tests/test_provider_dialects.py#L461) | [§9.2-05](../docs/RFC.md?plain=1#L632) | Responses 原生缓存键支持默认、字符串、布尔值及 null。 |
+| [`test_chat_cache_fields_are_independent_opt_ins_and_anthropic_keeps_them_out_of_the_body`](../tests/test_provider_dialects.py#L480) | [§9.2-06](../docs/RFC.md?plain=1#L633) | 兼容 Chat 端点的两个 Body 路由字段分别按需启用。 |
+| [`test_chat_cache_fields_are_independent_opt_ins_and_anthropic_keeps_them_out_of_the_body`](../tests/test_provider_dialects.py#L480) | [§9.2-07](../docs/RFC.md?plain=1#L634) | Anthropic 只发送路由头，Body 保持协议格式。 |
+| [`test_responses_coprocess_keeps_the_frozen_prefix_and_scopes_dynamic_instructions`](../tests/test_provider_dialects.py#L507) | [§9.1-23](../docs/RFC.md?plain=1#L583) | 同一 Responses 协进程交替接收缺省、不同单轮指令和再次缺省，冻结前缀、工具往返和新增历史逐项核对。 [断言 L534](../tests/test_provider_dialects.py#L534) · [断言 L542](../tests/test_provider_dialects.py#L542) |
+| [`test_responses_wal_resume_retains_only_the_frozen_prompt_and_conversation`](../tests/test_provider_dialects.py#L551) | [§9.1-24](../docs/RFC.md?plain=1#L583) | 连续三次真实 CLI 进程复用一个 WAL；只在中间一次传单轮指令，每次 HTTP 首项都等于磁盘上的冻结正文。 [断言 L581](../tests/test_provider_dialects.py#L581) · [断言 L587](../tests/test_provider_dialects.py#L587) |
 
 ## `tests/test_provider_streaming.py`
 

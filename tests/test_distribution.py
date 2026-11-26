@@ -332,11 +332,15 @@ timeout_sec=3
             self.assertEqual(len(http.requests), 3)
             first, second, third = http.requests
             self.assertEqual(first["model"], "test-model")
-            self.assertIn("inspect fixture", first["instructions"])
+            prefix = first["input"][0]
+            self.assertEqual(prefix["role"], "developer")
+            self.assertNotIn("instructions", first)
+            frozen = prefix["content"][0]["text"]
+            self.assertIn("inspect fixture", frozen)
             for contract in ("$ANIX_OUT", "$ANIX_ERR", "<runtime_tips>",
                              "how-to-background.md"):
-                self.assertIn(contract, first["instructions"])
-            self.assertEqual(first["instructions"], third["instructions"])
+                self.assertIn(contract, frozen)
+            self.assertEqual([b["input"][0] for b in (second, third)], [prefix, prefix])
             user_text = first["input"][-1]["content"][0]["text"]
             self.assertLess(user_text.index("<args>sample</args>"), user_text.index("from stdin"))
             self.assertEqual(len(media), 1)

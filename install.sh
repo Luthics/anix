@@ -7,7 +7,7 @@
 #   gh api repos/Luthics/anix/contents/install.sh -H "Accept: application/vnd.github.raw" | sh
 #
 # Environment overrides:
-#   ANIX_VERSION=v0.0.6           Pin a specific release tag (default: latest release)
+#   ANIX_VERSION=v0.0.7           Pin a specific release tag (default: latest release)
 #   ANIX_PREFIX=$HOME/.local      Install prefix (default: ~/.local)
 #   ANIX_REPO=Luthics/anix
 #   GITHUB_TOKEN / GH_TOKEN       Optional GitHub token (needed if repo is private and `gh` is absent)
@@ -119,7 +119,7 @@ resolve_latest_version() {
       v*) printf '%s' "$tag"; return 0 ;;
     esac
   fi
-  printf '%s' "v0.0.6"
+  printf '%s' "v0.0.7"
 }
 
 download_release_assets() {

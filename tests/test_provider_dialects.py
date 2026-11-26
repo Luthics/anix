@@ -126,8 +126,11 @@ class ProviderDialects(unittest.TestCase):
                 self.assertNotIn("tools", body)
                 self.assertEqual(body["model"], "default-model")
                 if dialect == "openai-responses":
-                    self.assertEqual(body["instructions"], frozen)
-                    items = [(m["role"], b["text"]) for m in body["input"] for b in m["content"]]
+                    first, *history = body["input"]
+                    self.assertNotIn("instructions", body)
+                    self.assertEqual((first["role"], first["content"]),
+                                     ("developer", [{"type": "input_text", "text": frozen}]))
+                    items = [(m["role"], b["text"]) for m in history for b in m["content"]]
                     cap = body["max_output_tokens"]
                 elif dialect == "openai-compat":
                     first, *history = body["messages"]
@@ -499,6 +502,90 @@ class ProviderDialects(unittest.TestCase):
                         self.assertEqual(headers.get_all("x-session-id"), [f"turn-{i}"])
                         self.assertEqual({key: body[key] for key in ("prompt_cache_key", "session_id")
                                           if key in body}, want)
+
+    # RFC §9.1-23 — 同一 Responses 协进程交替接收缺省、不同单轮指令和再次缺省，冻结前缀、工具往返和新增历史逐项核对。
+    def test_responses_coprocess_keeps_the_frozen_prefix_and_scopes_dynamic_instructions(self):
+        dialect = "openai-responses"
+        frozen = "  冻结\r\n前缀\t "
+        messages = [{"role": "system", "turn_id": 0, "text": frozen}, user("question")]
+        next_messages = [
+            [{"role": "assistant", "turn_id": 2, "tool_calls": [
+                {"id": "lookup", "name": "msh", "arguments": {"cmd": "printf example"}}]},
+             {"role": "tool", "turn_id": 3, "tool_call_id": "lookup", "text": "tool reply"}],
+            [{"role": "assistant", "turn_id": 4, "text": "answer"}, user("next", turn_id=5)],
+            [{"role": "system", "turn_id": 6, "text": "<runtime_update>changed</runtime_update>"},
+             user("last", turn_id=7)],
+        ]
+        commands = [None, "  ONLY-TURN-2\r\n", "ONLY-TURN-3\t", None]
+        requests = []
+        for i, command in enumerate(commands):
+            if i:
+                messages.extend(next_messages[i - 1])
+            params = {} if command is None else {"instructions": command}
+            requests.append(envelope(i + 1, messages.copy(), header=header(params=params), session_id="shared"))
+        proc, events, bodies = self.run_provider(dialect, "coprocess", requests,
+                                                 [(200, completion(dialect), None)] * len(requests))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assert_terminals(events, ["done"] * len(requests))
+        for i, (body, command) in enumerate(zip(bodies, commands)):
+            with self.subTest(turn=i + 1):
+                first, *history = body["input"]
+                # RFC-ASSERT §9.1-23
+                self.assertEqual((first["role"], first["content"], "instructions" in body, body.get("instructions")),
+                                 ("developer", [{"type": "input_text", "text": frozen}], command is not None, command))
+                self.assertEqual(sum(item.get("role") == "developer" for item in body["input"]), 1)
+                self.assertEqual(body["prompt_cache_key"], "shared")
+                self.assertFalse(any(text and text.strip() in json.dumps(history) for text in commands))
+                if i:
+                    previous = bodies[i - 1]["input"]
+                    # RFC-ASSERT §9.1-23
+                    self.assertEqual(body["input"][:len(previous)], previous)
+        history = bodies[-1]["input"][1:]
+        self.assertEqual([item.get("role") or item["type"] for item in history],
+                         ["user", "function_call", "function_call_output", "assistant", "user", "user", "user"])
+        self.assertEqual((history[1]["call_id"], history[2]["call_id"], history[2]["output"]),
+                         ("lookup", "lookup", "tool reply"))
+        self.assertEqual(history[-2]["content"][0]["text"], "<runtime_update>changed</runtime_update>")
+
+    # RFC §9.1-24 — 连续三次真实 CLI 进程复用一个 WAL；只在中间一次传单轮指令，每次 HTTP 首项都等于磁盘上的冻结正文。
+    def test_responses_wal_resume_retains_only_the_frozen_prompt_and_conversation(self):
+        dialect = "openai-responses"
+        config = self.root / ".config/anix"
+        config.mkdir(parents=True)
+        adapter = self.root / "anix-provider-openai-responses"
+        adapter.symlink_to(self.binary)
+        (config / "config.toml").write_text(
+            f'[defaults]\nprovider="{dialect}"\nmodel="fixture"\nshell="none"\n'
+            f'[providers.{dialect}]\nbin="{adapter}"\nbase_url="http://127.0.0.1:{self.http.server_port}/v1"\n'
+            'api_key="fixture"\napi_key_env=""\ntimeout_sec=5\n')
+        (self.root / "case.agent").write_text("冻结正文\n保留这段")
+        env = {"HOME": str(self.root), "PATH": "/usr/bin:/bin", "XDG_RUNTIME_DIR": str(self.root / "run")}
+        command = "THIS-TURN-ONLY"
+        for i in range(3):
+            with self.subTest(process=i + 1):
+                reply = f"answer-{i}"
+                self.http.replies.append((200, sse({"type": "response.output_text.delta", "delta": reply})
+                                          + completion(dialect), None))
+                option = ["--param", f"instructions={command}"] if i == 1 else []
+                run = subprocess.run([self.binary.with_name("anix"), "-q", "-c", "history", *option,
+                                      "case.agent", "--", f"question-{i}"], cwd=self.root, env=env,
+                                     stdin=subprocess.DEVNULL, capture_output=True, timeout=15)
+                self.assertEqual((run.returncode, run.stdout), (0, reply.encode()), run.stderr)
+                self.assertEqual(len(self.http.requests), i + 1)
+                records = [json.loads(line) for line in (self.root / "history").read_bytes().splitlines()]
+                frozen, = [r["text"] for r in records if r.get("role") == "system"]
+                self.assertIn("保留这段", frozen)
+                body = self.http.requests[-1]
+                first, *history = body["input"]
+                # RFC-ASSERT §9.1-24
+                self.assertEqual((first["role"], first["content"], "instructions" in body, body.get("instructions")),
+                                 ("developer", [{"type": "input_text", "text": frozen}], i == 1, command if i == 1 else None))
+                self.assertNotIn(command, json.dumps(body["input"]))
+                self.assertEqual(body["prompt_cache_key"], records[0]["session_id"])
+                # Compare to the actual saved conversation, excluding this response which was generated after dispatch.
+                # RFC-ASSERT §9.1-24
+                self.assertEqual([(item["role"], item["content"][0]["text"]) for item in history],
+                                 [(r["role"], r["text"]) for r in records[:-1] if r.get("role") in ("user", "assistant")])
 
 
 if __name__ == "__main__":
