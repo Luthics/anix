@@ -1,6 +1,6 @@
-# Anix Core（POSIX 原生 Agent 内核）v0.2 技术规范
+# Anix Core（POSIX 原生 Agent 内核）v0.3 技术规范
 
-**版本**：v0.2.0-rfc  
+**版本**：v0.3.0-rfc  
 **状态**：Working Specification（`0.x` 演进期草案；`v1.0.0` 正式定稿前保留契约收口空间）  
 **适用范围**：`anix-core` 内核与全部外部线协议（参考运行底座组件见 [RUNTIME.md](RUNTIME.md)）  
 **协议版本**：`ir_version = 1`  
@@ -36,8 +36,13 @@ Anix 生态按**逐级递进、严格单向依赖**划分为四层；**本 RFC �
 
 ### 1.4 `0.x` 演进与兼容性声明
 
-* **版本编号约定**：本规范当前处于 **`0.x` 演进阶段**（早期草稿与历史 Issue 中曾使用 `v1.0` / `v1.1.x` / `v1.2.0` 编号，现统一归并为 `v0.0` / `v0.1.x` / `v0.2.0`；在 `v1.0.0` 正式定稿前保留小版本契约收口空间，线协议版本字段维持 `ir_version = 1` 不变）。
-* **保持兼容（Forward-Compatible）**：Canonical IR 维持 `ir_version = 1`；WAL 保持 Append-Only 格式前向兼容（`v0.1` / `v0.1.1` / `v0.1.2` / `v0.2.0` 新增字段均为可选）；`*.agent` 脚本格式、`$ANIX_OUT`/`$ANIX_ERR`/`$ANIX_CTL` 侧信道与 Lifecycle Hooks 线协议保持不变；所有新增可选插件（`[approval].bin`、`[vision].bin`）未配置时保持原有默认行为。
+* **版本编号约定**：本规范当前处于 **`0.x` 演进阶段**（早期草稿与历史 Issue 中曾使用 `v1.0` / `v1.1.x` / `v1.2.0` 编号，现统一归并为 `v0.0` / `v0.1.x` / `v0.2.0` / `v0.3.0`；在 `v1.0.0` 正式定稿前保留小版本契约收口空间，线协议版本字段维持 `ir_version = 1` 不变）。
+* **保持兼容（Forward-Compatible）**：Canonical IR 维持 `ir_version = 1`；WAL 保持 Append-Only 格式前向兼容（`v0.1` / `v0.1.1` / `v0.1.2` / `v0.2.0` / `v0.3.0` 新增字段均为可选）；`*.agent` 脚本格式、`$ANIX_OUT`/`$ANIX_ERR`/`$ANIX_CTL` 侧信道与 Lifecycle Hooks 线协议保持不变；所有新增可选插件（`[approval].bin`、`[vision].bin`）未配置时保持原有默认行为。
+* **`v0.2.0 → v0.3.0` 树状 WAL 原语（向后兼容）**：将单文件 Append-Only WAL 升级为支持多分支的轻量树（DAG）原语，使上层 `anix-agent`（Layer 3）可直接复用同一 WAL 文件实现交互式分支管理，而 `anix-core` 仍保持极简无 UI：
+  * 每条新写入的 WAL 事件携带文件级严格单调自增的节点编号 `id`（`uint64 >= 1`）与可选父指针 `parent_id`（`session_init` 为根省略 `parent_id`）；
+  * `fold` 事件统一表示为指向 `from_turn` 之前祖先节点的分支摘要节点（可选记录被剪枝分支的 `pruned_usage`），彻底取代基于 `turn_id` 的区间剪枝状态机；
+  * 新增最小 CLI/环境变量原语 `--leaf <ID>` / `ANIX_LEAF=<ID>`（缺省沿用文件末尾节点），允许从任意闭合的历史节点原地分叉（支持跨越 `checkpoint` 回到旧分支），并在 Trace（`run_start`/`cycle_end`/`run_end`/`fold`/`compact`）与 `on-exit.d/` 暴露 `leaf_id`；
+  * 未携带 `id`/`parent_id` 的历史线性 WAL 文件保持原位只读兼容与线性续写，零迁移破坏。
 * **`v0.1.0 → v0.1.1` 增量扩展（向后兼容）**：新增会话级路由亲和标识 `session_id`（WAL `session_init`/`checkpoint` 可选字段、Provider 公共环境 `ANIX_SESSION_ID` 与 `coprocess` 信封可选 `session_id`、Trace `run_start.session_id`）；无状态运行自动生成进程级 UUID v4，历史无 `session_id` 的旧 WAL 自动派生确定性回退值。
 * **`v0.1.1 → v0.1.2` 增量扩展**：Shell 工具调用新增可选 `timeout_sec`（受 `[defaults].max_msh_timeout_sec` 硬上限裁剪）与 `kill_on_timeout`（默认 `false`），新增 `$ANIX_CTL` `bg_job` 帧与后台任务完成 `<runtime_update>` 自动通知及 `bg_job_started`/`bg_job_finished` Trace 事件（工具线格式向后兼容；参考 Shell 默认超时行为由强杀改为转后台，见 [RUNTIME.md](RUNTIME.md)）。
 * **`v0.1.2 → v0.2.0` 架构收口（三轴正交静态输出契约）**：将**能力轴（`shell: <bin> | none`）**、**策略轴（`approval: ask | auto | deny`）**与**输出契约轴（`output: reply | explicit | none`，默认 `reply`）**彻底正交解耦：
@@ -80,6 +85,7 @@ anix --version             # 输出版本号与支持的 ir_version
 核心 CLI 选项（优先级最高）：
 
 * `-c, --context <FILE>`：指定持久化 WAL JSONL 文件路径；传空串 `""` 强制无状态。
+* `--leaf <ID>`：仅配合 `-c <FILE>` 使用（`v0.3.0`）；从指定历史 WAL 节点 `id`（`uint64 >= 1`）分叉续跑，缺省沿用文件末尾有效叶节点。
 * `--provider <NAME>` / `--model <ID>` / `--shell <PATH|none>`（`none` 禁用全部 Shell 工具，进入零注入纯文本模式）
 * `-o, --output <reply|explicit|none>`：声明 `fd 1`（stdout）的唯一静态输出契约（默认 `reply`，见 §4.1）
 * `--vision` / `--no-vision`：显式声明当前模型是否支持原生视觉输入（默认 `true`，见 §5.5）。
@@ -146,13 +152,14 @@ stderr: auto
 
 标准环境变量映射：
 
-* `ANIX_PROVIDER`、`ANIX_MODEL`、`ANIX_VISION`（`1`/`true` 为真，`0`/`false` 为假）、`ANIX_SHELL`、`ANIX_OUTPUT`（`reply`|`explicit`|`none`）、`ANIX_MAX_TURNS`、`ANIX_MAX_TOKENS`、`ANIX_MAX_OUTPUT_TOKENS`、`ANIX_COMPACT_THRESHOLD`、`ANIX_APPROVAL`、`ANIX_YES`（`1`/`true` 等价于 `--approval auto`）、`ANIX_STDERR`、`ANIX_LOG`（`human`|`info`|`trace`）、`ANIX_TRACE_FD`、`ANIX_TRACE_LEVEL`、`ANIX_CONTEXT`、`ANIX_INBOX`、`ANIX_IDLE_TIMEOUT`。
+* `ANIX_PROVIDER`、`ANIX_MODEL`、`ANIX_VISION`（`1`/`true` 为真，`0`/`false` 为假）、`ANIX_SHELL`、`ANIX_OUTPUT`（`reply`|`explicit`|`none`）、`ANIX_MAX_TURNS`、`ANIX_MAX_TOKENS`、`ANIX_MAX_OUTPUT_TOKENS`、`ANIX_COMPACT_THRESHOLD`、`ANIX_APPROVAL`、`ANIX_YES`（`1`/`true` 等价于 `--approval auto`）、`ANIX_STDERR`、`ANIX_LOG`（`human`|`info`|`trace`）、`ANIX_TRACE_FD`、`ANIX_TRACE_LEVEL`、`ANIX_CONTEXT`、`ANIX_LEAF`（`v0.3.0`）、`ANIX_INBOX`、`ANIX_IDLE_TIMEOUT`。
 * **空串覆盖规则**：`ANIX_CONTEXT=""`（已设置但为空）必须覆盖 Frontmatter 中的 `context`，强制本次运行无状态。
-* **启动期静态校验（Fail-Fast，`v0.2.0`）**：在全部 6 层配置合并完成之后、写入 WAL `session_init` 之前，必须执行以下确定性校验；凡违规一律向 `fd 2` 报错并以退出码 **`2`** 立即退出（严禁留下无效 WAL 或发起 Provider 请求）：
+* **启动期静态校验（Fail-Fast，`v0.2.0` / `v0.3.0`）**：在全部 6 层配置合并完成之后、写入 WAL `session_init` 之前，必须执行以下确定性校验；凡违规一律向 `fd 2` 报错并以退出码 **`2`** 立即退出（严禁留下无效 WAL 或发起 Provider 请求）：
   1. `output`、`approval`、`stderr` 枚举值非法 → 退出 `2`；
   2. `output == explicit` 且（`shell == none` 或 `approval == deny`）→ 退出 `2`（`explicit` 契约要求存在可执行的 Shell 工具向 `$ANIX_OUT` 写入）；
   3. `shell != none` 但无法解析到具备 `+x` 权限的 Shell 可执行文件 → 退出 `2`（`shell == none` 时跳过检查，且忽略 `approval` 策略）；
-  4. **非阻断警告（输出至 `fd 2`）**：`output == reply && shell != none && approval == deny`、`output == none && shell == none`、以及 `output != explicit` 但脚本正文出现 `ANIX_OUT`（迁移提示）。
+  4. 指定了 `--leaf <ID>` / `ANIX_LEAF` 但未配置有效 `-c <FILE>`，或 `<ID> == 0` / 非法整数，或目标 WAL 为空、为缺失节点 `id` 的旧线性格式、节点不存在、指向 `session_init`/`checkpoint` 分节头、或目标节点破坏工具调用闭合不变量 → 退出 `2`；
+  5. **非阻断警告（输出至 `fd 2`）**：`output == reply && shell != none && approval == deny`、`output == none && shell == none`、以及 `output != explicit` 但脚本正文出现 `ANIX_OUT`（迁移提示）。
 * **子进程隔离规则（默认清空 + 观测白名单 + 主动注入生效审批）**：`anix` 拉起 Shell 子进程前必须**清空（`unset`）所有 `ANIX_*` 环境变量**（防止父进程的 `ANIX_CONTEXT`、`ANIX_INBOX`、`ANIX_MODEL`、`ANIX_VISION`、`ANIX_TRACE_FD`、`ANIX_MAX_TURNS` 等单实例状态、FD 编号或预算配置隐式污染子 Agent 并覆盖其 Frontmatter），仅按以下规则向下传递：
   * **可观测性白名单透传**：若父进程环境中存在 `ANIX_LOG` 或 `ANIX_TRACE_LEVEL`，原样透传（注意 `ANIX_TRACE_FD` 绝不透传，父进程的 Trace FD 在 `exec` 前已因 `FD_CLOEXEC` 关闭）；
   * **审批策略主动注入**：必须将当前父进程已解析生效的审批策略主动注入为 `ANIX_APPROVAL=<ask|auto|deny>`（不再单独透传 `ANIX_YES`，统一归一至 `ANIX_APPROVAL`）；
@@ -332,43 +339,50 @@ safe_commands = ["ls", "cat", "head", "tail", "rg", "grep", "find", "pwd", "git 
    * **内置默认压缩器（默认）**：使用 `[compact].provider` 与 `[compact].model`（未配置时回退当前会话），结合 `[compact].prompt` 或 `[compact].prompt_file`（二选一，未配置时回退内置极简摘要提示词）调用 Provider 生成摘要。
    * 压缩器（无论内置或外部）均不具备 Shell 工具权限（`tools: []`）。
 
-### 6.2 无状态持久化上下文（`-c <file>`）与 WAL Schema
+### 6.2 树状持久化上下文（`-c <file>` / `--leaf <id>`）与 WAL Schema
 
-`anix` 本体不维护中心化数据库；`-c <file>` 是唯一持久化原语，采用 **Append-Only JSONL（WAL）** 格式。
+`anix` 本体不维护中心化数据库；`-c <file>` 是唯一持久化原语，采用单文件 **Append-Only 树状 JSONL（Tree WAL，`v0.3.0`）** 格式。所有交互式树浏览、分支命名、搜索与可视化管理均归属上层 `anix-agent`（Layer 3）直接消费该 WAL 文件；内核仅提供最小树节点写入、单遍逆读投影与 `--leaf <id>` 分叉原语。
 
 1. **并发防线**：打开 `<file>` 时必须调用 `flock(LOCK_EX | LOCK_NB)` 获取独占非阻塞锁。若返回 `EWOULDBLOCK`，必须立即向 `fd 2` 报错并以退出码 `1` 退出。
-2. **KV-Cache 工程让步（不可变 Prefix + 尾部追加）**：
-   * **首轮冻结**：新建 `<file>` 时，执行 `pre-context.d/` 并将初始配置写入 `session_init` 行，紧随其后将冻结的系统提示词写入 `turn_id: 0` 的 `role: "system"` 消息行；后续恢复时原样复用该冻结前缀。
-   * **Config Drift 尾部通知**：恢复运行若检测到契约类配置（如 `output`、`shell` 启用状态、`stderr`、`approval`、`vision`）与 WAL 中最新生效状态不一致，当前调用参数胜出，严禁改动头部 `role: "system"`，仅在尾部追加一条 `runtime_update` 事件（映射至 IR 时作为尾部 `role: "system"` 增量消息，若上游 API 不支持中间 `system` 则由 Provider 降级为 `user`）。**`v0.2.0` 向后兼容**：若逆读的旧版 WAL 缺失 `output` 字段，漂移检测必须将其视作 `explicit`。
-   * **大压缩分节（唯一刷新时机）**：仅当自动压缩、`compact` 控制帧或 `SIGUSR1` 触发大压缩时，在文件末尾追加一个新的 **`checkpoint` 分节头**（携带 `ir_version: 1`、最新 `config` 与新 `turn_id`），紧接着追加重新执行 `pre-context.d/` 生成的新冻结 `role: "system"` 行与摘要行；尾部折叠 `fold` 严禁刷新头部 Prefix。
+2. **树节点拓扑与 KV-Cache 工程让步（不可变 Prefix + 原地追加分叉）**：
+   * **文件级单调节点标识（`v0.3.0`）**：新建 WAL 中每条事件均携带文件级严格单调递增的 `id`（`uint64`，从 `1` 开始）以及可选父指针 `parent_id`（`uint64`，根节点 `session_init` 省略；追加顺序天然满足拓扑序 `parent_id < id`）。
+   * **首轮冻结**：新建 `<file>` 时，执行 `pre-context.d/` 并将初始配置写入 `session_init`（`id: 1`），紧随其后将冻结的系统提示词写入 `turn_id: 0` 的 `role: "system"` 消息行（`id: 2, parent_id: 1`）；后续恢复或从任意祖先分叉时原样复用该冻结前缀。
+   * **Config Drift 尾部通知**：恢复（或 `--leaf` 分叉）运行若检测到契约类配置（`output`、`shell` 启用状态、`stderr`、`approval`、`vision`）与**目标分支链路上**最新生效配置不一致，当前调用参数胜出，严禁改动头部 `role: "system"`，仅在当前分支尾部追加一条 `runtime_update` 事件（映射至 IR 时作为尾部 `role: "system"` 增量消息，若上游 API 不支持中间 `system` 则由 Provider 降级为 `user`）。**`v0.2.0` 向后兼容**：若逆读的旧版 WAL 缺失 `output` 字段，漂移检测必须将其视作 `explicit`。
+   * **尾部折叠即分支摘要（`fold`）**：执行 `aclr -t` 尾部折叠时，内核追加一条 `fold` 事件，其 `parent_id` 直接指向 `aligned_from` 之前最后一条保留消息的 `id`，并将当前活跃叶指针（`head_id`）切换至该 `fold` 节点；旧尾部节点原样保留在文件中，后续逆读沿 `parent_id` 自动跳过被折掉的子分支。严禁修改头部冻结 Prefix。
+   * **大压缩分节（唯一刷新时机）**：仅当自动压缩、`compact` 控制帧或 `SIGUSR1` 触发大压缩时，在文件末尾追加一个新的 **`checkpoint` 分节头**（携带 `id`、`parent_id`（指向被压缩时的当前叶节点）、`ir_version: 1`、最新 `config` 与新 `turn_id`），紧接着追加重新执行 `pre-context.d/` 生成的新冻结 `role: "system"` 行与摘要行；从 `checkpoint` 之后的节点逆读到该 `checkpoint` 即停，而通过 `--leaf` 指定 `checkpoint` 之前的历史节点时仍可越过该 `checkpoint` 回到旧分支。
 3. **WAL JSONL 事件 Schema**（每行必须为合法 JSON + `\n`，每轮结束原子 flush）：
-   * **会话路由标识（`session_id`，`v0.1.1`）**：`session_init` 与 `checkpoint` 分节头均携带可选字段 `session_id`（UTF-8 字符串，默认 UUID v4）。新建 WAL 时生成一次并写入 `session_init`；写入 `checkpoint` 时**必须（MUST）**原样延续当前会话的 `session_id`，确保 `O(当前活跃窗口)` 逆读停在 `checkpoint` 时仍能恢复同一会话标识；无状态运行生成进程级临时 UUID v4；逆读缺失 `session_id` 的旧 WAL 时严禁报错，基于该 WAL 规范路径派生确定性回退标识。
+   * **节点指针字段（`v0.3.0`，可选以保持向后兼容）**：`id`（`uint64 >= 1`）、`parent_id`（`uint64 >= 1`，仅 `session_init` 省略）。未携带 `id` 的历史线性 WAL 自动回退旧版线性回放与线性续写。
+   * **会话路由标识（`session_id`，`v0.1.1`）**：`session_init` 与 `checkpoint` 分节头均携带可选字段 `session_id`（UTF-8 字符串，默认 UUID v4）。新建 WAL 时生成一次并写入 `session_init`；写入 `checkpoint` 时**必须（MUST）**原样延续当前会话的 `session_id`，确保单遍逆读停在 `checkpoint` 时仍能恢复同一会话标识；无状态运行生成进程级临时 UUID v4；逆读缺失 `session_id` 的旧 WAL 时严禁报错，基于该 WAL 规范路径派生确定性回退标识。
    * `role: "assistant"` 消息行可携带可选字段 `provider_opaque`（原样保存 Provider 返回的 `opaque.data`）以及可选字段 `usage`（同构 5 字段对象，见 §9.2；构造 Canonical IR 发给 Provider 时必须剥离，严禁写入 IR）；
-   * `fold` 事件在自动摘要折叠模式下可携带可选字段 `fold_usage`（5 字段对象，计入本段 `cumulative_usage`）；
-   * `checkpoint` 分节头可携带可选字段 `compact_usage` 与 `cumulative_usage`（5 字段前缀和，等于上一 `checkpoint` 的 `cumulative_usage` 加上本段窗口内所有 `assistant.usage`（含被 `fold` 剪枝的行）、所有 `fold.fold_usage` 与本次 `compact_usage`）。
+   * `fold` 事件可携带可选字段 `fold_usage`（自动摘要压缩器本身的 5 字段消耗）与 `pruned_usage`（`v0.3.0`，被该 `fold` 折叠掉的当前分支尾部轮次的累计 5 字段消耗，使重启回放沿 `parent_id` 跳过旧尾部时仍精确保持当前分支的 `session_usage` 连续性）；
+   * `checkpoint` 分节头可携带可选字段 `compact_usage` 与 `cumulative_usage`（**当前分支链路**的 5 字段前缀和，等于上一 `checkpoint` 的 `cumulative_usage` 加上本段分支链路内所有 `assistant.usage`、所有 `fold.fold_usage` / `fold.pruned_usage` 与本次 `compact_usage`）。
 
 ```json
-{"ir_version":1,"type":"session_init","ts":"2026-11-24T12:00:00Z","session_id":"550e8400-e29b-41d4-a716-446655440000","config":{"output":"reply","shell":"msh","stderr":"auto","approval":"ask","vision":true}}
-{"type":"message","turn_id":0,"role":"system","ts":"2026-11-24T12:00:00Z","text":"<posix_runtime>...</posix_runtime>\n\n你是一个安全审计专家..."}
-{"type":"message","turn_id":1,"role":"user","ts":"...","text":"分析这个报错截图"}
-{"type":"message","turn_id":2,"role":"assistant","ts":"...","text":"","reasoning":"...","tool_calls":[{"id":"call_1","name":"msh","arguments":{"cmd":"aview err.png"}}],"usage":{"input_tokens":4200,"output_tokens":380,"cached_tokens":3600,"cache_write_tokens":400,"reasoning_tokens":200}}
-{"type":"message","turn_id":3,"role":"tool","ts":"...","tool_call_id":"call_1","text":"[t3] exit=0\n","media":[{"mime":"image/png","path":"/tmp/aview_xxx.png"}]}
-{"type":"runtime_update","turn_id":4,"ts":"...","content":"stderr mode switched to explicit...","config":{"output":"reply","shell":"msh","stderr":"explicit"}}
-{"type":"fold","ts":"...","from_turn":3,"to_turn":6,"summary":"使用xx是错误的","fold_usage":{"input_tokens":1800,"output_tokens":95,"cached_tokens":0,"cache_write_tokens":0,"reasoning_tokens":0}}
-{"ir_version":1,"type":"checkpoint","turn_id":7,"ts":"...","session_id":"550e8400-e29b-41d4-a716-446655440000","config":{"output":"reply","shell":"msh","stderr":"explicit","approval":"ask","vision":true},"compact_usage":{"input_tokens":98000,"output_tokens":1200,"cached_tokens":80000,"cache_write_tokens":0,"reasoning_tokens":400},"cumulative_usage":{"input_tokens":246800,"output_tokens":8695,"cached_tokens":192000,"cache_write_tokens":6400,"reasoning_tokens":3100}}
-{"type":"message","turn_id":7,"role":"system","ts":"...","text":"<posix_runtime>...</posix_runtime>\n\n你是一个安全审计专家..."}
-{"type":"message","turn_id":8,"role":"user","ts":"...","text":"<checkpoint>\n...\n</checkpoint>"}
+{"ir_version":1,"type":"session_init","id":1,"ts":"2026-11-26T12:00:00Z","session_id":"550e8400-e29b-41d4-a716-446655440000","config":{"output":"reply","shell":"msh","stderr":"auto","approval":"ask","vision":true}}
+{"type":"message","id":2,"parent_id":1,"turn_id":0,"role":"system","ts":"2026-11-26T12:00:00Z","text":"<posix_runtime>...</posix_runtime>\n\n你是一个安全审计专家..."}
+{"type":"message","id":3,"parent_id":2,"turn_id":1,"role":"user","ts":"...","text":"分析这个报错截图"}
+{"type":"message","id":4,"parent_id":3,"turn_id":2,"role":"assistant","ts":"...","text":"","reasoning":"...","tool_calls":[{"id":"call_1","name":"msh","arguments":{"cmd":"aview err.png"}}],"usage":{"input_tokens":4200,"output_tokens":380,"cached_tokens":3600,"cache_write_tokens":400,"reasoning_tokens":200}}
+{"type":"message","id":5,"parent_id":4,"turn_id":3,"role":"tool","ts":"...","tool_call_id":"call_1","text":"[t3] exit=0\n","media":[{"mime":"image/png","path":"/tmp/aview_xxx.png"}]}
+{"type":"fold","id":6,"parent_id":3,"ts":"...","from_turn":2,"to_turn":3,"summary":"使用xx是错误的","fold_usage":{"input_tokens":1800,"output_tokens":95,"cached_tokens":0,"cache_write_tokens":0,"reasoning_tokens":0},"pruned_usage":{"input_tokens":4200,"output_tokens":380,"cached_tokens":3600,"cache_write_tokens":400,"reasoning_tokens":200}}
+{"type":"runtime_update","id":7,"parent_id":6,"turn_id":4,"ts":"...","content":"stderr mode switched to explicit...","config":{"output":"reply","shell":"msh","stderr":"explicit"}}
+{"ir_version":1,"type":"checkpoint","id":8,"parent_id":7,"turn_id":5,"ts":"...","session_id":"550e8400-e29b-41d4-a716-446655440000","config":{"output":"reply","shell":"msh","stderr":"explicit","approval":"ask","vision":true},"compact_usage":{"input_tokens":98000,"output_tokens":1200,"cached_tokens":80000,"cache_write_tokens":0,"reasoning_tokens":400},"cumulative_usage":{"input_tokens":104000,"output_tokens":1675,"cached_tokens":83600,"cache_write_tokens":400,"reasoning_tokens":600}}
+{"type":"message","id":9,"parent_id":8,"turn_id":5,"role":"system","ts":"...","text":"<posix_runtime>...</posix_runtime>\n\n你是一个安全审计专家..."}
+{"type":"message","id":10,"parent_id":9,"turn_id":6,"role":"user","ts":"...","text":"<checkpoint>\n...\n</checkpoint>"}
 ```
 
-4. **逆读回放算法与尾行损坏处理（Fail-Closed）**：
-   * **逆读到最新大压缩点**：启动加载 `-c <file>` 时，**必须从文件末尾（EOF）向前按行逆读**，使加载复杂度保持 `O(当前活跃窗口)`。
-   * **尾行损坏处理（Fail-Closed）**：逆读首行（文件最后一行）若非合法 UTF-8 JSON，必须立即向 `fd 2` 报错并以退出码 `1` 退出，严禁静默丢弃数据。
-   * **主动折叠自动剪枝（Single-Pass Reverse Fix）**：维护剪枝水位 `skip_ge = +∞`：
-     1. 遇到 `fold` 事件：累加可选 `fold_usage`；压入 `<folded turns="{from_turn}..{to_turn}">{summary}</folded>`，更新 `skip_ge = min(skip_ge, from_turn)`；
-     2. 遇到普通 `message` 或 `runtime_update`：凡 `role: "assistant"` 携带 `usage` 一律累加计入窗口历史消耗；若 `turn_id >= skip_ge` 则跳过丢弃，否则压入结果栈；
-     3. 若保留窗口末尾（或 `skip_ge` 边界前一条）落在带有未闭合 `tool_calls` 的 `assistant` 消息上，继续上调 `skip_ge` 并丢弃之，确保满足 §9.1 不变量 (2)；
-     4. 遇到 `checkpoint` 或 `session_init` 分节头：校验 `ir_version == 1`（不兼容则退出 `2`），提取最新配置与 `session_id`，叠加 `cumulative_usage` 后**立即停止逆读**；
-     5. 将结果栈反转即得按时间正序、无孤立 `tool_call` 的活跃上下文。
+4. **单遍逆读回放算法、分叉校验与尾行损坏处理（Fail-Closed）**：
+   * **尾行损坏处理（Fail-Closed）**：无论是否指定 `--leaf`，逆读首行（文件最后一行）若非合法 UTF-8 JSON，必须立即向 `fd 2` 报错并以退出码 `1` 退出，严禁静默丢弃数据。
+   * **单遍沿链逆读（Tree Mode，`v0.3.0`）**：当文件尾行携带 `id` 时，以 `max_node_id = eof_id`（后续新写入节点从 `max_node_id + 1` 分配），令目标叶节点 `want_id = requested_leaf.unwrap_or(eof_id)`，从 EOF 向前单遍扫描：
+     1. 凡 `event.id != want_id` 的兄弟分支或无关后代节点直接 O(1) 跳过（即使途中遇到其他分支的 `checkpoint` 也不提前终止）；
+     2. 命中 `event.id == want_id` 时校验拓扑序（`parent_id < id`），按类型处理后令 `want_id = event.parent_id`：
+        * 遇到 `fold`：累加 `fold_usage` 与 `pruned_usage` 至分支消耗；压入 `<folded turns="{from_turn}..{to_turn}">{summary}</folded>`；`want_id` 直接跳至其 `parent_id`（自然绕过被折叠子分支）；
+        * 遇到 `message` 或 `runtime_update`：若为 `assistant` 且携带 `usage` 则累加至分支消耗；若存在未闭合 `tool_calls`：
+          * **显式 `--leaf <ID>`**：严禁静默改写调用方指定的分叉点，必须立即报错并以退出码 **`2`** 退出；
+          * **默认续跑（未指定 `--leaf`）**：按崩溃自愈语义弹出该批部分 `tool` 消息并丢弃未闭合 `assistant`，保留其账单 `usage`，且将恢复后的 `head_id` 回退至最后一条存活节点，使后续写入自动从健康祖先干净分叉；
+        * 遇到 `checkpoint` 或 `session_init`：若这是显式 `--leaf <ID>` 直接命中的目标节点本身，必须报错并以退出码 **`2`** 退出（分节头不含 `system` 前缀，不可直接作为对话叶节点）；否则校验 `ir_version == 1`（不兼容退出 `2`），提取分支最新 `config` 与 `session_id`，叠加 `checkpoint.cumulative_usage` 后**立即停止逆读**；
+     3. 若扫至文件头仍未命中 `requested_leaf` → 退出码 **`2`**；若命中叶节点但祖先链断裂缺失 `session_init`/`checkpoint` → 退出码 **`1`**；
+     4. 将结果栈反转即得按时间正序、无孤立 `tool_call` 的活跃分支上下文，`head_id` 设为结果栈末尾存活节点的 `id`，`next_turn_id` 设为当前分支最大 `turn_id + 1`。
+   * **历史线性 WAL 兼容（Legacy Mode）**：当文件尾行缺失 `id` 时，若指定了 `--leaf` 则以退出码 `2` 拒绝；否则沿用 `v0.1`/`v0.2` 的 `skip_ge` 线性单遍逆读与无 `id` 续写，保证历史文件零破坏。
 
 ### 6.3 纯事件驱动等待规范
 
@@ -396,7 +410,7 @@ safe_commands = ["ls", "cat", "head", "tail", "rg", "grep", "find", "pwd", "git 
 | :--- | :--- | :--- |
 | **`0`** | `EX_OK` | 任务正常完成，Payload 已完整刷入 `fd 1`（或 `--inbox` 闲置优雅退出）。 |
 | **`1`** | `GENERAL_ERR` | 通用运行时错误：Provider 网络/协议失败（含 `unsupported_media` / `media_not_found`）、I/O 异常、WAL 损坏、`flock` 锁冲突、未知内部错误。 |
-| **`2`** | `EX_USAGE` | 命令行参数非法、无效 `--trace-fd`、启动期静态校验失败、Frontmatter / `config.toml` 语法或未知字段错误、`ir_version` 不兼容。 |
+| **`2`** | `EX_USAGE` | 命令行参数非法、无效 `--trace-fd`、无效 `--leaf`（无 `-c`/节点缺失/旧线性格式/分节头/未闭合工具调用）、启动期静态校验失败、Frontmatter / `config.toml` 语法或未知字段错误、`ir_version` 不兼容。 |
 | **`75`** | `EX_TEMPFAIL` | **挂起 / 待外部介入（取代 `v0.0` `42`）**：无 TTY 环境下触发 `approval=ask` 拦截、`approval=deny` 叠加 `--fail-on-deny`、`[approval].bin` 异常或超时 Fail-Closed、项目级外部执行（`hooks/`、`[approval].bin`、`[vision].bin`、`[compact].bin`、`providers.<name>.bin`）未经 `anix trust` 校验或 SHA-256 变更。具体原因**必须（MUST）**通过 `fd 2` 诊断与结构化 Trace 输出。 |
 | **`124`** | `EX_TIMEOUT` | 预算或超时熔断：达到 `max_turns`、超出 `max_tokens` 硬上限，或 Provider 调用超时。注：单条 Shell 子命令返回 `124` 时不终止 `anix` 主进程（作为 `is_error: true` 工具结果返回模型）。 |
 | **`128+N`** | `SIGNAL` | 被信号 `N` 终止（如 `130` 对应 `SIGINT`，`143` 对应 `SIGTERM`）。 |
@@ -620,7 +634,7 @@ Provider 驱动通过标准 `stdin`/`stdout` JSONL 与 `anix` 通信。默认采
 
 * **`pre-context.d/`**：`stdin` 接收 Canonical IR JSONL 流，`stdout` 输出修改后的 Canonical IR JSONL 流（钩子可直接追加或改写 `role: "system"` / 其他消息行）。退出码 `0` 表示继续，非零退出则中止整个 `anix` 进程（透传报错至 `fd 2` 并退出 `1`）。
 * **`post-tool.d/`**：`stdin` 接收 `{"turn_id":3,"tool_call_id":"call_1","cmd":"...","exit_code":0,"output":"..."}`，`stdout` 输出修改/脱敏后的同构 JSON；非零退出中止执行。
-* **`on-exit.d/`**：进程退出前触发，`stdin` 接收 `{"exit_code":0,"turns":4,"usage":{...},"session_usage":{...},"context":{"tokens":42100,"max_tokens":128000},"context_file":"..."}`，单钩子默认超时 `5s`，失败仅记录至 Trace 不覆盖主进程退出码。
+* **`on-exit.d/`**：进程退出前触发，`stdin` 接收 `{"exit_code":0,"turns":4,"usage":{...},"session_usage":{...},"context":{"tokens":42100,"max_tokens":128000},"context_file":"...","leaf_id":10}`（`leaf_id` 为 `v0.3.0` 可选字段，无状态或旧线性 WAL 时省略），单钩子默认超时 `5s`，失败仅记录至 Trace 不覆盖主进程退出码。
 
 ### 9.4 结构化 Trace 线协议（`--trace-fd=<N>` / `ANIX_TRACE_FD=<N>` / `journal.sock`）
 
@@ -634,15 +648,16 @@ Provider 驱动通过标准 `stdin`/`stdout` JSONL 与 `anix` 通信。默认采
    ```
 3. **三级存储粒度（`ANIX_TRACE_LEVEL`）**：
    * `events`（`journal.sock` 推荐默认）：记录完整嵌套生命周期事件（`run_start`、`cycle_start`、`llm_request_start`、`llm_response`、`provider_error`、`tool_approval`、`tool_start`、`tool_end`、`bg_job_started`、`bg_job_finished`、`compact`、`fold`、`cycle_end`、`idle`、`warning`、`error`、`run_end`）：
-     * `run_start`：携带 `session_id`（`v0.1.1`）、`provider`、`model`、`shell`（`v0.2.0`）、`output`（`v0.2.0`）、`vision`、`fresh_session` 与 `inbox_mode`；
+     * `run_start`：携带 `session_id`（`v0.1.1`）、`provider`、`model`、`shell`（`v0.2.0`）、`output`（`v0.2.0`）、`vision`、`fresh_session`、`inbox_mode` 与可选 `leaf_id`（`v0.3.0`，恢复/分叉起点节点 ID）；
      * `cycle_start`：每次进入推理循环前发出（单次模式与 `--inbox` 模式同构），携带 `cycle_id`（从 `1` 单调递增）、`source`（初始输入为 `"initial"`，Inbox 消息为文件名 `<name>`）与 `start_turn_id`；
-     * `cycle_end`：作为**严格提交屏障**，在该次推理循环结束、WAL 已原子落盘且 `--inbox` 消息已移入 `done/` **之后**发出，携带 `cycle_id`、`source`、`reason`（`"completed"` | `"max_turns"` | `"max_tokens"` | `"approval_blocked"` | `"provider_error"` | `"error"` | `"interrupted"`）、`exit_code`、`turns`、`cycle_usage`、`usage`、`session_usage` 与 `context` 水位对象；
+     * `cycle_end`：作为**严格提交屏障**，在该次推理循环结束、WAL 已原子落盘且 `--inbox` 消息已移入 `done/` **之后**发出，携带 `cycle_id`、`source`、`reason`（`"completed"` | `"max_turns"` | `"max_tokens"` | `"approval_blocked"` | `"provider_error"` | `"error"` | `"interrupted"`）、`exit_code`、`turns`、`cycle_usage`、`usage`、`session_usage`、`context` 水位对象与可选 `leaf_id`（`v0.3.0`，本次循环提交后的最新叶节点 ID）；
      * `idle`：仅 `--inbox` 模式在 `new/` 队列排空、进入事件阻塞待命时发出一次（携带 `idle_timeout_sec`），直至新消息到达前不重复发出；
      * `llm_response` 携带当轮 5 字段 `usage`；
      * `tool_approval` 携带 `decider`（`"builtin"` | `"external"`）与可选 `decider_exit_code`（仅 `external` 时存在）；
      * `bg_job_started` / `bg_job_finished`（`v0.1.2`）：`bg_job_started` 携带 `job_id`、`pid`、`pgid`、`cmd`、`log_path`、`exit_file`；`bg_job_finished` 携带 `job_id`、`pid`、`pgid`、`exit_code`（外部强杀缺失 `.exit` 时为 `null`）、`log_path` 与 `elapsed_ms`；
-     * `fold` 在自动摘要折叠时携带可选 `fold_usage`（5 字段对象）；
-     * `run_end` 携带 `exit_code`、`turns`、`usage`、`session_usage` 与 `context` 水位对象；
+     * `compact` 携带 `reason`、`checkpoint_turn`、`summary_bytes`、可选 `compact_usage`/`cumulative_usage` 与树模式下可选 `checkpoint_node_id`/`leaf_id`（`v0.3.0`）；
+     * `fold` 携带 `from_turn`、`to_turn`、`summary`、可选 `fold_usage`（5 字段对象）与树模式下可选 `node_id`/`parent_id`（`v0.3.0`）；
+     * `run_end` 携带 `exit_code`、`turns`、`usage`、`session_usage`、`context` 水位对象与可选 `leaf_id`（`v0.3.0`，退出时最新提交叶节点 ID）；
      * 发生网络断连或重试时，`provider_error` 必须立刻落盘并附带 `code`、`attempt`、`elapsed_ms`、`provider_stderr` 及断连前已收到的 `partial_text`/`partial_reasoning` 与 `last_delta_ts`。
    * `deltas`（显式 `--trace-fd` 推荐默认）：在 `events` 基础上追加每一帧流式 `reasoning_delta` / `text_delta`。
    * `wire`（显式排障开启）：额外落盘完整 Canonical IR 输入、Provider 原始输出帧与 Shell 原始输出；**严禁发往共享的 `journal.sock`**，仅允许写入权限为 `0600` 的独立排障文件。
@@ -669,3 +684,4 @@ Provider 驱动通过标准 `stdin`/`stdout` JSONL 与 `anix` 通信。默认采
 | 按需超时与后台任务帧（`v0.1.2`） | §7.1, §7.2, §8.2, §9.4 | `timeout_sec`/`kill_on_timeout`、`max_msh_timeout_sec`、`$ANIX_CTL` `bg_job` 帧、`<runtime_update>` 完成通知 | `120s` / 上限 `600s` | 不适用 | 线格式兼容（参考 Shell 默认超时改为转后台） |
 | 三轴正交输出契约（`v0.2.0`） | §3.1, §3.3, §3.4, §4.1, §4.3, §4.4, §6.2, §8.2, §9.1, §9.4 | `shell: <bin> \| none`、`output: reply \| explicit \| none`（`-o`/`ANIX_OUTPUT`）、启动 Fail-Fast（exit 2）、显式关闭 `fd 4` | `output = reply` | 不适用 | **默认输出契约升级（旧 WAL 回退按 `explicit`）** |
 | 规范与运行底座分层（`v0.2.0`） | §1.3, §2 | `RFC.md` 收口为纯 Core 规范，参考组件（`msh`/`a*`/`anix-provider`/`skills`/`tips`/打包）拆出至 [RUNTIME.md](RUNTIME.md)，上层壳与生态独立分仓 | 四层架构 | 不适用 | 文档结构收口 |
+| 树状 WAL 原语（`v0.3.0`） | §3.1, §3.4, §6.2, §6.5, §9.3, §9.4 | WAL 事件新增可选 `id`/`parent_id` 与 `fold.pruned_usage`；`fold` 统一为祖先分支摘要；新增 `--leaf <ID>` / `ANIX_LEAF`；Trace 与 `on-exit.d/` 暴露 `leaf_id` | 缺省沿用文件尾节点 | 不适用 | 向后兼容（旧线性 WAL 自动回退线性模式） |

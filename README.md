@@ -1,6 +1,6 @@
 # Anix (POSIX-Native Agent Core & Runtime)
 
-POSIX-native Agent kernel and reference runtime (`ir_version = 1`, Core spec `v0.2.0-rfc` in [docs/RFC.md](docs/RFC.md), Reference Runtime guide in [docs/RUNTIME.md](docs/RUNTIME.md)) built in Rust as independent static binaries with zero external runtime dependencies.
+POSIX-native Agent kernel and reference runtime (`ir_version = 1`, Core spec `v0.3.0-rfc` in [docs/RFC.md](docs/RFC.md), Reference Runtime guide in [docs/RUNTIME.md](docs/RUNTIME.md)) built in Rust as independent static binaries with zero external runtime dependencies.
 
 ## Layered Architecture
 
