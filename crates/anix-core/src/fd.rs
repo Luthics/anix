@@ -1,28 +1,27 @@
 //! External FD 0/1/2/4..9 contract, `fd 2` newline tracking, `FD_CLOEXEC` hygiene,
-//! anonymous pipe relays (`fd 4/5/6` for `$ANIX_OUT`, `$ANIX_ERR`, `$ANIX_CTL`),
-//! pure event-driven `msh` wait, and Maildir `--inbox` / `--idle-timeout` queue (v1.1 §§4 & 6.3).
+//! anonymous pipe relays (`$ANIX_OUT`, `$ANIX_ERR`, `$ANIX_CTL`), and pure event-driven
+//! shell executor spawning (RFC §§3.4, 4.1, 4.2 & 6.1).
 
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{self, Read, Write};
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const PIPE_DRAIN_AFTER_EXIT: Duration = Duration::from_millis(200);
-
 use anix_proto::ctl::{CtlFrame, MAX_CTL_FRAME_BYTES};
 use anix_proto::exit_code::ExitCode;
-use anix_proto::ir::ApprovalMode;
 
-use crate::platform::{self, ChildWaitOutcome, DirWatcher, PreparedSandbox, posix};
+use crate::platform::{self, ChildWaitOutcome, PreparedSandbox, posix};
 use crate::signal::SignalState;
 
-/// Tracks the trailing byte written to `fd 2` (`stderr`) to enforce the v1.1 §4.1
+const PIPE_DRAIN_AFTER_EXIT: Duration = Duration::from_millis(200);
+
+/// Tracks the trailing byte written to `fd 2` (`stderr`) to enforce the
 /// deterministic newline contract without ever touching `fd 1` (`stdout`).
 #[derive(Debug, Clone, Default)]
 pub struct StderrTracker {
@@ -34,14 +33,12 @@ impl StderrTracker {
         Self::default()
     }
 
-    /// Record raw bytes just written to `fd 2`.
     pub fn note_bytes(&self, bytes: &[u8]) {
         if let Some(&last) = bytes.last() {
             self.needs_newline.store(last != b'\n', Ordering::SeqCst);
         }
     }
 
-    /// If the last byte written to `fd 2` was not `\n`, emit a `\n` now.
     pub fn ensure_newline(&self) {
         if self.needs_newline.swap(false, Ordering::SeqCst) {
             let mut err = io::stderr().lock();
@@ -50,7 +47,6 @@ impl StderrTracker {
         }
     }
 
-    /// Emit a complete diagnostic line to `fd 2`, ensuring a clean leading line break first.
     pub fn writeln_line(&self, line: &str) {
         self.ensure_newline();
         let mut err = io::stderr().lock();
@@ -59,8 +55,6 @@ impl StderrTracker {
         self.needs_newline.store(false, Ordering::SeqCst);
     }
 
-    /// Emit a complete line wrapped in ANSI Dim (`\x1b[2m...\x1b[0m\n`) when `isatty(2)` is true,
-    /// strictly resetting ANSI style BEFORE `\n` (v1.1 §4.1).
     pub fn writeln_dim_if_tty(&self, line: &str) {
         self.ensure_newline();
         let mut err = io::stderr().lock();
@@ -75,7 +69,7 @@ impl StderrTracker {
 }
 
 /// Drain and immediately close any inherited readable static multi-input FDs (`fd 4..=9`),
-/// skipping `skip_fd` if `--trace-fd=<N>` claimed a descriptor in that range (v1.1 §4.1).
+/// skipping `skip_fd` if `--trace-fd=<N>` claimed a descriptor in that range.
 pub fn drain_inherited_extra_fds(skip_fd: Option<RawFd>) -> Vec<(RawFd, String)> {
     let mut extras = Vec::new();
     for fd in 4..=9 {
@@ -94,8 +88,7 @@ pub fn drain_inherited_extra_fds(skip_fd: Option<RawFd>) -> Vec<(RawFd, String)>
     extras
 }
 
-/// Assemble initial user input from `<SCRIPT_ARGS>`, `fd 0` (`stdin`), and pre-drained `fd 4..=9`
-/// per Section 4.1.
+/// Assemble initial user input from `<SCRIPT_ARGS>`, `fd 0` (`stdin`), and pre-drained `fd 4..=9`.
 pub fn assemble_initial_inputs(
     script_args: &[String],
     extra_fds: &[(RawFd, String)],
@@ -108,8 +101,6 @@ pub fn assemble_initial_inputs(
         sections.push(script_args.join(" "));
     }
 
-    // Section 4.1: If `isatty(0)` is true AND `<SCRIPT_ARGS>` were provided (or `--inbox` startup),
-    // NEVER block waiting for stdin EOF.
     let is_tty_stdin = posix::isatty(0);
     let should_read_stdin = !(is_tty_stdin && (!script_args.is_empty() || skip_tty_stdin));
     if should_read_stdin {
@@ -127,7 +118,7 @@ pub fn assemble_initial_inputs(
     Ok(sections.join("\n\n"))
 }
 
-fn read_fd_interruptible(fd: RawFd, signals: &SignalState) -> io::Result<Vec<u8>> {
+pub(crate) fn read_fd_interruptible(fd: RawFd, signals: &SignalState) -> io::Result<Vec<u8>> {
     let mut out = Vec::new();
     let mut buf = [0u8; 8192];
     loop {
@@ -162,34 +153,36 @@ fn read_fd_interruptible(fd: RawFd, signals: &SignalState) -> io::Result<Vec<u8>
     Ok(out)
 }
 
-/// Output captured from a single `msh -c "<cmd>"` invocation.
+/// Output captured from a single shell invocation (`<program> <prefix_args...> -c "<cmd>"`).
 #[derive(Debug)]
-pub struct MshOutput {
+pub struct ShellOutput {
     pub stdout: String,
     pub exit_code: i32,
+    pub anix_out_bytes: Vec<u8>,
     pub ctl_frames: Vec<CtlFrame>,
     pub ctl_warnings: Vec<String>,
     pub interrupted_by: Option<ExitCode>,
 }
 
-/// Spawn `msh -c <cmd>` with anonymous pipe relays for `fd 4` (`$ANIX_OUT` -> external `fd 1`),
-/// `fd 5` (`$ANIX_ERR` -> external `fd 2`), and `fd 6` (`$ANIX_CTL` -> JSONL control frames),
-/// waiting purely via kernel events (`pidfd`/`kqueue`, zero polling).
+/// Spawn `<shell_bin> <shell_prefix_args...> -c <cmd>` with anonymous pipe relays for
+/// `$ANIX_OUT` (when `mount_anix_out`), `$ANIX_ERR`, `$ANIX_CTL`, active `$ANIX_INBOX`
+/// injection (when running in `--inbox` mode), and pure event-driven wait (`pidfd`/`kqueue`).
 #[allow(clippy::too_many_arguments)]
-pub fn run_msh_command(
+pub fn run_shell_command(
     shell_bin: &Path,
+    shell_prefix_args: &[String],
     tools_dir: &Path,
     cmd_str: &str,
+    tool_args_json: &str,
     cwd: &Path,
-    msh_timeout_sec: u64,
-    msh_kill_on_timeout: bool,
-    jobs_dir: &Path,
+    exec_timeout_sec: Option<u64>,
+    exec_kill_on_timeout: Option<bool>,
+    parent_inbox: Option<&Path>,
     mount_anix_out: bool,
-    approval: ApprovalMode,
     sandbox: Option<&PreparedSandbox>,
     signals: &SignalState,
     stderr_tracker: &StderrTracker,
-) -> io::Result<MshOutput> {
+) -> io::Result<ShellOutput> {
     let out_pipe = if mount_anix_out {
         Some(posix::create_pipe_cloexec()?)
     } else {
@@ -210,18 +203,17 @@ pub fn run_msh_command(
     let mut err_reader = unsafe { File::from_raw_fd(err_r) };
     let mut ctl_reader = unsafe { File::from_raw_fd(ctl_r) };
 
-    // Disable stdout/stderr relay once this tool turn finishes its bounded drain so a command
-    // that yielded to background can never asynchronously corrupt a later turn's fd 1 / fd 2.
     let relay_active = Arc::new(AtomicBool::new(true));
 
-    // Relay `$ANIX_OUT` raw bytes -> external `fd 1` (stdout) ONLY when `output == explicit`.
     let (out_w_opt, out_done_rx) = if let Some((out_r, out_w)) = out_pipe {
         // SAFETY: `out_r` is exclusively owned by this relay thread.
         let mut out_reader = unsafe { File::from_raw_fd(out_r) };
-        let (out_done_tx, rx) = mpsc::channel::<()>();
+        let (out_done_tx, rx) = mpsc::channel::<Vec<u8>>();
         let out_active = Arc::clone(&relay_active);
         thread::spawn(move || {
+            const MAX_CAPTURED_ANIX_OUT: usize = 1024 * 1024;
             let mut buf = [0u8; 8192];
+            let mut captured = Vec::new();
             loop {
                 match out_reader.read(&mut buf) {
                     Ok(0) => break,
@@ -230,20 +222,23 @@ pub fn run_msh_command(
                             let mut stdout = io::stdout().lock();
                             let _ = stdout.write_all(&buf[..n]);
                             let _ = stdout.flush();
+                            if captured.len() < MAX_CAPTURED_ANIX_OUT {
+                                let take = n.min(MAX_CAPTURED_ANIX_OUT - captured.len());
+                                captured.extend_from_slice(&buf[..take]);
+                            }
                         }
                     }
                     Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
                     Err(_) => break,
                 }
             }
-            let _ = out_done_tx.send(());
+            let _ = out_done_tx.send(captured);
         });
         (Some(out_w), Some(rx))
     } else {
         (None, None)
     };
 
-    // Relay `$ANIX_ERR` raw bytes -> external `fd 2` (stderr) while tracking trailing newline.
     let (err_done_tx, err_done_rx) = mpsc::channel::<()>();
     let err_tracker = stderr_tracker.clone();
     let err_active = Arc::clone(&relay_active);
@@ -272,13 +267,12 @@ pub fn run_msh_command(
         let _ = err_done_tx.send(());
     });
 
-    // Collect `$ANIX_CTL` chunks over a channel so detached grandchildren can never deadlock.
     let (ctl_tx, ctl_rx) = mpsc::channel::<Vec<u8>>();
     thread::spawn(move || {
         pump_reader_to_channel(&mut ctl_reader, &ctl_tx);
     });
 
-    // Build child PATH with `~/.local/libexec/anix/tools/` prepended (Section 2).
+    // Prepend private tools dir (`~/.local/libexec/anix/tools`) to child PATH (RFC §2).
     let existing_path = std::env::var_os("PATH").unwrap_or_default();
     let mut path_entries = vec![tools_dir.to_path_buf()];
     path_entries.extend(std::env::split_paths(&existing_path));
@@ -287,14 +281,9 @@ pub fn run_msh_command(
     let parent_pid = unsafe { libc::getpid() };
     let sandbox_cloned = sandbox.cloned();
 
-    let approval_str = match approval {
-        ApprovalMode::Ask => "ask",
-        ApprovalMode::Auto => "auto",
-        ApprovalMode::Deny => "deny",
-    };
-
     let mut command = Command::new(shell_bin);
     command
+        .args(shell_prefix_args)
         .arg("-c")
         .arg(cmd_str)
         .current_dir(cwd)
@@ -302,9 +291,8 @@ pub fn run_msh_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    // Section 3.4: Clear ALL `ANIX_*` environment variables (including `ANIX_VISION` &
-    // `ANIX_TRACE_FD`) before spawning `msh`, keeping ONLY `ANIX_LOG` & `ANIX_TRACE_LEVEL`,
-    // then actively inject resolved `ANIX_APPROVAL` and side-channel vars.
+    // RFC §3.4: Clear ALL `ANIX_*` environment variables except `ANIX_LOG` & `ANIX_TRACE_LEVEL`,
+    // then actively inject only the authoritative runtime channels.
     for (key, _) in std::env::vars_os() {
         let key_str = key.to_string_lossy();
         if key_str.starts_with("ANIX_") && key_str != "ANIX_LOG" && key_str != "ANIX_TRACE_LEVEL" {
@@ -314,23 +302,26 @@ pub fn run_msh_command(
 
     command
         .env("PATH", new_path)
-        .env("ANIX_APPROVAL", approval_str)
         .env("ANIX_ERR", "/dev/fd/5")
         .env("ANIX_CTL", "/dev/fd/6")
-        .env("MSH_TIMEOUT_SEC", msh_timeout_sec.to_string())
-        .env(
-            "MSH_KILL_ON_TIMEOUT",
-            if msh_kill_on_timeout { "1" } else { "0" },
-        )
-        .env("MSH_JOBS_DIR", jobs_dir);
+        .env("ANIX_TOOL_ARGS", tool_args_json);
     if mount_anix_out {
         command.env("ANIX_OUT", "/dev/fd/4");
     } else {
         command.env_remove("ANIX_OUT");
     }
+    if let Some(inbox_dir) = parent_inbox {
+        command.env("ANIX_INBOX", inbox_dir);
+    }
+    if let Some(t) = exec_timeout_sec {
+        command.env("ANIX_EXEC_TIMEOUT_SEC", t.to_string());
+    }
+    if let Some(k) = exec_kill_on_timeout {
+        command.env("ANIX_EXEC_KILL_ON_TIMEOUT", if k { "1" } else { "0" });
+    }
 
-    // SAFETY: `pre_exec` uses only async-signal-safe syscalls to isolate PGID, bind FDs (closing
-    // `fd 4` when `output != explicit`), set Linux `PR_SET_PDEATHSIG`, and apply Landlock rules.
+    // SAFETY: `pre_exec` invokes only async-signal-safe syscalls to isolate PGID, bind FDs,
+    // set Linux `PR_SET_PDEATHSIG`, and apply Landlock rules.
     unsafe {
         command.pre_exec(move || {
             if libc::setpgid(0, 0) == -1 {
@@ -354,8 +345,6 @@ pub fn run_msh_command(
             if let Some(to) = tmp_out {
                 dup2_inheritable(to, 4)?;
             } else {
-                // v1.2.0 §4.3: Explicitly close `fd 4` when `$ANIX_OUT` is not mounted so no
-                // inherited descriptor can ever leak into child commands.
                 let _ = libc::close(4);
             }
             dup2_inheritable(tmp_err, 5)?;
@@ -416,7 +405,6 @@ pub fn run_msh_command(
     let mut ctl_bytes = Vec::new();
     let mut interrupted_by = None;
 
-    // Pure event-driven child wait (v1.1 §6.3): blocks in `pidfd`/`kqueue` with zero polling.
     let status = loop {
         if let Some(sig_exit) = signals.termination_exit_code() {
             interrupted_by = Some(sig_exit);
@@ -435,9 +423,10 @@ pub fn run_msh_command(
     signals.clear_active_child_pgid();
 
     if let Some(sig_exit) = interrupted_by {
-        return Ok(MshOutput {
+        return Ok(ShellOutput {
             stdout: String::new(),
             exit_code: sig_exit.as_i32(),
+            anix_out_bytes: Vec::new(),
             ctl_frames: Vec::new(),
             ctl_warnings: Vec::new(),
             interrupted_by: Some(sig_exit),
@@ -448,9 +437,12 @@ pub fn run_msh_command(
     drain_channel_until(&stdout_rx, &mut stdout_bytes, drain_deadline);
     drain_channel_until(&stderr_rx, &mut stderr_bytes, drain_deadline);
     drain_channel_until(&ctl_rx, &mut ctl_bytes, drain_deadline);
-    if let Some(ref rx) = out_done_rx {
-        let _ = rx.recv_timeout(drain_deadline.saturating_duration_since(Instant::now()));
-    }
+    let anix_out_bytes = if let Some(ref rx) = out_done_rx {
+        rx.recv_timeout(drain_deadline.saturating_duration_since(Instant::now()))
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     let _ = err_done_rx.recv_timeout(drain_deadline.saturating_duration_since(Instant::now()));
     relay_active.store(false, Ordering::SeqCst);
 
@@ -473,9 +465,10 @@ pub fn run_msh_command(
         ExitCode::RuntimeError.as_i32()
     };
 
-    Ok(MshOutput {
+    Ok(ShellOutput {
         stdout: combined,
         exit_code,
+        anix_out_bytes,
         ctl_frames,
         ctl_warnings,
         interrupted_by,
@@ -575,146 +568,4 @@ fn parse_ctl_frames(raw: &[u8]) -> (Vec<CtlFrame>, Vec<String>) {
     }
 
     (frames, warnings)
-}
-
-/// An atomic message claimed from `<inbox>/new/<name>` into `<inbox>/cur/<name>` (Section 4.2).
-#[derive(Debug, Clone)]
-pub struct InboxMessage {
-    pub name: String,
-    pub cur_path: PathBuf,
-    pub formatted_input: String,
-}
-
-/// Maildir-style atomic directory queue (`tmp/`, `new/`, `cur/`, `done/`, mode `0700`)
-/// watched via pure event-driven Linux `inotify+epoll` / macOS `kqueue` (v1.1 §§4.2 & 6.3).
-#[derive(Debug)]
-pub struct InboxQueue {
-    new_dir: PathBuf,
-    cur_dir: PathBuf,
-    done_dir: PathBuf,
-    watcher: Option<DirWatcher>,
-}
-
-impl InboxQueue {
-    /// Ensure `<dir>` and `tmp/`, `new/`, `cur/`, `done/` exist with mode `0700` and attach watcher.
-    pub fn open(dir: &Path, sig_fd: Option<RawFd>) -> io::Result<Self> {
-        let tmp_dir = dir.join("tmp");
-        let new_dir = dir.join("new");
-        let cur_dir = dir.join("cur");
-        let done_dir = dir.join("done");
-
-        posix::ensure_dir_mode(dir, 0o700)?;
-        posix::ensure_dir_mode(&tmp_dir, 0o700)?;
-        posix::ensure_dir_mode(&new_dir, 0o700)?;
-        posix::ensure_dir_mode(&cur_dir, 0o700)?;
-        posix::ensure_dir_mode(&done_dir, 0o700)?;
-
-        let watcher = DirWatcher::watch(&new_dir, sig_fd).ok();
-        Ok(Self {
-            new_dir,
-            cur_dir,
-            done_dir,
-            watcher,
-        })
-    }
-
-    /// Wait for the next ASCII-sorted message in `new/`, atomically rename it to `cur/`,
-    /// and return its wrapped payload. Invokes `on_idle` ONCE when `new/` is drained empty
-    /// before entering pure event-driven wait with exact remaining timeout (v1.1 §§4.2, 6.3, 9.5).
-    pub fn next_message(
-        &mut self,
-        idle_timeout: Option<Duration>,
-        signals: &SignalState,
-        on_snapshot: &mut impl FnMut(),
-        on_idle: &mut impl FnMut(),
-    ) -> io::Result<Option<InboxMessage>> {
-        let idle_start = Instant::now();
-        let mut emitted_idle = false;
-
-        loop {
-            if signals.termination_exit_code().is_some() {
-                return Ok(None);
-            }
-            if signals.take_snapshot_request() {
-                on_snapshot();
-            }
-
-            if let Some(msg) = self.try_claim_next()? {
-                return Ok(Some(msg));
-            }
-
-            if let Some(limit) = idle_timeout
-                && idle_start.elapsed() >= limit
-            {
-                return Ok(None);
-            }
-
-            if !emitted_idle {
-                on_idle();
-                emitted_idle = true;
-            }
-
-            // Exact remaining timeout (`None` = infinite block, 0 wakeups/sec; v1.1 §6.3).
-            let remaining = idle_timeout.map(|limit| limit.saturating_sub(idle_start.elapsed()));
-            if remaining.is_some_and(|d| d.is_zero()) {
-                return Ok(None);
-            }
-
-            if let Some(ref watcher) = self.watcher {
-                let _ = watcher.wait(remaining);
-                signals.drain_wakeup();
-            } else {
-                // Rare fallback only if kernel directory watcher initialization failed.
-                let fallback = remaining.unwrap_or(Duration::from_secs(1));
-                let _ = posix::sleep_or_signal(fallback, signals.wakeup_fd());
-                signals.drain_wakeup();
-            }
-        }
-    }
-
-    /// Move a completed message atomically from `cur/<name>` to `done/<name>`.
-    pub fn mark_done(&self, msg: &InboxMessage) -> io::Result<()> {
-        let dest = self.done_dir.join(&msg.name);
-        fs::rename(&msg.cur_path, dest)
-    }
-
-    fn try_claim_next(&self) -> io::Result<Option<InboxMessage>> {
-        let mut names: Vec<String> = Vec::new();
-        for entry in fs::read_dir(&self.new_dir)? {
-            let Ok(entry) = entry else { continue };
-            let Ok(ft) = entry.file_type() else { continue };
-            if !ft.is_file() {
-                continue;
-            }
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') {
-                continue;
-            }
-            names.push(name);
-        }
-
-        // Strict ASCII lexicographical order (Section 4.2.3).
-        names.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
-
-        for name in names {
-            let src = self.new_dir.join(&name);
-            let cur = self.cur_dir.join(&name);
-            match fs::rename(&src, &cur) {
-                Ok(()) => {
-                    let bytes = fs::read(&cur)?;
-                    let body = String::from_utf8_lossy(&bytes);
-                    let formatted_input = format!("<input source=\"{name}\">\n{body}\n</input>");
-                    return Ok(Some(InboxMessage {
-                        name,
-                        cur_path: cur,
-                        formatted_input,
-                    }));
-                }
-                Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
-                Err(err) => return Err(err),
-            }
-        }
-
-        Ok(None)
-    }
 }

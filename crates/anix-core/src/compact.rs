@@ -1,6 +1,6 @@
 //! Token budget tracking, auto-compaction trigger, `aclr -t <N>` auto-summary tail folding,
 //! and `[compact]` strategy resolution (external `[compact].bin` vs built-in Provider summarizer)
-//! (v1.1 Section 6.1).
+//! (RFC §5.1).
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -22,8 +22,8 @@ use crate::hooks::{self, HookError};
 use crate::platform::{self, ChildWaitOutcome, posix};
 use crate::provider::{self, ProviderError, ProviderPool};
 use crate::signal::SignalState;
+use crate::strict_modes::{self, StrictModeError};
 use crate::trace::Tracer;
-use crate::trust::{self, TrustError};
 use crate::wal::{ActiveEntry, WalError, WalStore};
 
 const DEFAULT_COMPACT_PROMPT: &str = "\
@@ -35,7 +35,7 @@ Summarize ONLY this folded tail segment concisely and factually so earlier turns
 #[derive(Debug, Error)]
 pub enum CompactError {
     #[error(transparent)]
-    Trust(#[from] TrustError),
+    StrictMode(#[from] StrictModeError),
     #[error(transparent)]
     Provider(#[from] ProviderError),
     #[error(transparent)]
@@ -49,7 +49,7 @@ pub enum CompactError {
 impl CompactError {
     pub fn exit_code(&self) -> ExitCode {
         match self {
-            Self::Trust(_) => ExitCode::TempFail,
+            Self::StrictMode(e) => e.exit_code(),
             Self::Provider(e) => e.exit_code(),
             Self::Hook(e) => e.exit_code(),
             Self::Wal(e) => e.exit_code(),
@@ -58,14 +58,7 @@ impl CompactError {
     }
 }
 
-/// Compute current effective context watermark `T_cur` per Section 6.1.2:
-///
-/// 1. Locate the last surviving `role: "assistant"` message in `messages` carrying `usage`.
-/// 2. If found: `usage.input_tokens + usage.output_tokens + ceil(bytes_after_it / 3)`.
-/// 3. Otherwise (fresh session or right after `checkpoint` with no surviving assistant yet):
-///    `ceil(total_window_bytes / 3)`.
-///
-/// Built-in compactor / auto-fold summarizer usage is NEVER included in `T_cur`.
+/// Compute current effective context watermark `T_cur` per RFC §5.1.
 pub fn estimate_context_tokens(
     messages: &[IrMessage],
     assistant_usages: &BTreeMap<u64, TokenUsage>,
@@ -110,9 +103,8 @@ pub struct CompactionOutcome {
     pub cumulative_usage: TokenUsage,
 }
 
-/// Execute full compaction (auto-compact, `aclr -s`, or `SIGUSR1`), refresh frozen
-/// `role: "system"` via `pre-context.d/`, and append a WAL `checkpoint` section with
-/// `compact_usage` and prefix-sum `cumulative_usage` (Section 6.1 & 6.2).
+/// Execute full compaction (auto-compact, `aclr -s`, `SIGUSR1`, or `Anix-Control: compact`),
+/// refresh frozen `role: "system"` via `pre-context.d/`, and append a WAL `checkpoint` section.
 #[allow(clippy::too_many_arguments)]
 pub fn run_full_compaction(
     cfg: &ResolvedConfig,
@@ -167,14 +159,13 @@ pub fn run_full_compaction(
         cumulative_usage.add_assign(cu);
     }
 
-    // Refresh frozen `role: "system"` prefix by re-running `pre-context.d/` (Section 6.2.2).
     let checkpoint_turn = next_turn_id;
     let seed_ir = IrStream {
         header: IrHeader {
             ir_version: IR_VERSION,
             record_type: HeaderTag::Header,
             tools: if cfg.shell_enabled() {
-                vec![IrStream::msh_tool_def()]
+                vec![IrStream::shell_tool_def(&cfg.tool_name)]
             } else {
                 Vec::new()
             },
@@ -193,12 +184,13 @@ pub fn run_full_compaction(
     };
     let refreshed_ir = hooks::run_pre_context(
         seed_ir,
-        &cfg.paths,
+        &cfg.hooks_dir,
+        &cfg.paths.cwd,
         cfg.output,
         cfg.shell_enabled(),
         cfg.stderr,
-        cfg.vision,
-        cfg.vision_bridge.bin.is_some(),
+        &cfg.tool_name,
+        cfg.inbox.is_some(),
     )?;
     let fresh_system_text = refreshed_ir
         .messages
@@ -243,9 +235,8 @@ pub fn run_full_compaction(
         config: WalConfigSnapshot {
             output: Some(cfg.output),
             shell: Some(cfg.shell.clone()),
+            tool_name: Some(cfg.tool_name.clone()),
             stderr: Some(cfg.stderr),
-            approval: Some(cfg.approval),
-            vision: Some(cfg.vision),
         },
         compact_usage: normalized_compact,
         cumulative_usage: Some(normalized_cumulative),
@@ -301,8 +292,7 @@ pub fn run_full_compaction(
     })
 }
 
-/// Auto-summarize ONLY the aligned tail sub-window `from_turn..=current_turn` for `aclr -t <N>`
-/// (omitted summary) using `[compact]` precedence without touching frozen prefix turns (v1.1 §6.1).
+/// Auto-summarize ONLY the aligned tail sub-window `from_turn..=current_turn` for `aclr -t <N>`.
 pub fn summarize_tail_fold(
     cfg: &ResolvedConfig,
     session_id: &str,
@@ -374,16 +364,8 @@ fn run_external_compactor(
     compact_ir: &IrStream,
     signals: &SignalState,
 ) -> Result<String, CompactError> {
-    let base_dir = cfg
-        .paths
-        .project_agent_dir
-        .as_deref()
-        .and_then(|d| d.parent());
-    let bin_path = cfg.paths.resolve_component_bin(bin_spec, base_dir);
-
-    if cfg.compact.bin_from_project {
-        trust::verify_trusted(&bin_path, &cfg.paths)?;
-    }
+    let bin_path = cfg.paths.resolve_component_bin(bin_spec);
+    strict_modes::verify_file(&bin_path)?;
 
     let ir_jsonl = compact_ir
         .to_jsonl()
@@ -485,7 +467,6 @@ fn run_builtin_compactor(
     })?;
     let model = cfg.compact.model.as_deref().unwrap_or(&cfg.model);
 
-    // Clear provider_opaque if compacting through a different provider (Section 9.1 / 9.2).
     if provider_name != cfg.provider {
         for msg in &mut compact_ir.messages {
             if let IrMessage::Assistant {

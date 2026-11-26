@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use anix_proto::ir::{ApprovalMode, OutputMode, StderrMode};
+use anix_proto::ir::{OutputMode, StderrMode};
 use serde_json::Value as JsonValue;
 use serde_yaml_ng::Value as YamlValue;
 use thiserror::Error;
@@ -76,13 +76,12 @@ pub struct AgentFrontmatter {
     pub name: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
-    pub vision: Option<bool>,
     pub shell: Option<String>,
+    pub tool_name: Option<String>,
     pub max_turns: Option<u32>,
     pub max_tokens: Option<u32>,
     pub max_output_tokens: Option<u32>,
     pub compact_threshold: Option<CompactThreshold>,
-    pub approval: Option<ApprovalMode>,
     pub output: Option<OutputMode>,
     pub stderr: Option<StderrMode>,
     pub context: Option<String>,
@@ -217,13 +216,6 @@ fn parse_yaml_frontmatter(yaml_block: &str) -> Result<AgentFrontmatter, Frontmat
                 }
                 fm.model = Some(s);
             }
-            "vision" => {
-                let b = v.as_bool().ok_or_else(|| FrontmatterError::InvalidValue {
-                    field: "vision",
-                    reason: "expected boolean (`true` or `false`)".into(),
-                })?;
-                fm.vision = Some(b);
-            }
             "shell" => {
                 let s = expect_string("shell", v)?;
                 if s.trim().is_empty() {
@@ -233,6 +225,11 @@ fn parse_yaml_frontmatter(yaml_block: &str) -> Result<AgentFrontmatter, Frontmat
                     });
                 }
                 fm.shell = Some(s);
+            }
+            "tool_name" => {
+                let s = expect_string("tool_name", v)?;
+                validate_tool_name(&s)?;
+                fm.tool_name = Some(s);
             }
             "max_turns" => {
                 let n = expect_u32("max_turns", v)?;
@@ -260,15 +257,6 @@ fn parse_yaml_frontmatter(yaml_block: &str) -> Result<AgentFrontmatter, Frontmat
             }
             "compact_threshold" => {
                 fm.compact_threshold = Some(parse_yaml_compact_threshold(v)?);
-            }
-            "approval" => {
-                let s = expect_string("approval", v)?;
-                fm.approval = Some(parse_approval_mode(&s).map_err(|reason| {
-                    FrontmatterError::InvalidValue {
-                        field: "approval",
-                        reason,
-                    }
-                })?);
             }
             "output" => {
                 let s = expect_string("output", v)?;
@@ -330,13 +318,18 @@ pub fn validate_agent_name(name: &str) -> Result<(), FrontmatterError> {
     Ok(())
 }
 
-pub fn parse_approval_mode(raw: &str) -> Result<ApprovalMode, String> {
-    match raw.trim() {
-        "ask" => Ok(ApprovalMode::Ask),
-        "auto" => Ok(ApprovalMode::Auto),
-        "deny" => Ok(ApprovalMode::Deny),
-        other => Err(format!("expected `ask`, `auto`, or `deny`, got `{other}`")),
+pub fn validate_tool_name(name: &str) -> Result<(), FrontmatterError> {
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+    {
+        return Err(FrontmatterError::InvalidValue {
+            field: "tool_name",
+            reason: format!("`{name}` must match [a-zA-Z0-9_-]+"),
+        });
     }
+    Ok(())
 }
 
 pub fn parse_stderr_mode(raw: &str) -> Result<StderrMode, String> {

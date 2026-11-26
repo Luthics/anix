@@ -959,7 +959,7 @@ mod tests {
             std::env::temp_dir().join(format!("anix-anthropic-test-{}.png", std::process::id()));
         fs::write(&tmp_img, b"\x89PNG\r\n\x1a\n").expect("write png");
 
-        let mut header = base_header(vec![IrStream::msh_tool_def()]);
+        let mut header = base_header(vec![IrStream::shell_tool_def("shell")]);
         header.max_output_tokens = Some(4096);
         header
             .params

@@ -1,4 +1,5 @@
 use std::io::{self, Write};
+use std::path::Path;
 use std::process::ExitCode as StdExitCode;
 
 use anix_proto::exit_code::ExitCode;
@@ -12,6 +13,17 @@ fn main() -> StdExitCode {
     let args: Vec<String> = std::env::args().collect();
     if args.len() == 2 && (args[1] == "--version" || args[1] == "-V") {
         println!("msh {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::Success.into();
+    }
+    // Internal background reaper callback invoked by JOB_WRAPPER upon completion.
+    if args.len() == 8 && args[1] == "--reap-notify" {
+        let job_id = &args[2];
+        let exit_code = args[3].parse::<i32>().unwrap_or(1);
+        let log_path = Path::new(&args[4]);
+        let inbox_dir = Path::new(&args[5]);
+        let sent_flag = Path::new(&args[6]);
+        let cmd = &args[7];
+        exec::deliver_reap_notify_once(job_id, exit_code, log_path, inbox_dir, sent_flag, cmd);
         return ExitCode::Success.into();
     }
     if args.len() != 3 || args[1] != "-c" {

@@ -22,8 +22,8 @@ use crate::config::{AgentPaths, ProviderConfig};
 use crate::fd::StderrTracker;
 use crate::platform::{self, ChildWaitOutcome, posix};
 use crate::signal::SignalState;
+use crate::strict_modes::{self, StrictModeError};
 use crate::trace::Tracer;
-use crate::trust::{self, TrustError};
 
 const RETRY_DELAYS_SEC: &[u64] = &[1, 2, 4];
 const COPROCESS_SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
@@ -31,7 +31,7 @@ const COPROCESS_SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 #[derive(Debug, Error)]
 pub enum ProviderError {
     #[error(transparent)]
-    Trust(#[from] TrustError),
+    StrictMode(#[from] StrictModeError),
     #[error("provider `{provider}` timed out after {timeout_sec}s")]
     Timeout { provider: String, timeout_sec: u64 },
     #[error("provider `{provider}` truncated before producing output: {message}")]
@@ -53,7 +53,7 @@ pub enum ProviderError {
 impl ProviderError {
     pub fn exit_code(&self) -> ExitCode {
         match self {
-            Self::Trust(_) => ExitCode::TempFail,
+            Self::StrictMode(e) => e.exit_code(),
             Self::Timeout { .. } | Self::OutputTruncatedEmpty { .. } => ExitCode::TimeoutOrBudget,
             Self::Interrupted(code) => *code,
             Self::Failed { .. } => ExitCode::RuntimeError,
@@ -63,7 +63,7 @@ impl ProviderError {
     pub fn usage(&self) -> Option<TokenUsage> {
         match self {
             Self::OutputTruncatedEmpty { usage, .. } | Self::Failed { usage, .. } => *usage,
-            Self::Trust(_) | Self::Timeout { .. } | Self::Interrupted(_) => None,
+            Self::StrictMode(_) | Self::Timeout { .. } | Self::Interrupted(_) => None,
         }
     }
 }
@@ -396,12 +396,8 @@ pub fn invoke_provider(
     stderr_tracker: &StderrTracker,
     tracer: &mut Tracer,
 ) -> Result<ProviderTurnResult, ProviderError> {
-    let base_dir = paths.project_agent_dir.as_deref().and_then(|d| d.parent());
-    let bin_path = paths.resolve_component_bin(&provider_cfg.bin, base_dir);
-
-    if provider_cfg.bin_from_project {
-        trust::verify_trusted(&bin_path, paths)?;
-    }
+    let bin_path = paths.resolve_component_bin(&provider_cfg.bin);
+    strict_modes::verify_file(&bin_path)?;
 
     let ir_jsonl = if provider_cfg.mode == ProviderMode::Oneshot || tracer.is_enabled() {
         stream.to_jsonl().map_err(|e| ProviderError::Failed {

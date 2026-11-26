@@ -139,7 +139,7 @@ fn sample_ir_jsonl() -> String {
         header: IrHeader {
             ir_version: IR_VERSION,
             record_type: HeaderTag::Header,
-            tools: vec![IrStream::msh_tool_def()],
+            tools: vec![IrStream::shell_tool_def("shell")],
             max_output_tokens: Some(512),
             params: BTreeMap::from([("temperature".into(), json!(0.1))]),
             meta: IrMeta {

@@ -10,23 +10,32 @@ use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anix_proto::ctl::{CtlFrame, MAX_CTL_FRAME_BYTES};
 use anix_proto::exit_code::ExitCode;
+use anix_proto::maildir::{MaildirEnvelope, MaildirHeaders};
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::ansi;
+
 pub const DEFAULT_TIMEOUT_SEC: u64 = 120;
+pub const DEFAULT_HOLD_DEADLINE_SEC: u64 = 3600;
 // Shorter than `anix`'s 3s child grace so `msh` always escalates SIGKILL to `/bin/sh`
 // cleanly before `anix` ever escalates SIGKILL to `msh`.
 const KILL_GRACE_PERIOD: Duration = Duration::from_secs(2);
 const PREVIEW_READ_TAIL_BYTES: u64 = 64 * 1024;
 const MAX_CTL_CMD_CHARS: usize = 512;
 
-/// Outer POSIX shell wrapper that runs `$1` via `/bin/sh -c` and atomically writes
-/// its exit status to `$2` (`tmp -> mv`) even after `msh` has yielded to background.
-const JOB_WRAPPER: &str = "/bin/sh -c \"$1\" sh; _rc=$?; printf '%s\\n' \"$_rc\" > \"$2.tmp\" && mv -f \"$2.tmp\" \"$2\"; exit \"$_rc\"";
+/// Outer POSIX shell wrapper that runs `$1` via `/bin/sh -c`, atomically writes its exit
+/// status to `$2`, and when backgrounded (`$3` exists) with `$ANIX_INBOX` (`$7`), invokes
+/// `msh --reap-notify` to deliver an atomic Maildir completion message releasing the `hold`.
+const JOB_WRAPPER: &str = "\
+/bin/sh -c \"$1\" sh; _rc=$?; \
+printf '%s\\n' \"$_rc\" > \"$2.tmp\" && mv -f \"$2.tmp\" \"$2\"; \
+if [ -n \"$7\" ] && [ -f \"$3\" ]; then \"$4\" --reap-notify \"$5\" \"$_rc\" \"$6\" \"$7\" \"$8\" \"$1\" >/dev/null 2>&1 || true; fi; \
+exit \"$_rc\"";
 
 /// Anti-hang environment variables forcefully injected into every `/bin/sh -c` child.
 const ANTI_HANG_ENV: &[(&str, &str)] = &[
@@ -126,19 +135,35 @@ pub enum ExecError {
 pub struct ExecOptions {
     pub timeout_sec: u64,
     pub kill_on_timeout: bool,
+    pub hold_deadline_sec: u64,
+    pub inbox_dir: Option<PathBuf>,
     pub jobs_dir: PathBuf,
 }
 
 impl ExecOptions {
     pub fn from_env() -> Self {
-        let timeout_sec = std::env::var("MSH_TIMEOUT_SEC")
+        let timeout_sec = std::env::var("ANIX_EXEC_TIMEOUT_SEC")
             .ok()
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| std::env::var("MSH_TIMEOUT_SEC").ok())
             .and_then(|v| v.trim().parse::<u64>().ok())
             .unwrap_or(DEFAULT_TIMEOUT_SEC);
-        let kill_on_timeout = std::env::var("MSH_KILL_ON_TIMEOUT")
+        let kill_on_timeout = std::env::var("ANIX_EXEC_KILL_ON_TIMEOUT")
             .ok()
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| std::env::var("MSH_KILL_ON_TIMEOUT").ok())
             .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
             .unwrap_or(false);
+        let hold_deadline_sec = std::env::var("MSH_HOLD_DEADLINE_SEC")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .filter(|&v| v > 0)
+            .unwrap_or(DEFAULT_HOLD_DEADLINE_SEC);
+        let inbox_dir = std::env::var("ANIX_INBOX")
+            .ok()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
         let effective_timeout = if kill_on_timeout && timeout_sec == 0 {
             1
         } else {
@@ -148,6 +173,8 @@ impl ExecOptions {
         Self {
             timeout_sec: effective_timeout,
             kill_on_timeout,
+            hold_deadline_sec,
+            inbox_dir,
             jobs_dir,
         }
     }
@@ -221,6 +248,8 @@ pub fn run_command_with_options(
     let log_path = opts.jobs_dir.join(format!("{job_id}.log"));
     let exit_file = opts.jobs_dir.join(format!("{job_id}.exit"));
     let exit_tmp = opts.jobs_dir.join(format!("{job_id}.exit.tmp"));
+    let bg_flag = opts.jobs_dir.join(format!("{job_id}.bg"));
+    let sent_flag = opts.jobs_dir.join(format!("{job_id}.sent"));
 
     let log_file = OpenOptions::new()
         .create_new(true)
@@ -248,12 +277,29 @@ pub fn run_command_with_options(
     let immediate_bg = opts.timeout_sec == 0 && !opts.kill_on_timeout;
     let bind_pdeathsig = opts.kill_on_timeout;
 
+    if immediate_bg {
+        let _ = fs::write(&bg_flag, b"1");
+    }
+
+    let msh_exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("msh"));
+    let inbox_arg = opts
+        .inbox_dir
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+
     let mut cmd = Command::new("/bin/sh");
     cmd.arg("-c")
         .arg(JOB_WRAPPER)
         .arg("sh")
         .arg(command)
         .arg(&exit_file)
+        .arg(&bg_flag)
+        .arg(&msh_exe)
+        .arg(&job_id)
+        .arg(&log_path)
+        .arg(&inbox_arg)
+        .arg(&sent_flag)
         .stdin(Stdio::null())
         .stdout(stdout_stdio)
         .stderr(stderr_stdio);
@@ -305,6 +351,7 @@ pub fn run_command_with_options(
         Ok(c) => c,
         Err(err) => {
             let _ = fs::remove_file(&log_path);
+            let _ = fs::remove_file(&bg_flag);
             return Err(ExecError::Spawn(err));
         }
     };
@@ -314,9 +361,7 @@ pub fn run_command_with_options(
     let child_pgid = child_pid as libc::pid_t;
 
     if immediate_bg {
-        emit_bg_job_ctl(
-            &job_id, child_pid, child_pid, command, &log_path, &exit_file,
-        );
+        emit_hold_ctl(&job_id, opts.hold_deadline_sec, command);
         return Ok(ExecOutcome::Backgrounded {
             job_id,
             pid: child_pid,
@@ -368,10 +413,16 @@ pub fn run_command_with_options(
     };
 
     if timed_out && !opts.kill_on_timeout {
+        let _ = fs::write(&bg_flag, b"1");
         let preview_bytes = read_file_tail(&log_path, PREVIEW_READ_TAIL_BYTES).unwrap_or_default();
-        emit_bg_job_ctl(
-            &job_id, child_pid, child_pid, command, &log_path, &exit_file,
-        );
+        emit_hold_ctl(&job_id, opts.hold_deadline_sec, command);
+        // Close the race where the wrapper wrote `exit_file` right before `bg_flag` existed.
+        if let Some(ref inbox_dir) = opts.inbox_dir
+            && let Ok(raw_rc) = fs::read_to_string(&exit_file)
+            && let Ok(rc) = raw_rc.trim().parse::<i32>()
+        {
+            deliver_reap_notify_once(&job_id, rc, &log_path, inbox_dir, &sent_flag, command);
+        }
         return Ok(ExecOutcome::Backgrounded {
             job_id,
             pid: child_pid,
@@ -388,6 +439,8 @@ pub fn run_command_with_options(
     let _ = fs::remove_file(&log_path);
     let _ = fs::remove_file(&exit_file);
     let _ = fs::remove_file(&exit_tmp);
+    let _ = fs::remove_file(&bg_flag);
+    let _ = fs::remove_file(&sent_flag);
 
     if timed_out {
         return Ok(ExecOutcome::TimedOutKilled {
@@ -428,15 +481,8 @@ pub fn run_command(command: &str, timeout_sec: u64) -> Result<ExecOutcome, ExecE
     run_command_with_options(command, &opts)
 }
 
-/// Best-effort emit `CtlFrame::BgJob` on `$ANIX_CTL` (`fd 6`) if running inside `anix`.
-fn emit_bg_job_ctl(
-    job_id: &str,
-    pid: u32,
-    pgid: u32,
-    cmd: &str,
-    log_path: &Path,
-    exit_file: &Path,
-) {
+/// Best-effort emit `CtlFrame::Hold` on `$ANIX_CTL` (`fd 6`) if running inside `anix` (v0.4.0).
+fn emit_hold_ctl(job_id: &str, deadline_sec: u64, cmd: &str) {
     let Ok(ctl_path) = std::env::var("ANIX_CTL") else {
         return;
     };
@@ -444,28 +490,20 @@ fn emit_bg_job_ctl(
         return;
     }
 
-    let mut short_cmd = truncate_chars(cmd, MAX_CTL_CMD_CHARS);
-    // Keep total JSON frame well within the 64 KiB `$ANIX_CTL` limit.
-    let mut frame = CtlFrame::BgJob {
-        job_id: job_id.to_owned(),
-        pid,
-        pgid,
-        cmd: short_cmd.clone(),
-        log_path: log_path.display().to_string(),
-        exit_file: exit_file.display().to_string(),
+    let short_cmd = truncate_chars(cmd, MAX_CTL_CMD_CHARS);
+    let mut frame = CtlFrame::Hold {
+        id: job_id.to_owned(),
+        deadline_sec: deadline_sec.max(1),
+        label: Some(short_cmd),
     };
     let Ok(mut line) = serde_json::to_string(&frame) else {
         return;
     };
     if line.len() + 1 > MAX_CTL_FRAME_BYTES {
-        short_cmd = truncate_chars(cmd, 64);
-        frame = CtlFrame::BgJob {
-            job_id: job_id.to_owned(),
-            pid,
-            pgid,
-            cmd: short_cmd,
-            log_path: log_path.display().to_string(),
-            exit_file: exit_file.display().to_string(),
+        frame = CtlFrame::Hold {
+            id: job_id.to_owned(),
+            deadline_sec: deadline_sec.max(1),
+            label: Some(truncate_chars(cmd, 64)),
         };
         let Ok(smaller) = serde_json::to_string(&frame) else {
             return;
@@ -481,6 +519,115 @@ fn emit_bg_job_ctl(
         let _ = f.write_all(line.as_bytes());
         let _ = f.flush();
     }
+}
+
+/// Atomically deliver a Maildir completion notification for a backgrounded job exactly once
+/// (guarded by `O_CREAT | O_EXCL` on `sent_flag`), releasing the parent's `hold` lease.
+pub fn deliver_reap_notify_once(
+    job_id: &str,
+    exit_code: i32,
+    log_path: &Path,
+    inbox_dir: &Path,
+    sent_flag: &Path,
+    cmd: &str,
+) {
+    if OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(sent_flag)
+        .is_err()
+    {
+        // Another caller already claimed delivery.
+        return;
+    }
+
+    let tail = read_log_tail_text(log_path, 20, 2048);
+    let short_cmd = truncate_chars(cmd, MAX_CTL_CMD_CHARS);
+    let mut body = format!(
+        "Background job {job_id} finished (exit_code={exit_code}, cmd=`{short_cmd}`).\nFull log: {}",
+        log_path.display()
+    );
+    if !tail.is_empty() {
+        body.push_str("\n--- tail ---\n");
+        body.push_str(&tail);
+    }
+
+    let envelope = MaildirEnvelope {
+        headers: MaildirHeaders {
+            message_id: Some(format!("msh-job-{job_id}")),
+            reply_to: None,
+            in_reply_to: Some(job_id.to_owned()),
+            from: Some("msh".into()),
+            control: None,
+            exit_code: Some(exit_code),
+        },
+        body,
+    };
+
+    let _ = deliver_maildir_atomic(inbox_dir, &envelope);
+}
+
+fn deliver_maildir_atomic(dir: &Path, envelope: &MaildirEnvelope) -> io::Result<()> {
+    for sub in ["tmp", "new", "cur", "done"] {
+        let p = dir.join(sub);
+        fs::create_dir_all(&p)?;
+        let _ = fs::set_permissions(&p, fs::Permissions::from_mode(0o700));
+    }
+    let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
+
+    let ts_ns = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let pid = std::process::id();
+    let rand = &Uuid::new_v4().simple().to_string()[..12];
+    let filename = format!("{ts_ns:020}-{pid}-{rand}.msg");
+    let tmp_path = dir.join("tmp").join(&filename);
+    let new_path = dir.join("new").join(&filename);
+
+    let encoded = envelope.format();
+    let mut f = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&tmp_path)?;
+    f.write_all(encoded.as_bytes())?;
+    f.sync_data()?;
+    drop(f);
+    fs::rename(&tmp_path, &new_path).inspect_err(|_| {
+        let _ = fs::remove_file(&tmp_path);
+    })
+}
+
+fn read_log_tail_text(path: &Path, max_lines: usize, max_bytes: usize) -> String {
+    let Ok(raw) = read_file_tail(path, (max_bytes as u64).saturating_mul(4).max(8192)) else {
+        return String::new();
+    };
+    if raw.is_empty() {
+        return String::new();
+    }
+    let probe = &raw[..raw.len().min(8192)];
+    if probe.contains(&0) {
+        return "[binary output; inspect log file directly]".to_owned();
+    }
+    let text = String::from_utf8_lossy(&raw);
+    let cleaned = ansi::clean_ansi_and_cr(&text);
+    let lines: Vec<&str> = cleaned.lines().collect();
+    let tail_slice = if lines.len() > max_lines {
+        &lines[lines.len() - max_lines..]
+    } else {
+        &lines[..]
+    };
+    let joined = tail_slice.join("\n");
+    if joined.len() <= max_bytes {
+        return joined;
+    }
+    let mut start = joined.len() - max_bytes;
+    while start < joined.len() && !joined.is_char_boundary(start) {
+        start += 1;
+    }
+    joined[start..].to_owned()
 }
 
 fn truncate_chars(s: &str, max_chars: usize) -> String {

@@ -693,7 +693,7 @@ mod tests {
             header: IrHeader {
                 ir_version: IR_VERSION,
                 record_type: HeaderTag::Header,
-                tools: vec![IrStream::msh_tool_def()],
+                tools: vec![IrStream::shell_tool_def("shell")],
                 max_output_tokens: Some(4096),
                 params: BTreeMap::from([
                     ("reasoning_effort".into(), json!("medium")),

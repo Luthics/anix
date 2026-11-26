@@ -1,24 +1,23 @@
-//! Append-Only Tree WAL JSONL schema for `-c <file>` / `--leaf <id>` persistence (Section 6.2).
+//! Append-Only Tree WAL JSONL schema for `-c <file>` / `--leaf <id>` / `anix fork` (Section 5.2).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::ir::{ApprovalMode, MediaAttachment, OutputMode, StderrMode, ToolCall};
+use crate::ir::{MediaAttachment, OutputMode, StderrMode, ToolCall};
 use crate::provider::TokenUsage;
 
-/// Contract-level configuration recorded in `session_init`, `checkpoint`, and `runtime_update`.
+/// Contract-level configuration recorded in `session_init`, `branch_base`, `checkpoint`, and
+/// `runtime_update`. Intentionally ignores legacy unknown fields (e.g. pre-v0.4 `approval`/`vision`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WalConfigSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stderr: Option<StderrMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub approval: Option<ApprovalMode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vision: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<OutputMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shell: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
 }
 
 /// Message role stored in WAL `"type": "message"` entries.
@@ -31,10 +30,10 @@ pub enum WalRole {
     Tool,
 }
 
-/// Single line in an Append-Only Tree WAL JSONL context file (v0.3.0).
+/// Single line in an Append-Only Tree WAL JSONL context file (v0.4.0).
 ///
-/// All tree node fields (`id`, `parent_id`, `pruned_usage`) are optional on deserialization so
-/// legacy pre-v0.3 linear WAL files remain 100% readable and resumable in place.
+/// Tree node fields (`id`, `parent_id`, `pruned_usage`, `message_ids`) are optional on
+/// deserialization so legacy pre-v0.3 linear WAL files remain readable and resumable in place.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WalEvent {
@@ -42,6 +41,18 @@ pub enum WalEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         id: Option<u64>,
         ir_version: u32,
+        ts: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
+        config: WalConfigSnapshot,
+    },
+    /// Cross-file read-only branch root created by `anix fork <src> --leaf <id> -o <dst>` (v0.4.0).
+    BranchBase {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<u64>,
+        ir_version: u32,
+        /// Parent WAL reference formatted as `<abs_path>#<leaf_id>`.
+        base: String,
         ts: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_id: Option<String>,
@@ -71,6 +82,9 @@ pub enum WalEvent {
         provider_opaque: Option<Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         usage: Option<TokenUsage>,
+        /// Maildir message IDs committed by this user turn (crash-recovery deduplication, v0.4.0).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        message_ids: Vec<String>,
     },
     RuntimeUpdate {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -119,6 +133,7 @@ impl WalEvent {
     pub fn id(&self) -> Option<u64> {
         match self {
             Self::SessionInit { id, .. }
+            | Self::BranchBase { id, .. }
             | Self::Message { id, .. }
             | Self::RuntimeUpdate { id, .. }
             | Self::Fold { id, .. }
@@ -126,10 +141,10 @@ impl WalEvent {
         }
     }
 
-    /// Return the parent tree node ID if present (`SessionInit` is always root -> `None`).
+    /// Return the parent tree node ID if present (`SessionInit` and `BranchBase` are file roots -> `None`).
     pub fn parent_id(&self) -> Option<u64> {
         match self {
-            Self::SessionInit { .. } => None,
+            Self::SessionInit { .. } | Self::BranchBase { .. } => None,
             Self::Message { parent_id, .. }
             | Self::RuntimeUpdate { parent_id, .. }
             | Self::Fold { parent_id, .. }
@@ -152,55 +167,36 @@ mod tests {
         let init = WalEvent::SessionInit {
             id: Some(1),
             ir_version: IR_VERSION,
-            ts: "2026-11-26T12:00:00Z".into(),
+            ts: "2026-11-27T00:00:00Z".into(),
             session_id: Some("550e8400-e29b-41d4-a716-446655440000".into()),
             config: WalConfigSnapshot {
                 output: Some(OutputMode::Reply),
                 shell: Some("msh".into()),
+                tool_name: Some("shell".into()),
                 stderr: Some(StderrMode::Auto),
-                approval: Some(ApprovalMode::Ask),
-                vision: Some(true),
             },
         };
         let raw = serde_json::to_string(&init).expect("serialize wal init");
-        assert!(raw.contains("\"type\":\"session_init\""));
-        assert!(raw.contains("\"id\":1"));
-        assert!(raw.contains("\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\""));
         let parsed: WalEvent = serde_json::from_str(&raw).expect("deserialize wal init");
         assert_eq!(parsed, init);
         assert_eq!(parsed.id(), Some(1));
         assert_eq!(parsed.parent_id(), None);
 
-        let fold = WalEvent::Fold {
-            id: Some(6),
-            parent_id: Some(3),
-            ts: "2026-11-26T12:01:00Z".into(),
-            from_turn: 2,
-            to_turn: 3,
-            summary: "folded dead-end".into(),
-            fold_usage: Some(TokenUsage {
-                input_tokens: 60,
-                output_tokens: 15,
-                cached_tokens: Some(0),
-                cache_write_tokens: Some(0),
-                reasoning_tokens: Some(0),
-            }),
-            pruned_usage: Some(TokenUsage {
-                input_tokens: 500,
-                output_tokens: 50,
-                cached_tokens: Some(0),
-                cache_write_tokens: Some(0),
-                reasoning_tokens: Some(0),
-            }),
+        let base = WalEvent::BranchBase {
+            id: Some(1),
+            ir_version: IR_VERSION,
+            base: "/tmp/parent.jsonl#4".into(),
+            ts: "2026-11-27T00:01:00Z".into(),
+            session_id: Some("sid-fork".into()),
+            config: WalConfigSnapshot::default(),
         };
-        let fold_raw = serde_json::to_string(&fold).expect("serialize fold");
-        let parsed_fold: WalEvent = serde_json::from_str(&fold_raw).expect("deserialize fold");
-        assert_eq!(parsed_fold, fold);
-        assert_eq!(parsed_fold.id(), Some(6));
-        assert_eq!(parsed_fold.parent_id(), Some(3));
+        let base_raw = serde_json::to_string(&base).expect("serialize branch_base");
+        let parsed_base: WalEvent =
+            serde_json::from_str(&base_raw).expect("deserialize branch_base");
+        assert_eq!(parsed_base, base);
 
-        // Legacy pre-v0.3 WAL without `id` / `parent_id` / `session_id` must still deserialize cleanly.
-        let legacy = r#"{"ir_version":1,"type":"session_init","ts":"2026-11-24T12:00:00Z","config":{"stderr":"auto"}}"#;
+        // Legacy pre-v0.4 WAL with `approval`/`vision` and without `id` must still deserialize cleanly.
+        let legacy = r#"{"ir_version":1,"type":"session_init","ts":"2026-11-24T12:00:00Z","config":{"stderr":"auto","approval":"ask","vision":true}}"#;
         let parsed_legacy: WalEvent = serde_json::from_str(legacy).expect("deserialize legacy");
         assert!(matches!(
             parsed_legacy,

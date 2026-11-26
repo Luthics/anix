@@ -935,7 +935,7 @@ mod tests {
 
     #[test]
     fn translates_frozen_system_degraded_runtime_update_tools_and_params() {
-        let mut header = base_header(vec![IrStream::msh_tool_def()]);
+        let mut header = base_header(vec![IrStream::shell_tool_def("shell")]);
         header.max_output_tokens = Some(4096);
         header
             .params
@@ -1005,7 +1005,7 @@ mod tests {
         fs::write(&tmp_img, b"\x89PNG\r\n\x1a\n").expect("write tmp png");
 
         let stream = IrStream {
-            header: base_header(vec![IrStream::msh_tool_def()]),
+            header: base_header(vec![IrStream::shell_tool_def("shell")]),
             messages: vec![
                 IrMessage::user(1, "inspect"),
                 IrMessage::Assistant {

@@ -53,7 +53,10 @@ dependencies = [
  "anix-proto",
  "clap",
  "image",
+ "libc",
+ "serde",
  "serde_json",
+ "serde_yaml_ng",
  "thiserror",
  "uuid",
 ]

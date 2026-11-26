@@ -1,20 +1,23 @@
-//! Deterministic 4-step environment self-check for `anix --doctor` (Section 10.3).
+//! Deterministic 4-step environment self-check for `anix --doctor` (`docs/RUNTIME.md` §8).
 
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::path::Path;
 
 use anix_proto::exit_code::ExitCode;
 use uuid::Uuid;
 
 use crate::config::{
     AgentPaths, ApiKeySource, ProviderConfig, default_providers, load_config_file, merge_providers,
+    split_shell_words,
 };
 use crate::platform::{self, posix};
+use crate::strict_modes;
 
-pub fn run() -> ExitCode {
+pub fn run(cli_config: Option<&Path>) -> ExitCode {
     let cwd = match env::current_dir() {
         Ok(c) => c,
         Err(err) => {
@@ -30,28 +33,43 @@ pub fn run() -> ExitCode {
         }
     };
 
+    let (config_file, must_exist) = paths.resolve_config_file(cli_config);
     let mut all_ok = true;
 
-    // Step 1: Verify FHS binaries exist and have `+x` permissions.
-    let default_provider = check_config(&paths);
+    let (default_provider, default_shell) = check_config(&config_file, must_exist);
     let default_provider_bin = default_provider
         .as_ref()
         .map_or("anix-provider-openai-responses", |p| p.bin.as_str());
-    if !check_binaries(&paths, default_provider_bin) {
+
+    // Step 1: Verify configured shell, default provider, and StrictModes.
+    if !check_binaries(
+        &paths,
+        default_shell.as_deref().unwrap_or("msh"),
+        default_provider_bin,
+    ) {
         all_ok = false;
     }
 
-    // Step 2: Config & default provider API key check (`api_key_env` ENV takes precedence over `api_key`).
+    // Step 2: Config & default provider API key check.
     if let Some(ref prov) = default_provider {
         match prov.resolve_api_key().1 {
             ApiKeySource::Env(env_name) => {
-                println!("[OK]   2. config.toml valid and `{env_name}` is set");
+                println!(
+                    "[OK]   2. config `{}` valid and `{env_name}` is set",
+                    config_file.display()
+                );
             }
             ApiKeySource::Config => {
-                println!("[OK]   2. config.toml valid and `api_key` is configured");
+                println!(
+                    "[OK]   2. config `{}` valid and `api_key` is configured",
+                    config_file.display()
+                );
             }
             ApiKeySource::NoneRequired => {
-                println!("[OK]   2. config.toml valid (no api_key required)");
+                println!(
+                    "[OK]   2. config `{}` valid (no api_key required)",
+                    config_file.display()
+                );
             }
             ApiKeySource::Missing(env_name) => {
                 eprintln!(
@@ -59,7 +77,7 @@ pub fn run() -> ExitCode {
                 );
                 eprintln!(
                     "       fix: export {env_name}=\"<your-api-key>\" or set `api_key` in `{}`",
-                    paths.global_config_file().display()
+                    config_file.display()
                 );
                 all_ok = false;
             }
@@ -106,82 +124,81 @@ pub fn run() -> ExitCode {
     }
 }
 
-fn check_binaries(paths: &AgentPaths, default_provider_bin: &str) -> bool {
-    let required = [
-        paths.home_dir.join(".local/bin/anix"),
-        paths.libexec_dir.join("msh"),
-        paths.libexec_dir.join(default_provider_bin),
-        paths.tools_dir.join("aview"),
-        paths.tools_dir.join("aclr"),
-    ];
+fn check_binaries(paths: &AgentPaths, default_shell: &str, default_provider_bin: &str) -> bool {
+    let mut issues = Vec::new();
 
-    let mut missing = Vec::new();
-    for p in &required {
-        if !posix::is_executable_file(p) {
-            missing.push(p.display().to_string());
+    if !default_shell.trim().eq_ignore_ascii_case("none") {
+        let parts = split_shell_words(default_shell);
+        if let Some(prog) = parts.first() {
+            let resolved = paths.resolve_component_bin(prog);
+            if !posix::is_executable_file(&resolved) {
+                issues.push(format!(
+                    "configured shell `{prog}` not found or not executable (resolved `{}`)",
+                    resolved.display()
+                ));
+            }
         }
     }
 
-    if missing.is_empty() {
-        println!("[OK]   1. FHS binaries present and executable (+x)");
+    let prov_resolved = paths.resolve_component_bin(default_provider_bin);
+    if !posix::is_executable_file(&prov_resolved) {
+        issues.push(format!(
+            "default provider `{default_provider_bin}` not found or not executable (resolved `{}`)",
+            prov_resolved.display()
+        ));
+    } else if let Err(err) = strict_modes::verify_file(&prov_resolved) {
+        issues.push(err.to_string());
+    }
+
+    if issues.is_empty() {
+        println!(
+            "[OK]   1. configured shell and provider binaries present, executable, and StrictModes-clean"
+        );
         true
     } else {
-        eprintln!("[FAIL] 1. missing or non-executable FHS binaries:");
-        for m in &missing {
-            eprintln!("       - {m}");
+        eprintln!("[FAIL] 1. component binary check failed:");
+        for msg in &issues {
+            eprintln!("       - {msg}");
         }
-        eprintln!("       fix: run `./scripts/install-local.sh` (or `chmod +x <path>`)");
+        eprintln!(
+            "       fix: run `./scripts/install-local.sh` or check permissions (`chmod go-w`)"
+        );
         false
     }
 }
 
-fn check_config(paths: &AgentPaths) -> Option<ProviderConfig> {
-    let global_path = paths.global_config_file();
-    let global_cfg = match load_config_file(&global_path) {
+fn check_config(config_file: &Path, must_exist: bool) -> (Option<ProviderConfig>, Option<String>) {
+    let file_cfg = match load_config_file(config_file, must_exist) {
         Ok(c) => c.unwrap_or_default(),
         Err(err) => {
-            eprintln!("[FAIL] 2. global config invalid: {err}");
-            eprintln!("       fix: fix TOML syntax in `{}`", global_path.display());
-            return None;
+            eprintln!("[FAIL] 2. config invalid: {err}");
+            eprintln!("       fix: fix TOML syntax in `{}`", config_file.display());
+            return (None, None);
         }
     };
 
-    let project_cfg = match paths.project_config_file() {
-        Some(p) => match load_config_file(&p) {
-            Ok(c) => c.unwrap_or_default(),
-            Err(err) => {
-                eprintln!("[FAIL] 2. project config invalid: {err}");
-                eprintln!("       fix: fix TOML syntax in `{}`", p.display());
-                return None;
-            }
-        },
-        None => Default::default(),
-    };
-
-    let default_prov_name = project_cfg
+    let default_shell = file_cfg.defaults.shell.clone();
+    let default_prov_name = file_cfg
         .defaults
         .provider
-        .or(global_cfg.defaults.provider)
         .unwrap_or_else(|| "openai-responses".into());
 
     let mut provs = default_providers();
-    if let Err(err) = merge_providers(&mut provs, &global_cfg.providers, false)
-        .and_then(|_| merge_providers(&mut provs, &project_cfg.providers, true))
-    {
+    if let Err(err) = merge_providers(&mut provs, &file_cfg.providers) {
         eprintln!("[FAIL] 2. provider config invalid: {err}");
-        return None;
+        return (None, default_shell);
     }
 
     let Some(prov) = provs.get(&default_prov_name) else {
         eprintln!("[FAIL] 2. default provider `{default_prov_name}` not found in [providers.*]");
         eprintln!(
             "       fix: define [providers.{default_prov_name}] in `{}`",
-            global_path.display()
+            config_file.display()
         );
-        return None;
+        return (None, default_shell);
     };
 
-    Some(prov.clone())
+    (Some(prov.clone()), default_shell)
 }
 
 fn check_dev_fd_pipe() -> bool {
@@ -192,7 +209,6 @@ fn check_dev_fd_pipe() -> bool {
         return false;
     };
 
-    // Open `/dev/fd/<w_fd>` directly, write probe bytes, close both write ends, verify read.
     let dev_fd_path = format!("/dev/fd/{w_fd}");
     let write_ok = OpenOptions::new()
         .write(true)

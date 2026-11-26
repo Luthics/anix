@@ -1,44 +1,44 @@
-//! Core inference loop state machine, `msh` tool execution, `$ANIX_CTL` (`fd 6`) frame
-//! application, `[vision].bin` / `[approval].bin` integration, `aclr -t <N>` auto-fold,
-//! `cycle_start`/`cycle_end`/`idle` Trace observability, and `--inbox` daemon loop (v1.1 §§4–9).
+//! Core inference loop state machine, shell execution, `$ANIX_CTL` (`fd 6`) frame
+//! application (`media`, `compact`, `fold`, `hold`, `release`), unified Maildir `--inbox`
+//! event loop with debounce batching, crash dedup, `Anix-Reply-To` sync replies,
+//! `Anix-Control: compact`, and `--notify` exit callbacks (RFC §§4–8).
 
-use std::collections::BTreeMap;
-use std::fs::{self, File};
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::collections::{BTreeMap, HashSet};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anix_proto::IR_VERSION;
 use anix_proto::ctl::CtlFrame;
 use anix_proto::exit_code::ExitCode;
-use anix_proto::hooks::{ContextWatermark, OnExitPayload, PostToolPayload};
 use anix_proto::ir::{
-    HeaderTag, IrHeader, IrMessage, IrMeta, IrStream, MediaAttachment, OutputMode, StderrMode,
+    ALLOWED_MEDIA_MIMES, HeaderTag, IrHeader, IrMessage, IrMeta, IrStream, MediaAttachment,
+    OutputMode, StderrMode,
 };
 use anix_proto::provider::TokenUsage;
+use anix_proto::trace::ContextWatermark;
 use anix_proto::wal::{WalConfigSnapshot, WalEvent};
 use serde_json::{Map, Value};
 
-use crate::approval::{ApprovalDecision, ApprovalGate};
 use crate::compact::{self, CompactError};
 use crate::config::ResolvedConfig;
-use crate::fd::{self, InboxQueue, StderrTracker};
+use crate::fd::{self, StderrTracker};
 use crate::frontmatter::AgentScript;
 use crate::hooks;
+use crate::maildir::{self, InboxMessage, InboxQueue, InboxWaitOutcome};
 use crate::platform::{self, PreparedSandbox, posix};
 use crate::provider::{self, ProviderError, ProviderPool, TextStreamMode};
 use crate::signal::{self, SignalState};
 use crate::trace::Tracer;
-use crate::vision::{self, VisionBridgeOutcome};
 use crate::wal::{self, ActiveEntry, WalStore};
 
-/// Structured termination reason emitted on `cycle_end` Trace events (v1.1 §9.5).
+/// Structured termination reason emitted on `cycle_end` Trace events (RFC §8.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CycleEndReason {
     Completed,
     MaxTurns,
     MaxTokens,
-    ApprovalBlocked,
+    GateBlocked,
     ProviderError,
     Error,
     Interrupted,
@@ -50,7 +50,7 @@ impl CycleEndReason {
             Self::Completed => "completed",
             Self::MaxTurns => "max_turns",
             Self::MaxTokens => "max_tokens",
-            Self::ApprovalBlocked => "approval_blocked",
+            Self::GateBlocked => "gate_blocked",
             Self::ProviderError => "provider_error",
             Self::Error => "error",
             Self::Interrupted => "interrupted",
@@ -62,20 +62,25 @@ struct CycleOutcome {
     exit_code: ExitCode,
     reason: CycleEndReason,
     turns: u32,
+    delivered_output: String,
+}
+
+#[derive(Debug, Clone)]
+struct ActiveHold {
+    id: String,
+    deadline: Instant,
+    label: Option<String>,
 }
 
 /// Entry point for executing a resolved `*.agent` session (one-shot or `--inbox`).
 pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String]) -> ExitCode {
-    // CRITICAL POSIX FD HYGIENE (v1.1 §4.1):
-    // 1. NEVER probe `fd 3` implicitly. Only claim an explicitly configured `--trace-fd=<N>` /
-    //    `ANIX_TRACE_FD=<N>` FIRST — BEFORE opening any internal descriptors.
-    // 2. Drain/close inherited `fd 4..=9` (skipping `cfg.trace_fd` if in that range).
     posix::ignore_sigpipe();
     let trace_file = match cfg.trace_fd {
         Some(fd) => match Tracer::take_configured_fd(fd) {
             Ok(f) => Some(f),
             Err(msg) => {
                 eprintln!("anix: {msg}");
+                deliver_notify_if_configured(cfg, ExitCode::UsageError, &msg);
                 return ExitCode::UsageError;
             }
         },
@@ -86,7 +91,9 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
     let signals = match SignalState::install() {
         Ok(s) => s,
         Err(err) => {
-            eprintln!("anix: failed to install signal handlers: {err}");
+            let msg = format!("failed to install signal handlers: {err}");
+            eprintln!("anix: {msg}");
+            deliver_notify_if_configured(cfg, ExitCode::RuntimeError, &msg);
             return ExitCode::RuntimeError;
         }
     };
@@ -94,15 +101,14 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
     let stderr_tracker = StderrTracker::new();
     let mut provider_pool = ProviderPool::new();
 
-    // Ensure runtime directory exists with mode 0700 (Section 8.1).
     let _ = posix::ensure_dir_mode(&cfg.paths.runtime_dir, 0o700);
 
-    // Prepare Linux Landlock sandbox policy BEFORE launching any `msh` tool calls (Section 10.2).
     let sandbox: Option<PreparedSandbox> = if cfg.shell_enabled() {
         match platform::prepare_sandbox(cfg.sandbox, &cfg.paths.cwd, &cfg.paths.runtime_dir) {
             Ok(sb) => sb,
             Err(msg) => {
                 stderr_tracker.writeln_line(&format!("anix: {msg}"));
+                deliver_notify_if_configured(cfg, ExitCode::RuntimeError, &msg);
                 return ExitCode::RuntimeError;
             }
         }
@@ -112,13 +118,16 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
 
     let mut tracer = Tracer::init(&cfg.name, trace_file, &cfg.paths.journal_socket_path());
 
-    // Open WAL context store (`-c <file>`) with non-blocking exclusive `flock` (Section 6.2).
+    // Open WAL context store (`-c <file>`) with optional `--lock-wait[=<SEC>]` (RFC §5.2).
     let mut wal = match cfg.context {
-        Some(ref path) => match WalStore::open(path) {
+        Some(ref path) => match WalStore::open_with_lock_wait(path, cfg.lock_wait, &signals) {
             Ok(store) => store,
             Err(err) => {
-                stderr_tracker.writeln_line(&format!("anix: {err}"));
-                return err.exit_code();
+                let msg = err.to_string();
+                stderr_tracker.writeln_line(&format!("anix: {msg}"));
+                let code = err.exit_code();
+                deliver_notify_if_configured(cfg, code, &msg);
+                return code;
             }
         },
         None => WalStore::stateless(),
@@ -127,8 +136,11 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
     let replayed = match wal.load_active_window(cfg.leaf) {
         Ok(r) => r,
         Err(err) => {
-            stderr_tracker.writeln_line(&format!("anix: {err}"));
-            return err.exit_code();
+            let msg = err.to_string();
+            stderr_tracker.writeln_line(&format!("anix: {msg}"));
+            let code = err.exit_code();
+            deliver_notify_if_configured(cfg, code, &msg);
+            return code;
         }
     };
 
@@ -146,8 +158,8 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
     run_fields.insert("provider".into(), Value::String(cfg.provider.clone()));
     run_fields.insert("model".into(), Value::String(cfg.model.clone()));
     run_fields.insert("shell".into(), Value::String(cfg.shell.clone()));
+    run_fields.insert("tool_name".into(), Value::String(cfg.tool_name.clone()));
     run_fields.insert("output".into(), Value::String(cfg.output.as_str().into()));
-    run_fields.insert("vision".into(), Value::Bool(cfg.vision));
     run_fields.insert("fresh_session".into(), Value::Bool(replayed.is_fresh));
     run_fields.insert("inbox_mode".into(), Value::Bool(cfg.inbox.is_some()));
     if cfg.context.is_some()
@@ -177,6 +189,7 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                     TokenUsage::default(),
                     0,
                     None,
+                    "",
                     true,
                     &stderr_tracker,
                     &mut tracer,
@@ -185,21 +198,15 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
             }
         };
 
-    let mut approval = ApprovalGate::new(
-        cfg.approval,
-        cfg.fail_on_deny,
-        cfg.safe_commands.clone(),
-        cfg.approval_decider.clone(),
-        &cfg.name,
-        cfg.paths.clone(),
-    );
-
     let mut usage_already_printed_on_cycle = false;
+    let mut final_output = String::new();
 
     let exit_code = if let Some(ref inbox_dir) = cfg.inbox {
         match fd::assemble_initial_inputs(script_args, &inherited_extra_fds, true, &signals) {
             Ok(initial) if !initial.is_empty() => {
-                if let Err(code) = state.push_user_message(&initial, &mut wal, &stderr_tracker) {
+                if let Err(code) =
+                    state.push_user_message(&initial, Vec::new(), &mut wal, &stderr_tracker)
+                {
                     provider_pool.shutdown();
                     finish_session(
                         cfg,
@@ -209,6 +216,7 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                         state.session_usage,
                         state.current_context_tokens(),
                         state.reported_leaf_id(cfg),
+                        "",
                         true,
                         &stderr_tracker,
                         &mut tracer,
@@ -222,7 +230,6 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                     script,
                     &mut state,
                     &mut wal,
-                    &mut approval,
                     sandbox.as_ref(),
                     &signals,
                     &mut provider_pool,
@@ -230,6 +237,7 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                     &mut tracer,
                     true,
                 );
+                final_output = outcome.delivered_output;
                 usage_already_printed_on_cycle = true;
                 if outcome.exit_code != ExitCode::Success {
                     provider_pool.shutdown();
@@ -241,6 +249,7 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                         state.session_usage,
                         state.current_context_tokens(),
                         state.reported_leaf_id(cfg),
+                        &final_output,
                         false,
                         &stderr_tracker,
                         &mut tracer,
@@ -266,6 +275,7 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                     state.session_usage,
                     state.current_context_tokens(),
                     state.reported_leaf_id(cfg),
+                    "",
                     true,
                     &stderr_tracker,
                     &mut tracer,
@@ -274,13 +284,12 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
             }
         }
 
-        let (code, printed_usage) = run_inbox_loop(
+        let (code, printed_usage, last_out) = run_inbox_loop(
             inbox_dir,
             cfg,
             script,
             &mut state,
             &mut wal,
-            &mut approval,
             sandbox.as_ref(),
             &signals,
             &mut provider_pool,
@@ -288,12 +297,17 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
             &mut tracer,
         );
         usage_already_printed_on_cycle |= printed_usage;
+        if !last_out.is_empty() {
+            final_output = last_out;
+        }
         code
     } else {
         match fd::assemble_initial_inputs(script_args, &inherited_extra_fds, false, &signals) {
             Ok(input) => {
                 if !input.is_empty() {
-                    if let Err(code) = state.push_user_message(&input, &mut wal, &stderr_tracker) {
+                    if let Err(code) =
+                        state.push_user_message(&input, Vec::new(), &mut wal, &stderr_tracker)
+                    {
                         provider_pool.shutdown();
                         finish_session(
                             cfg,
@@ -303,6 +317,7 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                             state.session_usage,
                             state.current_context_tokens(),
                             state.reported_leaf_id(cfg),
+                            "",
                             true,
                             &stderr_tracker,
                             &mut tracer,
@@ -310,7 +325,8 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                         return code;
                     }
                 } else if state.entries.len() <= 1
-                    && let Err(code) = state.push_user_message("", &mut wal, &stderr_tracker)
+                    && let Err(code) =
+                        state.push_user_message("", Vec::new(), &mut wal, &stderr_tracker)
                 {
                     provider_pool.shutdown();
                     finish_session(
@@ -321,6 +337,7 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                         state.session_usage,
                         state.current_context_tokens(),
                         state.reported_leaf_id(cfg),
+                        "",
                         true,
                         &stderr_tracker,
                         &mut tracer,
@@ -335,7 +352,6 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                     script,
                     &mut state,
                     &mut wal,
-                    &mut approval,
                     sandbox.as_ref(),
                     &signals,
                     &mut provider_pool,
@@ -343,6 +359,7 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                     &mut tracer,
                     false,
                 );
+                final_output = outcome.delivered_output;
                 outcome.exit_code
             }
             Err(err) => {
@@ -356,7 +373,6 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
         }
     };
 
-    // Gracefully close persistent Provider coprocesses (stdin EOF -> exit 0) before final exit.
     provider_pool.shutdown();
 
     finish_session(
@@ -367,6 +383,7 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
         state.session_usage,
         state.current_context_tokens(),
         state.reported_leaf_id(cfg),
+        &final_output,
         !usage_already_printed_on_cycle,
         &stderr_tracker,
         &mut tracer,
@@ -374,40 +391,24 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
     exit_code
 }
 
-#[derive(Debug, Clone)]
-struct TrackedBgJob {
-    job_id: String,
-    pid: u32,
-    pgid: u32,
-    cmd: String,
-    log_path: PathBuf,
-    exit_file: PathBuf,
-    started_at: Instant,
-    notified: bool,
-}
-
 struct SessionState {
     session_id: String,
     entries: Vec<ActiveEntry>,
-    /// Per-turn `usage` for surviving active-window `assistant` messages (never written to IR).
     assistant_usages: BTreeMap<u64, TokenUsage>,
     last_checkpoint_turn: u64,
     next_turn_id: u64,
-    /// True for fresh sessions and v0.3 tree WALs (`id`/`parent_id`); false for legacy pre-v0.3 WALs.
     tree_mode: bool,
-    /// Active branch tip WAL node ID (`Some` in tree mode once initialized).
     head_id: Option<u64>,
-    /// Next file-wide monotonic WAL node ID to allocate (`>= 1`).
     next_node_id: u64,
     next_cycle_id: u64,
     turns_executed: u32,
-    /// Cumulative 5-field usage for this process run (including built-in compactor & auto-fold calls).
     run_usage: TokenUsage,
-    /// Cross-compaction cumulative 5-field usage along the active branch lineage.
     session_usage: TokenUsage,
     pending_compact: bool,
-    /// Background `msh` jobs yielded during this process run (v0.1.2 §§7.1 & 7.2).
-    bg_jobs: Vec<TrackedBgJob>,
+    /// Active generic `hold` leases blocking `--idle-timeout` (RFC §4.3.3 & §6.2).
+    active_holds: Vec<ActiveHold>,
+    /// Maildir `message_id`s committed to WAL on this lineage (for crash dedup).
+    committed_message_ids: HashSet<String>,
 }
 
 impl SessionState {
@@ -426,12 +427,13 @@ impl SessionState {
             };
             let processed = match hooks::run_pre_context(
                 seed,
-                &cfg.paths,
+                &cfg.hooks_dir,
+                &cfg.paths.cwd,
                 cfg.output,
                 cfg.shell_enabled(),
                 cfg.stderr,
-                cfg.vision,
-                cfg.vision_bridge.bin.is_some(),
+                &cfg.tool_name,
+                cfg.inbox.is_some(),
             ) {
                 Ok(ir) => ir,
                 Err(err) => {
@@ -456,13 +458,7 @@ impl SessionState {
                 ir_version: IR_VERSION,
                 ts,
                 session_id: Some(session_id.clone()),
-                config: WalConfigSnapshot {
-                    output: Some(cfg.output),
-                    shell: Some(cfg.shell.clone()),
-                    stderr: Some(cfg.stderr),
-                    approval: Some(cfg.approval),
-                    vision: Some(cfg.vision),
-                },
+                config: wal_config_snapshot(cfg),
             }) {
                 stderr_tracker.writeln_line(&format!("anix: {err}"));
                 return Err(err.exit_code());
@@ -508,12 +504,13 @@ impl SessionState {
                 run_usage: TokenUsage::default(),
                 session_usage: TokenUsage::default(),
                 pending_compact: false,
-                bg_jobs: Vec::new(),
+                active_holds: Vec::new(),
+                committed_message_ids: HashSet::new(),
             });
         }
 
-        // Resumed (or `--leaf` branched) WAL session: preserve frozen system prefix verbatim and
-        // emit trailing `runtime_update` ONLY if contract config drifted along this branch lineage.
+        // Resumed / forked / `--leaf` WAL session: preserve frozen prefix verbatim; append
+        // trailing `runtime_update` ONLY if contract config drifted along this lineage.
         let mut entries = replayed.entries;
         let mut next_turn_id = replayed.next_turn_id;
         let tree_mode = replayed.tree_mode;
@@ -522,7 +519,6 @@ impl SessionState {
 
         if let Some(prev_cfg) = replayed.latest_config {
             let mut diffs = Vec::new();
-            // v0.2.0 compatibility: pre-v0.2 WALs without `output` ran under `output=explicit`.
             let prev_output = prev_cfg.output.unwrap_or(OutputMode::Explicit);
             if prev_output != cfg.output {
                 diffs.push(format!(
@@ -532,7 +528,7 @@ impl SessionState {
                             "reply (your final text reply is delivered to stdout fd 1; $ANIX_OUT is NOT mounted)"
                         }
                         OutputMode::Explicit => {
-                            "explicit (write final deliverables via msh to $ANIX_OUT fd 1; normal text goes to stderr)"
+                            "explicit (write final deliverables via shell to $ANIX_OUT fd 1; normal text goes to stderr)"
                         }
                         OutputMode::None => {
                             "none (stdout fd 1 is strictly silent; $ANIX_OUT is NOT mounted)"
@@ -543,12 +539,12 @@ impl SessionState {
             let prev_shell_enabled = prev_cfg
                 .shell
                 .as_deref()
-                .is_none_or(|s| !s.eq_ignore_ascii_case("none"));
+                .is_none_or(|s| !s.trim().eq_ignore_ascii_case("none"));
             if prev_shell_enabled != cfg.shell_enabled() {
                 if cfg.shell_enabled() {
                     diffs.push(format!(
-                        "shell capability enabled (`{}`; `msh` tool is now available)",
-                        cfg.shell
+                        "shell capability enabled (`{}`; `{}` tool is now available)",
+                        cfg.shell, cfg.tool_name
                     ));
                 } else {
                     diffs.push("shell capability switched to none (no tools available)".into());
@@ -564,12 +560,6 @@ impl SessionState {
                         }
                     }
                 ));
-            }
-            if prev_cfg.approval.is_some_and(|a| a != cfg.approval) {
-                diffs.push(format!("approval policy switched to {:?}", cfg.approval));
-            }
-            if prev_cfg.vision.is_some_and(|v| v != cfg.vision) {
-                diffs.push(format!("vision capability switched to {}", cfg.vision));
             }
 
             if !diffs.is_empty() {
@@ -591,13 +581,7 @@ impl SessionState {
                     turn_id,
                     ts,
                     content: content.clone(),
-                    config: WalConfigSnapshot {
-                        output: Some(cfg.output),
-                        shell: Some(cfg.shell.clone()),
-                        stderr: Some(cfg.stderr),
-                        approval: Some(cfg.approval),
-                        vision: Some(cfg.vision),
-                    },
+                    config: wal_config_snapshot(cfg),
                 }) {
                     stderr_tracker.writeln_line(&format!("anix: {err}"));
                     return Err(err.exit_code());
@@ -630,7 +614,8 @@ impl SessionState {
             run_usage: TokenUsage::default(),
             session_usage: replayed.session_usage,
             pending_compact: false,
-            bg_jobs: Vec::new(),
+            active_holds: Vec::new(),
+            committed_message_ids: replayed.committed_message_ids,
         })
     }
 
@@ -654,7 +639,6 @@ impl SessionState {
         if self.tree_mode { self.head_id } else { None }
     }
 
-    /// WAL leaf ID to expose in Trace / `on-exit.d/` (`None` for stateless or legacy WAL runs).
     fn reported_leaf_id(&self, cfg: &ResolvedConfig) -> Option<u64> {
         if cfg.context.is_some() && self.tree_mode {
             self.head_id
@@ -677,14 +661,22 @@ impl SessionState {
         &mut self,
         msg: IrMessage,
         usage: Option<TokenUsage>,
+        message_ids: Vec<String>,
         wal: &mut WalStore,
         stderr_tracker: &StderrTracker,
     ) -> Result<(), ExitCode> {
         let node_id = self.alloc_node_id();
         let parent_id = self.current_parent_id();
-        if let Err(err) = wal.append_message_with_usage(node_id, parent_id, &msg, usage) {
+        if let Err(err) =
+            wal.append_message_with_meta(node_id, parent_id, &msg, usage, message_ids.clone())
+        {
             stderr_tracker.writeln_line(&format!("anix: {err}"));
             return Err(err.exit_code());
+        }
+        for mid in message_ids {
+            if !mid.is_empty() {
+                self.committed_message_ids.insert(mid);
+            }
         }
         if self.tree_mode {
             self.head_id = node_id;
@@ -700,12 +692,85 @@ impl SessionState {
     fn push_user_message(
         &mut self,
         text: &str,
+        message_ids: Vec<String>,
         wal: &mut WalStore,
         stderr_tracker: &StderrTracker,
     ) -> Result<(), ExitCode> {
         let tid = self.alloc_turn_id();
         let msg = IrMessage::user(tid, text);
-        self.push_message(msg, None, wal, stderr_tracker)
+        self.push_message(msg, None, message_ids, wal, stderr_tracker)
+    }
+
+    fn push_runtime_update(
+        &mut self,
+        cfg: &ResolvedConfig,
+        content: String,
+        wal: &mut WalStore,
+        stderr_tracker: &StderrTracker,
+    ) -> Result<(), ExitCode> {
+        let turn_id = self.alloc_turn_id();
+        let node_id = self.alloc_node_id();
+        let parent_id = self.current_parent_id();
+        let ts = posix::timestamp_rfc3339_utc();
+        if let Err(err) = wal.append(&WalEvent::RuntimeUpdate {
+            id: node_id,
+            parent_id,
+            turn_id,
+            ts,
+            content: content.clone(),
+            config: wal_config_snapshot(cfg),
+        }) {
+            stderr_tracker.writeln_line(&format!("anix: {err}"));
+            return Err(err.exit_code());
+        }
+        if self.tree_mode {
+            self.head_id = node_id;
+        }
+        self.entries.push(ActiveEntry {
+            node_id,
+            message: IrMessage::system(
+                turn_id,
+                format!("<runtime_update>{content}</runtime_update>"),
+            ),
+            entry_usage: TokenUsage::default(),
+        });
+        Ok(())
+    }
+
+    fn register_hold(&mut self, id: String, deadline_sec: u64, label: Option<String>) {
+        let deadline = Instant::now() + Duration::from_secs(deadline_sec.max(1));
+        if let Some(existing) = self.active_holds.iter_mut().find(|h| h.id == id) {
+            existing.deadline = deadline;
+            existing.label = label;
+        } else {
+            self.active_holds.push(ActiveHold {
+                id,
+                deadline,
+                label,
+            });
+        }
+    }
+
+    fn release_hold(&mut self, id: &str) -> Option<ActiveHold> {
+        let pos = self.active_holds.iter().position(|h| h.id == id)?;
+        Some(self.active_holds.remove(pos))
+    }
+
+    fn earliest_hold_deadline(&self) -> Option<Instant> {
+        self.active_holds.iter().map(|h| h.deadline).min()
+    }
+
+    fn drain_expired_holds(&mut self, now: Instant) -> Vec<ActiveHold> {
+        let mut expired = Vec::new();
+        let mut i = 0;
+        while i < self.active_holds.len() {
+            if self.active_holds[i].deadline <= now {
+                expired.push(self.active_holds.remove(i));
+            } else {
+                i += 1;
+            }
+        }
+        expired
     }
 
     fn current_context_tokens(&self) -> u64 {
@@ -719,199 +784,17 @@ impl SessionState {
             messages: self.messages_cloned(),
         }
     }
-
-    /// Inspect tracked background `msh` jobs and emit `<runtime_update>` + `bg_job_finished`
-    /// notifications for any jobs that exited since the last turn (v0.1.2 §§7.1 & 7.2).
-    fn poll_completed_bg_jobs(
-        &mut self,
-        cfg: &ResolvedConfig,
-        wal: &mut WalStore,
-        stderr_tracker: &StderrTracker,
-        tracer: &mut Tracer,
-    ) -> Result<(), ExitCode> {
-        let mut newly_finished: Vec<(usize, Option<i32>, u64)> = Vec::new();
-        for (idx, job) in self.bg_jobs.iter().enumerate() {
-            if job.notified {
-                continue;
-            }
-            if let Some(code) = read_exit_code_file(&job.exit_file) {
-                newly_finished.push((idx, Some(code), job.started_at.elapsed().as_millis() as u64));
-                continue;
-            }
-            if !process_group_exists(job.pgid) {
-                // Re-check exit_file once to close any exit/rename race.
-                let code = read_exit_code_file(&job.exit_file);
-                newly_finished.push((idx, code, job.started_at.elapsed().as_millis() as u64));
-            }
-        }
-
-        for (idx, exit_code, elapsed_ms) in newly_finished {
-            self.bg_jobs[idx].notified = true;
-            let job = self.bg_jobs[idx].clone();
-
-            let status_desc = match exit_code {
-                Some(code) => format!("exit_code={code}"),
-                None => "terminated externally".to_owned(),
-            };
-            let elapsed_sec = elapsed_ms / 1000;
-            let tail = read_bg_log_tail(&job.log_path, 20, 2048);
-
-            let mut content = format!(
-                "Background job {} finished ({}, elapsed={}s, cmd=`{}`).\nFull log: {}",
-                job.job_id,
-                status_desc,
-                elapsed_sec,
-                job.cmd,
-                job.log_path.display()
-            );
-            if !tail.is_empty() {
-                content.push_str("\n--- tail ---\n");
-                content.push_str(&tail);
-            }
-
-            let turn_id = self.alloc_turn_id();
-            let node_id = self.alloc_node_id();
-            let parent_id = self.current_parent_id();
-            let ts = posix::timestamp_rfc3339_utc();
-            if let Err(err) = wal.append(&WalEvent::RuntimeUpdate {
-                id: node_id,
-                parent_id,
-                turn_id,
-                ts,
-                content: content.clone(),
-                config: WalConfigSnapshot {
-                    output: Some(cfg.output),
-                    shell: Some(cfg.shell.clone()),
-                    stderr: Some(cfg.stderr),
-                    approval: Some(cfg.approval),
-                    vision: Some(cfg.vision),
-                },
-            }) {
-                stderr_tracker.writeln_line(&format!("anix: {err}"));
-                return Err(err.exit_code());
-            }
-            if self.tree_mode {
-                self.head_id = node_id;
-            }
-            self.entries.push(ActiveEntry {
-                node_id,
-                message: IrMessage::system(
-                    turn_id,
-                    format!("<runtime_update>{content}</runtime_update>"),
-                ),
-                entry_usage: TokenUsage::default(),
-            });
-
-            let mut fin_fields = Map::new();
-            fin_fields.insert("job_id".into(), Value::String(job.job_id));
-            fin_fields.insert("pid".into(), Value::from(job.pid));
-            fin_fields.insert("pgid".into(), Value::from(job.pgid));
-            fin_fields.insert(
-                "exit_code".into(),
-                exit_code.map_or(Value::Null, Value::from),
-            );
-            fin_fields.insert(
-                "log_path".into(),
-                Value::String(job.log_path.display().to_string()),
-            );
-            fin_fields.insert("elapsed_ms".into(), Value::from(elapsed_ms));
-            tracer.emit_event("bg_job_finished", fin_fields);
-        }
-
-        Ok(())
-    }
 }
 
-fn read_exit_code_file(path: &Path) -> Option<i32> {
-    let raw = fs::read_to_string(path).ok()?;
-    raw.trim().parse::<i32>().ok()
-}
-
-fn process_group_exists(pgid: u32) -> bool {
-    if pgid == 0 {
-        return false;
-    }
-    // SAFETY: `kill(-pgid, 0)` only probes process group existence without delivering a signal.
-    let rc = unsafe { libc::kill(-(pgid as libc::pid_t), 0) };
-    if rc == 0 {
-        return true;
-    }
-    io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
-}
-
-fn read_bg_log_tail(path: &Path, max_lines: usize, max_bytes: usize) -> String {
-    let Ok(mut file) = File::open(path) else {
-        return String::new();
-    };
-    let len = file.metadata().map(|m| m.len()).unwrap_or(0);
-    if len == 0 {
-        return String::new();
-    }
-    let read_cap = (max_bytes as u64).saturating_mul(4).max(8192);
-    if len > read_cap {
-        let _ = file.seek(SeekFrom::Start(len - read_cap));
-    }
-    let mut raw = Vec::new();
-    if file.read_to_end(&mut raw).is_err() || raw.is_empty() {
-        return String::new();
-    }
-    let probe = &raw[..raw.len().min(8192)];
-    if probe.contains(&0) {
-        return "[binary output; inspect log file directly]".to_owned();
-    }
-    let text = String::from_utf8_lossy(&raw);
-    let cleaned = strip_basic_ansi(&text);
-    let lines: Vec<&str> = cleaned.lines().collect();
-    let tail_slice = if lines.len() > max_lines {
-        &lines[lines.len() - max_lines..]
-    } else {
-        &lines[..]
-    };
-    let joined = tail_slice.join("\n");
-    if joined.len() <= max_bytes {
-        return joined;
-    }
-    let mut start = joined.len() - max_bytes;
-    while start < joined.len() && !joined.is_char_boundary(start) {
-        start += 1;
-    }
-    joined[start..].to_owned()
-}
-
-fn strip_basic_ansi(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
-            i += 2;
-            while i < bytes.len() && !(0x40..=0x7e).contains(&bytes[i]) {
-                i += 1;
-            }
-            if i < bytes.len() {
-                i += 1;
-            }
-        } else if bytes[i] != b'\r' {
-            out.push(bytes[i]);
-            i += 1;
-        } else {
-            i += 1;
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-/// Bracket a single inference cycle with `cycle_start` and commit-barrier `cycle_end` Trace events
-/// (and optional per-cycle `[usage]` on `fd 2` in `--inbox` mode) (v1.1 §§4.1, 4.2, 9.5).
+/// Bracket a single inference cycle with `cycle_start` and commit-barrier `cycle_end` Trace events.
 #[allow(clippy::too_many_arguments)]
 fn execute_tracked_cycle(
     source: &str,
-    inbox_commit: Option<(&InboxQueue, &fd::InboxMessage)>,
+    inbox_commit: Option<(&InboxQueue, &[InboxMessage])>,
     cfg: &ResolvedConfig,
     script: &AgentScript,
     state: &mut SessionState,
     wal: &mut WalStore,
-    approval: &mut ApprovalGate,
     sandbox: Option<&PreparedSandbox>,
     signals: &SignalState,
     provider_pool: &mut ProviderPool,
@@ -923,10 +806,25 @@ fn execute_tracked_cycle(
     let start_turn_id = state.next_turn_id;
     let usage_before = state.run_usage.normalized_5();
 
+    let batch_message_ids: Vec<String> = inbox_commit
+        .map(|(_, msgs)| msgs.iter().map(|m| m.message_id().to_owned()).collect())
+        .unwrap_or_default();
+
     let mut start_fields = Map::new();
     start_fields.insert("cycle_id".into(), Value::from(cycle_id));
     start_fields.insert("source".into(), Value::String(source.to_owned()));
     start_fields.insert("start_turn_id".into(), Value::from(start_turn_id));
+    if !batch_message_ids.is_empty() {
+        start_fields.insert(
+            "message_ids".into(),
+            Value::Array(
+                batch_message_ids
+                    .iter()
+                    .map(|s| Value::String(s.clone()))
+                    .collect(),
+            ),
+        );
+    }
     tracer.emit_event("cycle_start", start_fields);
 
     let mut outcome = run_inference_cycle(
@@ -934,7 +832,6 @@ fn execute_tracked_cycle(
         script,
         state,
         wal,
-        approval,
         sandbox,
         signals,
         provider_pool,
@@ -942,17 +839,31 @@ fn execute_tracked_cycle(
         tracer,
     );
 
-    // Commit barrier (v1.1 §4.2 & §9.5): move `cur/<name>` -> `done/<name>` BEFORE emitting `cycle_end`.
-    if outcome.exit_code == ExitCode::Success
-        && let Some((queue, msg)) = inbox_commit
-        && let Err(err) = queue.mark_done(msg)
-    {
-        stderr_tracker.writeln_line(&format!(
-            "anix: failed to move inbox message `{}` to done/: {err}",
-            msg.name
-        ));
-        outcome.exit_code = ExitCode::RuntimeError;
-        outcome.reason = CycleEndReason::Error;
+    // Commit barrier (RFC §4.3.3 & §8.4):
+    // 1. On success, move all batch `cur/<name>` -> `done/<name>`.
+    // 2. Deliver replies to all `Anix-Reply-To` Maildir targets (even on non-zero exit so callers unblock!).
+    // 3. Emit `cycle_end`.
+    if let Some((queue, msgs)) = inbox_commit {
+        if outcome.exit_code == ExitCode::Success {
+            for msg in msgs {
+                if let Err(err) = queue.mark_done(msg) {
+                    stderr_tracker.writeln_line(&format!(
+                        "anix: failed to move inbox message `{}` to done/: {err}",
+                        msg.filename
+                    ));
+                    outcome.exit_code = ExitCode::RuntimeError;
+                    outcome.reason = CycleEndReason::Error;
+                    break;
+                }
+            }
+        }
+        deliver_batch_replies(
+            msgs,
+            &cfg.name,
+            outcome.exit_code.as_i32(),
+            &outcome.delivered_output,
+            tracer,
+        );
     }
 
     let run_norm = state.run_usage.normalized_5();
@@ -991,6 +902,12 @@ fn execute_tracked_cycle(
     );
     end_fields.insert("exit_code".into(), Value::from(outcome.exit_code.as_i32()));
     end_fields.insert("turns".into(), Value::from(outcome.turns));
+    if !batch_message_ids.is_empty() {
+        end_fields.insert(
+            "message_ids".into(),
+            Value::Array(batch_message_ids.into_iter().map(Value::String).collect()),
+        );
+    }
     if let Ok(v) = serde_json::to_value(cycle_usage) {
         end_fields.insert("cycle_usage".into(), v);
     }
@@ -1011,6 +928,33 @@ fn execute_tracked_cycle(
     outcome
 }
 
+fn deliver_batch_replies(
+    msgs: &[InboxMessage],
+    agent_name: &str,
+    exit_code: i32,
+    body: &str,
+    tracer: &mut Tracer,
+) {
+    for msg in msgs {
+        if let Some(ref reply_dir_str) = msg.envelope.headers.reply_to {
+            let reply_dir = PathBuf::from(reply_dir_str);
+            if let Err(err) =
+                maildir::deliver_reply(&reply_dir, msg.message_id(), agent_name, exit_code, body)
+            {
+                let mut wf = Map::new();
+                wf.insert(
+                    "message".into(),
+                    Value::String(format!(
+                        "failed delivering reply to `{}`: {err}",
+                        reply_dir.display()
+                    )),
+                );
+                tracer.emit_event("warning", wf);
+            }
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_inbox_loop(
     dir: &Path,
@@ -1018,13 +962,12 @@ fn run_inbox_loop(
     script: &AgentScript,
     state: &mut SessionState,
     wal: &mut WalStore,
-    approval: &mut ApprovalGate,
     sandbox: Option<&PreparedSandbox>,
     signals: &SignalState,
     provider_pool: &mut ProviderPool,
     stderr_tracker: &StderrTracker,
     tracer: &mut Tracer,
-) -> (ExitCode, bool) {
+) -> (ExitCode, bool, String) {
     let mut queue = match InboxQueue::open(dir, Some(signals.wakeup_fd())) {
         Ok(q) => q,
         Err(err) => {
@@ -1032,7 +975,7 @@ fn run_inbox_loop(
                 "anix: failed to initialize --inbox `{}`: {err}",
                 dir.display()
             ));
-            return (ExitCode::RuntimeError, false);
+            return (ExitCode::RuntimeError, false, String::new());
         }
     };
 
@@ -1041,13 +984,76 @@ fn run_inbox_loop(
     } else {
         Some(Duration::from_secs(cfg.idle_timeout_sec))
     };
+    let debounce = Duration::from_millis(cfg.inbox_debounce_ms);
 
     let mut printed_any_cycle_usage = false;
+    let mut last_output = String::new();
 
+    // 1. Startup `cur/` crash-recovery deduplication (RFC §4.3.3).
+    match queue.scan_cur_for_recovery() {
+        Ok(cur_msgs) if !cur_msgs.is_empty() => {
+            let mut to_process = Vec::new();
+            for msg in cur_msgs {
+                if state.committed_message_ids.contains(msg.message_id()) {
+                    let _ = queue.mark_done(&msg);
+                    let mut wf = Map::new();
+                    wf.insert(
+                        "message".into(),
+                        Value::String(format!(
+                            "deduplicated already-committed cur/ message `{}` (id={})",
+                            msg.filename,
+                            msg.message_id()
+                        )),
+                    );
+                    tracer.emit_event("warning", wf);
+                } else {
+                    to_process.push(msg);
+                }
+            }
+            if !to_process.is_empty() {
+                match process_inbox_batch(
+                    &queue,
+                    &to_process,
+                    cfg,
+                    script,
+                    state,
+                    wal,
+                    sandbox,
+                    signals,
+                    provider_pool,
+                    stderr_tracker,
+                    tracer,
+                ) {
+                    Ok((code, out, ran_cycle)) => {
+                        if ran_cycle {
+                            printed_any_cycle_usage = true;
+                        }
+                        if !out.is_empty() {
+                            last_output = out;
+                        }
+                        if code != ExitCode::Success {
+                            return (code, printed_any_cycle_usage, last_output);
+                        }
+                    }
+                    Err(code) => return (code, printed_any_cycle_usage, last_output),
+                }
+            }
+        }
+        Ok(_) => {}
+        Err(err) => {
+            stderr_tracker.writeln_line(&format!("anix: failed scanning --inbox cur/: {err}"));
+            return (ExitCode::RuntimeError, false, String::new());
+        }
+    }
+
+    // 2. Main unified Maildir event loop.
     loop {
         if let Some(code) = signals.termination_exit_code() {
-            return (code, printed_any_cycle_usage);
+            return (code, printed_any_cycle_usage, last_output);
         }
+
+        let next_hold_deadline = state.earliest_hold_deadline();
+        let active_holds_count = state.active_holds.len() as u64;
 
         let mut dump_snapshot = || {
             stderr_tracker.ensure_newline();
@@ -1058,24 +1064,78 @@ fn run_inbox_loop(
         let mut emit_idle = || {
             let mut idle_fields = Map::new();
             idle_fields.insert("idle_timeout_sec".into(), Value::from(cfg.idle_timeout_sec));
+            idle_fields.insert("active_holds".into(), Value::from(active_holds_count));
             tracer.emit_event("idle", idle_fields);
         };
 
-        match queue.next_message(idle_timeout, signals, &mut dump_snapshot, &mut emit_idle) {
-            Ok(Some(msg)) => {
-                if let Err(code) =
-                    state.push_user_message(&msg.formatted_input, wal, stderr_tracker)
-                {
-                    return (code, printed_any_cycle_usage);
-                }
-                let outcome = execute_tracked_cycle(
-                    &msg.name,
-                    Some((&queue, &msg)),
+        match queue.next_batch(
+            idle_timeout,
+            next_hold_deadline,
+            debounce,
+            signals,
+            &mut dump_snapshot,
+            &mut emit_idle,
+        ) {
+            Ok(InboxWaitOutcome::Batch(msgs)) => {
+                match process_inbox_batch(
+                    &queue,
+                    &msgs,
                     cfg,
                     script,
                     state,
                     wal,
-                    approval,
+                    sandbox,
+                    signals,
+                    provider_pool,
+                    stderr_tracker,
+                    tracer,
+                ) {
+                    Ok((code, out, ran_cycle)) => {
+                        if ran_cycle {
+                            printed_any_cycle_usage = true;
+                        }
+                        if !out.is_empty() {
+                            last_output = out;
+                        }
+                        if code != ExitCode::Success {
+                            return (code, printed_any_cycle_usage, last_output);
+                        }
+                    }
+                    Err(code) => return (code, printed_any_cycle_usage, last_output),
+                }
+            }
+            Ok(InboxWaitOutcome::HoldExpired) => {
+                let expired = state.drain_expired_holds(Instant::now());
+                if expired.is_empty() {
+                    continue;
+                }
+                for hold in &expired {
+                    let mut hf = Map::new();
+                    hf.insert("id".into(), Value::String(hold.id.clone()));
+                    if let Some(ref lbl) = hold.label {
+                        hf.insert("label".into(), Value::String(lbl.clone()));
+                    }
+                    tracer.emit_event("hold_expired", hf);
+                }
+                let summary_lines: Vec<String> = expired
+                    .iter()
+                    .map(|h| match h.label {
+                        Some(ref lbl) => format!("Hold expired: id={} ({lbl})", h.id),
+                        None => format!("Hold expired: id={}", h.id),
+                    })
+                    .collect();
+                if let Err(code) =
+                    state.push_runtime_update(cfg, summary_lines.join("\n"), wal, stderr_tracker)
+                {
+                    return (code, printed_any_cycle_usage, last_output);
+                }
+                let outcome = execute_tracked_cycle(
+                    "hold_expired",
+                    None,
+                    cfg,
+                    script,
+                    state,
+                    wal,
                     sandbox,
                     signals,
                     provider_pool,
@@ -1084,22 +1144,164 @@ fn run_inbox_loop(
                     true,
                 );
                 printed_any_cycle_usage = true;
+                if !outcome.delivered_output.is_empty() {
+                    last_output = outcome.delivered_output;
+                }
                 if outcome.exit_code != ExitCode::Success {
-                    return (outcome.exit_code, printed_any_cycle_usage);
+                    return (outcome.exit_code, printed_any_cycle_usage, last_output);
                 }
             }
-            Ok(None) => {
-                return (
-                    signals.termination_exit_code().unwrap_or(ExitCode::Success),
-                    printed_any_cycle_usage,
-                );
+            Ok(InboxWaitOutcome::IdleTimeout) => {
+                return (ExitCode::Success, printed_any_cycle_usage, last_output);
+            }
+            Ok(InboxWaitOutcome::Interrupted(code)) => {
+                return (code, printed_any_cycle_usage, last_output);
             }
             Err(err) => {
                 stderr_tracker.writeln_line(&format!("anix: --inbox error: {err}"));
-                return (ExitCode::RuntimeError, printed_any_cycle_usage);
+                return (ExitCode::RuntimeError, printed_any_cycle_usage, last_output);
             }
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn process_inbox_batch(
+    queue: &InboxQueue,
+    msgs: &[InboxMessage],
+    cfg: &ResolvedConfig,
+    script: &AgentScript,
+    state: &mut SessionState,
+    wal: &mut WalStore,
+    sandbox: Option<&PreparedSandbox>,
+    signals: &SignalState,
+    provider_pool: &mut ProviderPool,
+    stderr_tracker: &StderrTracker,
+    tracer: &mut Tracer,
+) -> Result<(ExitCode, String, bool), ExitCode> {
+    let mut saw_compact_control = false;
+    let mut body_sections: Vec<String> = Vec::new();
+    let mut msg_ids: Vec<String> = Vec::with_capacity(msgs.len());
+
+    for msg in msgs {
+        msg_ids.push(msg.message_id().to_owned());
+
+        // Release any matching `hold` lease on `Anix-In-Reply-To`.
+        if let Some(ref reply_id) = msg.envelope.headers.in_reply_to
+            && let Some(released) = state.release_hold(reply_id)
+        {
+            let mut rf = Map::new();
+            rf.insert("id".into(), Value::String(released.id));
+            rf.insert("reason".into(), Value::String("in_reply_to".into()));
+            if let Some(lbl) = released.label {
+                rf.insert("label".into(), Value::String(lbl));
+            }
+            tracer.emit_event("hold_released", rf);
+        }
+
+        if msg
+            .envelope
+            .headers
+            .control
+            .as_deref()
+            .is_some_and(|op| op.eq_ignore_ascii_case("compact"))
+        {
+            saw_compact_control = true;
+            state.pending_compact = true;
+        }
+
+        if !msg.envelope.body.is_empty() {
+            body_sections.push(msg.format_for_user_turn());
+        }
+    }
+
+    // Control-only batch (e.g. `anix send <inbox> --control compact` with no user text):
+    if body_sections.is_empty() && saw_compact_control {
+        state.pending_compact = false;
+        let current_msgs = state.messages_cloned();
+        let outcome = compact::run_full_compaction(
+            cfg,
+            &script.prompt,
+            &state.session_id,
+            &current_msgs,
+            state.next_turn_id,
+            state.tree_mode,
+            state.head_id,
+            state.next_node_id,
+            state.session_usage,
+            "Anix-Control: compact",
+            wal,
+            signals,
+            provider_pool,
+            stderr_tracker,
+            tracer,
+        );
+        match outcome {
+            Ok(c_out) => {
+                state.entries = c_out.new_entries;
+                state.assistant_usages.clear();
+                state.last_checkpoint_turn = c_out.checkpoint_turn_id;
+                state.next_turn_id = c_out.next_turn_id;
+                if state.tree_mode {
+                    state.head_id = c_out.head_id;
+                    state.next_node_id = c_out.next_node_id;
+                }
+                if let Some(ref cu) = c_out.compact_usage {
+                    state.run_usage.add_assign(cu);
+                }
+                state.session_usage = c_out.cumulative_usage;
+                for m in msgs {
+                    let _ = queue.mark_done(m);
+                }
+                deliver_batch_replies(msgs, &cfg.name, 0, "compacted\n", tracer);
+                return Ok((ExitCode::Success, String::new(), false));
+            }
+            Err(err) => {
+                stderr_tracker.writeln_line(&format!("anix: {err}"));
+                let code = err.exit_code();
+                deliver_batch_replies(msgs, &cfg.name, code.as_i32(), &err.to_string(), tracer);
+                return Ok((code, String::new(), false));
+            }
+        }
+    }
+
+    let combined_user_text = if body_sections.is_empty() {
+        msgs.iter()
+            .map(InboxMessage::format_for_user_turn)
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    } else {
+        body_sections.join("\n\n")
+    };
+
+    state.push_user_message(&combined_user_text, msg_ids, wal, stderr_tracker)?;
+
+    let source_label = if msgs.len() == 1 {
+        msgs[0].filename.clone()
+    } else {
+        format!(
+            "batch({}:{}..{})",
+            msgs.len(),
+            msgs[0].filename,
+            msgs[msgs.len() - 1].filename
+        )
+    };
+
+    let outcome = execute_tracked_cycle(
+        &source_label,
+        Some((queue, msgs)),
+        cfg,
+        script,
+        state,
+        wal,
+        sandbox,
+        signals,
+        provider_pool,
+        stderr_tracker,
+        tracer,
+        true,
+    );
+    Ok((outcome.exit_code, outcome.delivered_output, true))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1108,7 +1310,6 @@ fn run_inference_cycle(
     script: &AgentScript,
     state: &mut SessionState,
     wal: &mut WalStore,
-    approval: &mut ApprovalGate,
     sandbox: Option<&PreparedSandbox>,
     signals: &SignalState,
     provider_pool: &mut ProviderPool,
@@ -1121,18 +1322,19 @@ fn run_inference_cycle(
             exit_code: ExitCode::UsageError,
             reason: CycleEndReason::Error,
             turns: 0,
+            delivered_output: String::new(),
         };
     };
 
-    let base_dir = cfg
-        .paths
-        .project_agent_dir
-        .as_deref()
-        .and_then(|d| d.parent());
-    let shell_bin = cfg.paths.resolve_component_bin(&cfg.shell, base_dir);
+    let shell_bin = if cfg.shell_enabled() {
+        cfg.paths.resolve_component_bin(&cfg.shell_program)
+    } else {
+        PathBuf::new()
+    };
     let tools_dir = cfg.paths.effective_tools_dir();
 
     let mut cycle_turns: u32 = 0;
+    let mut captured_explicit_out = Vec::<u8>::new();
 
     loop {
         if let Some(code) = signals.termination_exit_code() {
@@ -1141,6 +1343,7 @@ fn run_inference_cycle(
                 exit_code: code,
                 reason: CycleEndReason::Interrupted,
                 turns: cycle_turns,
+                delivered_output: String::new(),
             };
         }
 
@@ -1153,7 +1356,6 @@ fn run_inference_cycle(
             }
         }
 
-        // Enforce `max_turns` budget (Section 3.3 / 6.5).
         if cycle_turns >= cfg.max_turns {
             stderr_tracker.writeln_line(&format!(
                 "anix: reached max_turns limit ({}) before task completion",
@@ -1163,19 +1365,11 @@ fn run_inference_cycle(
                 exit_code: ExitCode::TimeoutOrBudget,
                 reason: CycleEndReason::MaxTurns,
                 turns: cycle_turns,
+                delivered_output: String::new(),
             };
         }
 
-        // Notify model via trailing `<runtime_update>` if any background `msh` jobs finished (v1.1.2).
-        if let Err(code) = state.poll_completed_bg_jobs(cfg, wal, stderr_tracker, tracer) {
-            return CycleOutcome {
-                exit_code: code,
-                reason: CycleEndReason::Error,
-                turns: cycle_turns,
-            };
-        }
-
-        // Check `SIGUSR1` / `aclr -s` / auto-compact threshold before calling Provider (Section 6.1.2).
+        // Check `SIGUSR1` / `aclr -s` / `Anix-Control: compact` / auto-compact threshold.
         let sigusr1_compact = signals.take_compact_request();
         let est_tokens = state.current_context_tokens();
         let threshold_hit = cfg
@@ -1186,7 +1380,7 @@ fn run_inference_cycle(
             let reason = if sigusr1_compact {
                 "SIGUSR1"
             } else if state.pending_compact {
-                "aclr -s"
+                "compact-request"
             } else {
                 "auto-threshold"
             };
@@ -1234,7 +1428,7 @@ fn run_inference_cycle(
                     stderr_tracker.writeln_line(&format!("anix: {err}"));
                     let exit_code = err.exit_code();
                     let end_reason = match err {
-                        CompactError::Trust(_) => CycleEndReason::ApprovalBlocked,
+                        CompactError::StrictMode(_) => CycleEndReason::GateBlocked,
                         CompactError::Provider(ProviderError::Interrupted(_)) => {
                             CycleEndReason::Interrupted
                         }
@@ -1245,12 +1439,13 @@ fn run_inference_cycle(
                         exit_code,
                         reason: end_reason,
                         turns: cycle_turns,
+                        delivered_output: String::new(),
                     };
                 }
             }
         }
 
-        // Hard `max_tokens` circuit breaker (Section 6.1.2).
+        // Hard `max_tokens` circuit breaker.
         let est_after = state.current_context_tokens();
         if est_after > u64::from(cfg.max_tokens) {
             stderr_tracker.writeln_line(&format!(
@@ -1261,6 +1456,7 @@ fn run_inference_cycle(
                 exit_code: ExitCode::TimeoutOrBudget,
                 reason: CycleEndReason::MaxTokens,
                 turns: cycle_turns,
+                delivered_output: String::new(),
             };
         }
 
@@ -1273,6 +1469,7 @@ fn run_inference_cycle(
                 exit_code: ExitCode::RuntimeError,
                 reason: CycleEndReason::Error,
                 turns: cycle_turns,
+                delivered_output: String::new(),
             };
         }
 
@@ -1311,13 +1508,14 @@ fn run_inference_cycle(
                 let exit_code = err.exit_code();
                 let end_reason = match err {
                     ProviderError::Interrupted(_) => CycleEndReason::Interrupted,
-                    ProviderError::Trust(_) => CycleEndReason::ApprovalBlocked,
+                    ProviderError::StrictMode(_) => CycleEndReason::GateBlocked,
                     _ => CycleEndReason::ProviderError,
                 };
                 return CycleOutcome {
                     exit_code,
                     reason: end_reason,
                     turns: cycle_turns,
+                    delivered_output: String::new(),
                 };
             }
         };
@@ -1346,18 +1544,23 @@ fn run_inference_cycle(
             extra: BTreeMap::new(),
         };
 
-        if let Err(code) = state.push_message(assistant_msg, response.usage, wal, stderr_tracker) {
+        if let Err(code) = state.push_message(
+            assistant_msg,
+            response.usage,
+            Vec::new(),
+            wal,
+            stderr_tracker,
+        ) {
             return CycleOutcome {
                 exit_code: code,
                 reason: CycleEndReason::Error,
                 turns: cycle_turns,
+                delivered_output: String::new(),
             };
         }
 
         // No tool calls => inference task finished!
         if response.tool_calls.is_empty() {
-            // v1.2.0 §4.1: Deliver final reply to `fd 1` under `output=reply`; append trailing `\n`
-            // ONLY when `isatty(1)` is true and text is non-empty without a trailing newline.
             match text_stream_mode {
                 TextStreamMode::BufferForReply => {
                     if cfg.stderr == StderrMode::Auto {
@@ -1385,15 +1588,21 @@ fn run_inference_cycle(
                 }
                 TextStreamMode::StderrIfAuto => {}
             }
+            let delivered_output = match cfg.output {
+                OutputMode::Reply => response.text,
+                OutputMode::Explicit => {
+                    String::from_utf8_lossy(&captured_explicit_out).into_owned()
+                }
+                OutputMode::None => String::new(),
+            };
             return CycleOutcome {
                 exit_code: ExitCode::Success,
                 reason: CycleEndReason::Completed,
                 turns: cycle_turns,
+                delivered_output,
             };
         }
 
-        // Intermediate commentary on a tool-calling turn in `output=reply` goes to `fd 2`
-        // (never `fd 1`), preserving a strictly clean stdout stream.
         if text_stream_mode == TextStreamMode::BufferForReply
             && cfg.stderr == StderrMode::Auto
             && !response.text.is_empty()
@@ -1401,7 +1610,6 @@ fn run_inference_cycle(
             stderr_tracker.writeln_dim_if_tty(&response.text);
         }
 
-        // Execute each tool call sequentially; handle `aclr` folds and `vision` policies safely.
         let mut folded_this_turn = false;
         for tc in &response.tool_calls {
             if let Some(code) = signals.termination_exit_code() {
@@ -1409,6 +1617,7 @@ fn run_inference_cycle(
                     exit_code: code,
                     reason: CycleEndReason::Interrupted,
                     turns: cycle_turns,
+                    delivered_output: String::new(),
                 };
             }
 
@@ -1429,34 +1638,40 @@ fn run_inference_cycle(
                     media: Vec::new(),
                     extra: BTreeMap::new(),
                 };
-                if let Err(code) = state.push_message(tool_msg, None, wal, stderr_tracker) {
+                if let Err(code) =
+                    state.push_message(tool_msg, None, Vec::new(), wal, stderr_tracker)
+                {
                     return CycleOutcome {
                         exit_code: code,
                         reason: CycleEndReason::Error,
                         turns: cycle_turns,
+                        delivered_output: String::new(),
                     };
                 }
                 continue;
             }
 
-            if tc.name != "msh" {
+            if tc.name != cfg.tool_name {
                 let tid = state.alloc_turn_id();
                 let tool_msg = IrMessage::Tool {
                     turn_id: tid,
                     tool_call_id: tc.id.clone(),
                     is_error: true,
                     text: format!(
-                        "[t{tid}] exit=2\nError: unknown tool `{}` (only `msh` is available)",
-                        tc.name
+                        "[t{tid}] exit=2\nError: unknown tool `{}` (only `{}` is available)",
+                        tc.name, cfg.tool_name
                     ),
                     media: Vec::new(),
                     extra: BTreeMap::new(),
                 };
-                if let Err(code) = state.push_message(tool_msg, None, wal, stderr_tracker) {
+                if let Err(code) =
+                    state.push_message(tool_msg, None, Vec::new(), wal, stderr_tracker)
+                {
                     return CycleOutcome {
                         exit_code: code,
                         reason: CycleEndReason::Error,
                         turns: cycle_turns,
+                        delivered_output: String::new(),
                     };
                 }
                 continue;
@@ -1468,127 +1683,39 @@ fn run_inference_cycle(
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_owned();
-            let requested_timeout = tc.arguments.get("timeout_sec").and_then(Value::as_u64);
-            let kill_on_timeout = tc
-                .arguments
-                .get("kill_on_timeout")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            let mut effective_timeout_sec =
-                requested_timeout.map_or(cfg.msh_timeout_sec, |t| t.min(cfg.max_msh_timeout_sec));
-            if kill_on_timeout && effective_timeout_sec == 0 {
-                effective_timeout_sec = 1;
-            }
-
-            let decision = approval.check(&cmd_str, signals);
-            let mut app_fields = Map::new();
-            app_fields.insert("tool_call_id".into(), Value::String(tc.id.clone()));
-            app_fields.insert("cmd".into(), Value::String(cmd_str.clone()));
-            match &decision {
-                ApprovalDecision::Allow {
-                    source,
-                    decider,
-                    decider_exit_code,
-                    ..
-                } => {
-                    app_fields.insert("decision".into(), Value::String("allow".into()));
-                    app_fields.insert("source".into(), Value::String((*source).into()));
-                    app_fields.insert("decider".into(), Value::String((*decider).into()));
-                    if let Some(ec) = decider_exit_code {
-                        app_fields.insert("decider_exit_code".into(), Value::from(*ec));
-                    }
-                }
-                ApprovalDecision::DenyToModel {
-                    source,
-                    decider,
-                    decider_exit_code,
-                    ..
-                } => {
-                    app_fields.insert("decision".into(), Value::String("deny".into()));
-                    app_fields.insert("source".into(), Value::String((*source).into()));
-                    app_fields.insert("decider".into(), Value::String((*decider).into()));
-                    if let Some(ec) = decider_exit_code {
-                        app_fields.insert("decider_exit_code".into(), Value::from(*ec));
-                    }
-                }
-                ApprovalDecision::AbortTempFail {
-                    decider,
-                    decider_exit_code,
-                    ..
-                } => {
-                    app_fields.insert("decision".into(), Value::String("abort_75".into()));
-                    app_fields.insert("decider".into(), Value::String((*decider).into()));
-                    if let Some(ec) = decider_exit_code {
-                        app_fields.insert("decider_exit_code".into(), Value::from(*ec));
-                    }
-                }
-                ApprovalDecision::Interrupted(_) => {
-                    app_fields.insert("decision".into(), Value::String("interrupted".into()));
-                }
-            }
-            tracer.emit_event("tool_approval", app_fields);
-
-            let effective_cmd = match decision {
-                ApprovalDecision::Allow { cmd, .. } => cmd,
-                ApprovalDecision::DenyToModel { message, .. } => {
-                    let tid = state.alloc_turn_id();
-                    let tool_msg = IrMessage::Tool {
-                        turn_id: tid,
-                        tool_call_id: tc.id.clone(),
-                        is_error: true,
-                        text: format!("[t{tid}] exit=75\n{message}"),
-                        media: Vec::new(),
-                        extra: BTreeMap::new(),
-                    };
-                    if let Err(code) = state.push_message(tool_msg, None, wal, stderr_tracker) {
-                        return CycleOutcome {
-                            exit_code: code,
-                            reason: CycleEndReason::Error,
-                            turns: cycle_turns,
-                        };
-                    }
-                    continue;
-                }
-                ApprovalDecision::AbortTempFail { reason, .. } => {
-                    stderr_tracker.writeln_line(&format!("anix: {reason}"));
-                    return CycleOutcome {
-                        exit_code: ExitCode::TempFail,
-                        reason: CycleEndReason::ApprovalBlocked,
-                        turns: cycle_turns,
-                    };
-                }
-                ApprovalDecision::Interrupted(code) => {
-                    return CycleOutcome {
-                        exit_code: code,
-                        reason: CycleEndReason::Interrupted,
-                        turns: cycle_turns,
-                    };
-                }
-            };
+            let exec_timeout_sec = tc.arguments.get("timeout_sec").and_then(Value::as_u64);
+            let exec_kill_on_timeout = tc.arguments.get("kill_on_timeout").and_then(Value::as_bool);
+            let tool_args_json =
+                serde_json::to_string(&tc.arguments).unwrap_or_else(|_| "{}".into());
 
             if cfg.stderr == StderrMode::Auto {
-                stderr_tracker.writeln_dim_if_tty(&format!("[msh] $ {effective_cmd}"));
+                stderr_tracker.writeln_dim_if_tty(&format!("[{}] $ {cmd_str}", cfg.tool_name));
             }
 
             let mut start_fields = Map::new();
             start_fields.insert("tool_call_id".into(), Value::String(tc.id.clone()));
-            start_fields.insert("cmd".into(), Value::String(effective_cmd.clone()));
-            start_fields.insert("timeout_sec".into(), Value::from(effective_timeout_sec));
-            start_fields.insert("kill_on_timeout".into(), Value::Bool(kill_on_timeout));
+            start_fields.insert("tool_name".into(), Value::String(cfg.tool_name.clone()));
+            start_fields.insert("cmd".into(), Value::String(cmd_str.clone()));
+            if let Some(t) = exec_timeout_sec {
+                start_fields.insert("timeout_sec".into(), Value::from(t));
+            }
+            if let Some(k) = exec_kill_on_timeout {
+                start_fields.insert("kill_on_timeout".into(), Value::Bool(k));
+            }
             tracer.emit_event("tool_start", start_fields);
 
-            let jobs_dir = cfg.paths.jobs_dir();
             let mount_anix_out = cfg.output == OutputMode::Explicit;
-            let msh_out = match fd::run_msh_command(
+            let shell_out = match fd::run_shell_command(
                 &shell_bin,
+                &cfg.shell_prefix_args,
                 &tools_dir,
-                &effective_cmd,
+                &cmd_str,
+                &tool_args_json,
                 &cfg.paths.cwd,
-                effective_timeout_sec,
-                kill_on_timeout,
-                &jobs_dir,
+                exec_timeout_sec,
+                exec_kill_on_timeout,
+                cfg.inbox.as_deref(),
                 mount_anix_out,
-                cfg.approval,
                 sandbox,
                 signals,
                 stderr_tracker,
@@ -1603,19 +1730,25 @@ fn run_inference_cycle(
                         exit_code: ExitCode::RuntimeError,
                         reason: CycleEndReason::Error,
                         turns: cycle_turns,
+                        delivered_output: String::new(),
                     };
                 }
             };
 
-            if let Some(sig_exit) = msh_out.interrupted_by {
+            if let Some(sig_exit) = shell_out.interrupted_by {
                 return CycleOutcome {
                     exit_code: sig_exit,
                     reason: CycleEndReason::Interrupted,
                     turns: cycle_turns,
+                    delivered_output: String::new(),
                 };
             }
 
-            for warn in &msh_out.ctl_warnings {
+            if !shell_out.anix_out_bytes.is_empty() {
+                captured_explicit_out.extend_from_slice(&shell_out.anix_out_bytes);
+            }
+
+            for warn in &shell_out.ctl_warnings {
                 let mut wf = Map::new();
                 wf.insert("message".into(), Value::String(warn.clone()));
                 tracer.emit_event("warning", wf);
@@ -1624,86 +1757,45 @@ fn run_inference_cycle(
             if tracer.is_enabled() {
                 let mut wf = Map::new();
                 wf.insert("tool_call_id".into(), Value::String(tc.id.clone()));
-                wf.insert("raw_output".into(), Value::String(msh_out.stdout.clone()));
-                tracer.emit_wire("wire_msh_output", wf);
+                wf.insert("raw_output".into(), Value::String(shell_out.stdout.clone()));
+                tracer.emit_wire("wire_shell_output", wf);
+            }
+
+            // RFC §5.4: Exit code 75 (`EX_TEMPFAIL`) from a shell wrapper (e.g. `anix-approve`)
+            // signals a Fail-Closed gate abort requesting external/supervisor intervention.
+            if shell_out.exit_code == ExitCode::TempFail.as_i32() {
+                let detail = shell_out.stdout.trim();
+                if !detail.is_empty() {
+                    stderr_tracker.writeln_line(&format!("anix: {detail}"));
+                } else {
+                    stderr_tracker
+                        .writeln_line("anix: shell wrapper aborted with exit 75 (EX_TEMPFAIL)");
+                }
+                return CycleOutcome {
+                    exit_code: ExitCode::TempFail,
+                    reason: CycleEndReason::GateBlocked,
+                    turns: cycle_turns,
+                    delivered_output: String::new(),
+                };
             }
 
             let tool_turn_id = state.alloc_turn_id();
 
-            // Run `post-tool.d/` hooks (Section 9.3).
-            let post_payload = PostToolPayload {
-                turn_id: tool_turn_id,
-                tool_call_id: tc.id.clone(),
-                cmd: effective_cmd.clone(),
-                exit_code: msh_out.exit_code,
-                output: msh_out.stdout,
-            };
-            let post_payload = match hooks::run_post_tool(post_payload, &cfg.paths) {
-                Ok(p) => p,
-                Err(err) => {
-                    stderr_tracker.writeln_line(&format!("anix: {err}"));
-                    let exit_code = err.exit_code();
-                    let end_reason = if exit_code == ExitCode::TempFail {
-                        CycleEndReason::ApprovalBlocked
-                    } else {
-                        CycleEndReason::Error
-                    };
-                    return CycleOutcome {
-                        exit_code,
-                        reason: end_reason,
-                        turns: cycle_turns,
-                    };
-                }
-            };
-
-            // Process `$ANIX_CTL` frames (v1.1.2 §§5.5, 6.1, 7.1.5, 7.2).
+            // Process `$ANIX_CTL` frames (`media`, `compact`, `fold`, `hold`, `release`).
             let mut media: Vec<MediaAttachment> = Vec::new();
-            let mut extra_text_blocks: Vec<String> = Vec::new();
-            let mut vision_error = false;
+            let mut extra_warnings: Vec<String> = Vec::new();
             let mut fold_request: Option<(u64, Option<String>)> = None;
             let mut fold_validation_error: Option<String> = None;
-            let mut started_bg_job_id: Option<String> = None;
 
-            for frame in msh_out.ctl_frames {
+            for frame in shell_out.ctl_frames {
                 match frame {
-                    CtlFrame::Media { mime, path, source } => {
-                        if cfg.vision {
+                    CtlFrame::Media { mime, path, .. } => {
+                        if ALLOWED_MEDIA_MIMES.contains(&mime.as_str()) {
                             media.push(MediaAttachment { mime, path });
-                        } else if cfg.vision_bridge.bin.is_some() {
-                            match vision::run_vision_bridge(
-                                cfg,
-                                &mime,
-                                &path,
-                                source.as_deref(),
-                                signals,
-                            ) {
-                                VisionBridgeOutcome::Translated(desc) => {
-                                    extra_text_blocks.push(desc);
-                                }
-                                VisionBridgeOutcome::ToolError(err_msg) => {
-                                    vision_error = true;
-                                    extra_text_blocks.push(err_msg);
-                                }
-                                VisionBridgeOutcome::TrustViolation(reason) => {
-                                    stderr_tracker.writeln_line(&format!("anix: {reason}"));
-                                    return CycleOutcome {
-                                        exit_code: ExitCode::TempFail,
-                                        reason: CycleEndReason::ApprovalBlocked,
-                                        turns: cycle_turns,
-                                    };
-                                }
-                                VisionBridgeOutcome::Interrupted(code) => {
-                                    return CycleOutcome {
-                                        exit_code: code,
-                                        reason: CycleEndReason::Interrupted,
-                                        turns: cycle_turns,
-                                    };
-                                }
-                            }
                         } else {
-                            // v1.1 §5.5: NEVER write `media[]` to message or WAL when `vision=false`.
-                            vision_error = true;
-                            extra_text_blocks.push(vision::NO_NATIVE_VISION_ERROR.to_owned());
+                            extra_warnings.push(format!(
+                                "ignored media attachment with unsupported MIME `{mime}`"
+                            ));
                         }
                     }
                     CtlFrame::Compact => {
@@ -1719,56 +1811,48 @@ fn run_inference_cycle(
                             fold_request = Some((from_turn, summary));
                         }
                     }
-                    CtlFrame::BgJob {
-                        job_id,
-                        pid,
-                        pgid,
-                        cmd,
-                        log_path,
-                        exit_file,
+                    CtlFrame::Hold {
+                        id,
+                        deadline_sec,
+                        label,
                     } => {
-                        let mut bg_fields = Map::new();
-                        bg_fields.insert("job_id".into(), Value::String(job_id.clone()));
-                        bg_fields.insert("pid".into(), Value::from(pid));
-                        bg_fields.insert("pgid".into(), Value::from(pgid));
-                        bg_fields.insert("cmd".into(), Value::String(cmd.clone()));
-                        bg_fields.insert("log_path".into(), Value::String(log_path.clone()));
-                        bg_fields.insert("exit_file".into(), Value::String(exit_file.clone()));
-                        tracer.emit_event("bg_job_started", bg_fields);
-
-                        started_bg_job_id = Some(job_id.clone());
-                        state.bg_jobs.push(TrackedBgJob {
-                            job_id,
-                            pid,
-                            pgid,
-                            cmd,
-                            log_path: PathBuf::from(log_path),
-                            exit_file: PathBuf::from(exit_file),
-                            started_at: Instant::now(),
-                            notified: false,
-                        });
+                        let mut hf = Map::new();
+                        hf.insert("id".into(), Value::String(id.clone()));
+                        hf.insert("deadline_sec".into(), Value::from(deadline_sec));
+                        if let Some(ref lbl) = label {
+                            hf.insert("label".into(), Value::String(lbl.clone()));
+                        }
+                        tracer.emit_event("hold_started", hf);
+                        state.register_hold(id, deadline_sec, label);
+                    }
+                    CtlFrame::Release { id } => {
+                        if let Some(released) = state.release_hold(&id) {
+                            let mut rf = Map::new();
+                            rf.insert("id".into(), Value::String(released.id));
+                            rf.insert("reason".into(), Value::String("ctl_release".into()));
+                            if let Some(lbl) = released.label {
+                                rf.insert("label".into(), Value::String(lbl));
+                            }
+                            tracer.emit_event("hold_released", rf);
+                        }
                     }
                 }
+            }
+
+            for w in &extra_warnings {
+                let mut wf = Map::new();
+                wf.insert("message".into(), Value::String(w.clone()));
+                tracer.emit_event("warning", wf);
             }
 
             let mut end_fields = Map::new();
             end_fields.insert("turn_id".into(), Value::from(tool_turn_id));
             end_fields.insert("tool_call_id".into(), Value::String(tc.id.clone()));
-            end_fields.insert("exit_code".into(), Value::from(post_payload.exit_code));
+            end_fields.insert("exit_code".into(), Value::from(shell_out.exit_code));
             end_fields.insert("media_count".into(), Value::from(media.len() as u64));
-            if let Some(ref bg_id) = started_bg_job_id {
-                end_fields.insert("backgrounded".into(), Value::Bool(true));
-                end_fields.insert("job_id".into(), Value::String(bg_id.clone()));
-            }
             tracer.emit_event("tool_end", end_fields);
 
-            let mut output_body = post_payload.output;
-            for block in extra_text_blocks {
-                if !output_body.is_empty() && !output_body.ends_with('\n') {
-                    output_body.push('\n');
-                }
-                output_body.push_str(&block);
-            }
+            let mut output_body = shell_out.stdout;
             if let Some(ref f_err) = fold_validation_error {
                 if !output_body.is_empty() && !output_body.ends_with('\n') {
                     output_body.push('\n');
@@ -1776,12 +1860,10 @@ fn run_inference_cycle(
                 output_body.push_str(f_err);
             }
 
-            let mut is_error = post_payload.exit_code == ExitCode::TimeoutOrBudget.as_i32()
-                || fold_validation_error.is_some()
-                || vision_error;
+            let mut is_error = shell_out.exit_code == ExitCode::TimeoutOrBudget.as_i32()
+                || fold_validation_error.is_some();
 
-            // Resolve `aclr -t <N>` (omitted summary) auto-summary BEFORE committing the fold so
-            // any summarization error cleanly aborts the fold and reports `is_error = true` to model.
+            // Resolve `aclr -t <N>` (optional auto-summary) BEFORE committing the fold.
             let mut resolved_fold: Option<(u64, String, Option<TokenUsage>)> = None;
             if let Some((req_from, opt_summary)) = fold_request {
                 let candidate_tool_msg = IrMessage::Tool {
@@ -1790,7 +1872,7 @@ fn run_inference_cycle(
                     is_error,
                     text: format!(
                         "[t{tool_turn_id}] exit={}\n{output_body}",
-                        post_payload.exit_code
+                        shell_out.exit_code
                     ),
                     media: media.clone(),
                     extra: BTreeMap::new(),
@@ -1821,12 +1903,13 @@ fn run_inference_cycle(
                             Ok((auto_summary, fold_usage)) => {
                                 resolved_fold = Some((aligned_from, auto_summary, fold_usage));
                             }
-                            Err(CompactError::Trust(err)) => {
+                            Err(CompactError::StrictMode(err)) => {
                                 stderr_tracker.writeln_line(&format!("anix: {err}"));
                                 return CycleOutcome {
                                     exit_code: ExitCode::TempFail,
-                                    reason: CycleEndReason::ApprovalBlocked,
+                                    reason: CycleEndReason::GateBlocked,
                                     turns: cycle_turns,
+                                    delivered_output: String::new(),
                                 };
                             }
                             Err(CompactError::Provider(ProviderError::Interrupted(code))) => {
@@ -1834,11 +1917,10 @@ fn run_inference_cycle(
                                     exit_code: code,
                                     reason: CycleEndReason::Interrupted,
                                     turns: cycle_turns,
+                                    delivered_output: String::new(),
                                 };
                             }
                             Err(err) => {
-                                // v1.1 §6.1: On auto-fold failure, abort fold (no WAL fold event,
-                                // no context mutation) and return error as tool result.
                                 if let CompactError::Provider(ref pe) = err
                                     && let Some(u) = pe.usage()
                                 {
@@ -1858,7 +1940,7 @@ fn run_inference_cycle(
 
             let anchored_text = format!(
                 "[t{tool_turn_id}] exit={}\n{output_body}",
-                post_payload.exit_code
+                shell_out.exit_code
             );
 
             let tool_msg = IrMessage::Tool {
@@ -1870,19 +1952,19 @@ fn run_inference_cycle(
                 extra: BTreeMap::new(),
             };
 
-            if let Err(code) = state.push_message(tool_msg, None, wal, stderr_tracker) {
+            if let Err(code) = state.push_message(tool_msg, None, Vec::new(), wal, stderr_tracker) {
                 return CycleOutcome {
                     exit_code: code,
                     reason: CycleEndReason::Error,
                     turns: cycle_turns,
+                    delivered_output: String::new(),
                 };
             }
 
-            // Apply validated (and optionally auto-summarized) `aclr -t` tail fold (v0.3 §6.1 & §6.2).
+            // Apply validated `aclr -t` tail fold.
             if let Some((aligned_from, summary, fold_usage)) = resolved_fold {
                 let to_turn = tool_turn_id;
 
-                // Count auto-fold usage in `run_usage` / `session_usage`, NEVER in `T_cur`.
                 let normalized_fold_usage = fold_usage.map(|u| u.normalized_5());
                 if let Some(ref fu) = normalized_fold_usage {
                     state.run_usage.add_assign(fu);
@@ -1928,6 +2010,7 @@ fn run_inference_cycle(
                         exit_code: err.exit_code(),
                         reason: CycleEndReason::Error,
                         turns: cycle_turns,
+                        delivered_output: String::new(),
                     };
                 }
 
@@ -1981,12 +2064,21 @@ fn run_inference_cycle(
     }
 }
 
+fn wal_config_snapshot(cfg: &ResolvedConfig) -> WalConfigSnapshot {
+    WalConfigSnapshot {
+        output: Some(cfg.output),
+        shell: Some(cfg.shell.clone()),
+        tool_name: Some(cfg.tool_name.clone()),
+        stderr: Some(cfg.stderr),
+    }
+}
+
 fn make_ir_header(cfg: &ResolvedConfig) -> IrHeader {
     IrHeader {
         ir_version: IR_VERSION,
         record_type: HeaderTag::Header,
         tools: if cfg.shell_enabled() {
-            vec![IrStream::msh_tool_def()]
+            vec![IrStream::shell_tool_def(&cfg.tool_name)]
         } else {
             Vec::new()
         },
@@ -2003,6 +2095,18 @@ fn make_ir_header(cfg: &ResolvedConfig) -> IrHeader {
     }
 }
 
+fn deliver_notify_if_configured(cfg: &ResolvedConfig, exit_code: ExitCode, body: &str) {
+    if let Some(ref notify_dir) = cfg.notify {
+        let _ = maildir::deliver_notify(
+            notify_dir,
+            cfg.notify_id.as_deref(),
+            &cfg.name,
+            exit_code.as_i32(),
+            body,
+        );
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn finish_session(
     cfg: &ResolvedConfig,
@@ -2012,6 +2116,7 @@ fn finish_session(
     session_usage: TokenUsage,
     ctx_tokens: u64,
     leaf_id: Option<u64>,
+    final_output: &str,
     emit_usage_stderr: bool,
     stderr_tracker: &StderrTracker,
     tracer: &mut Tracer,
@@ -2027,8 +2132,6 @@ fn finish_session(
         max_tokens: cfg.max_tokens,
     };
 
-    // v1.1 §4.1: Always terminate `fd 2` cleanly on a fresh line before exit; emit static
-    // `[usage]` line in `auto` mode (ANSI reset strictly before `\n`). Never emit in `explicit`.
     if emit_usage_stderr && cfg.stderr == StderrMode::Auto && (turns > 0 || !run_usage.is_zero()) {
         emit_usage_line_stderr(
             cfg,
@@ -2042,21 +2145,7 @@ fn finish_session(
         stderr_tracker.ensure_newline();
     }
 
-    let payload = OnExitPayload {
-        exit_code: exit_code.as_i32(),
-        turns,
-        usage: run_norm,
-        session_usage: session_norm,
-        context,
-        context_file: cfg
-            .context
-            .as_ref()
-            .map(|p| p.display().to_string())
-            .unwrap_or_default(),
-        leaf_id,
-    };
-
-    hooks::run_on_exit(&payload, &cfg.paths, tracer);
+    deliver_notify_if_configured(cfg, exit_code, final_output);
 
     let mut fields = Map::new();
     fields.insert("exit_code".into(), Value::from(exit_code.as_i32()));

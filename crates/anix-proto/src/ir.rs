@@ -44,16 +44,7 @@ impl OutputMode {
     }
 }
 
-/// Interactive approval policy (Section 3.3 / 5.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum ApprovalMode {
-    #[default]
-    Ask,
-    Auto,
-    Deny,
-}
-
+/// Interactive approval policy removed from Core in v0.4.0 (moved to Layer 2 `anix-approve`).
 /// Tool schema exposed to a Provider in the IR header.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolDef {
@@ -356,11 +347,11 @@ impl IrStream {
         Ok(())
     }
 
-    /// Return the default `msh` tool definition (v1.2.0 §§7.1.5 & 9.1).
-    pub fn msh_tool_def() -> ToolDef {
+    /// Return the generic shell execution tool definition for any configured `tool_name` (v0.4.0 §6.1).
+    pub fn shell_tool_def(tool_name: &str) -> ToolDef {
         ToolDef {
-            name: "msh".into(),
-            description: "Execute a non-interactive shell command. If it exceeds timeout_sec, it automatically yields to background (unless kill_on_timeout=true) and returns pid/pgid/log path; set timeout_sec=0 to start in background immediately. Follow the <posix_runtime> contract for output delivery and $ANIX_ERR.".into(),
+            name: tool_name.to_owned(),
+            description: "Execute a non-interactive POSIX shell command in the configured shell environment. Optional `timeout_sec` and `kill_on_timeout` are forwarded to the shell executor via environment variables. Follow the <posix_runtime> contract for output delivery and $ANIX_ERR.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -371,11 +362,11 @@ impl IrStream {
                     "timeout_sec": {
                         "type": "integer",
                         "minimum": 0,
-                        "description": "Max seconds to wait in foreground before yielding to background (0 = start in background immediately; omitted = default)."
+                        "description": "Optional foreground wait timeout in seconds (0 = immediate background if supported by shell executor)."
                     },
                     "kill_on_timeout": {
                         "type": "boolean",
-                        "description": "If true, terminate the process group instead of yielding to background when timeout_sec expires (default: false)."
+                        "description": "Optional: if true, terminate process group on timeout instead of backgrounding (default: false)."
                     }
                 },
                 "required": ["cmd"]
@@ -398,7 +389,7 @@ mod tests {
             header: IrHeader {
                 ir_version: IR_VERSION,
                 record_type: HeaderTag::Header,
-                tools: vec![IrStream::msh_tool_def()],
+                tools: vec![IrStream::shell_tool_def("shell")],
                 max_output_tokens: Some(16384),
                 params: BTreeMap::from([("reasoning_effort".into(), Value::String("high".into()))]),
                 meta: IrMeta {
@@ -419,7 +410,7 @@ mod tests {
                     reasoning: None,
                     tool_calls: vec![ToolCall {
                         id: "call_1".into(),
-                        name: "msh".into(),
+                        name: "shell".into(),
                         arguments: serde_json::json!({"cmd": "ls"}),
                     }],
                     provider_opaque: None,

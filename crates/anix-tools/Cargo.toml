@@ -1,6 +1,6 @@
 [package]
 name = "anix-tools"
-description = "Explicit model-facing a* tools (`aview`, `aclr`) communicating via $ANIX_CTL"
+description = "Layer 2 reference tools (`aview`, `aclr`, `anix-approve`, `anix-hook`)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -16,13 +16,24 @@ path = "src/bin/aview.rs"
 name = "aclr"
 path = "src/bin/aclr.rs"
 
+[[bin]]
+name = "anix-approve"
+path = "src/bin/anix-approve.rs"
+
+[[bin]]
+name = "anix-hook"
+path = "src/bin/anix-hook.rs"
+
 [lints]
 workspace = true
 
 [dependencies]
+anix-proto.workspace = true
 clap.workspace = true
 image.workspace = true
-anix-proto.workspace = true
+libc.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+serde_yaml_ng.workspace = true
 thiserror.workspace = true
 uuid.workspace = true

@@ -1,40 +1,40 @@
-//! Unified side-channel control frames written to `$ANIX_CTL` (`fd 6`) by `a*` tools (Section 7.2).
+//! Unified side-channel control frames written to `$ANIX_CTL` by shell tools (Section 6.2).
 
 use serde::{Deserialize, Serialize};
 
-/// Hard limit per JSONL control frame on `$ANIX_CTL` (64 KiB, Section 7.2).
+/// Hard limit per JSONL control frame on `$ANIX_CTL` (64 KiB, Section 6.2).
 pub const MAX_CTL_FRAME_BYTES: usize = 64 * 1024;
 
-/// Single JSONL control frame sent from `aview` / `aclr` to `anix` over `fd 6`.
+/// Single JSONL control frame sent from child tools to `anix` over `$ANIX_CTL`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum CtlFrame {
-    /// Emitted by `aview` to attach a rendered/resized local image to the current tool turn.
+    /// Attach a local image/document path to the current tool turn (passed through to Provider).
     Media {
         mime: String,
         path: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         source: Option<String>,
     },
-    /// Emitted by `aclr -s` to trigger full context compaction & new WAL checkpoint.
+    /// Trigger full context compaction & new WAL checkpoint (`aclr -s`).
     Compact,
-    /// Emitted by `aclr -t <N> ["<summary>"]` to fold tail turns `N..=now` preserving KV-cache prefix.
-    /// When `summary` is omitted (`None`), the runtime invokes `[compact]` to auto-summarize `N..=now` (v1.1 §6.1).
+    /// Fold tail turns `from_turn..=now` into a branch summary preserving frozen prefix (`aclr -t`).
     Fold {
         from_turn: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         summary: Option<String>,
     },
-    /// Emitted by `msh` when a command yields to background (either `timeout_sec == 0`
-    /// or foreground wait expired with `kill_on_timeout == false`, v1.1.2 §§7.1.5 & 7.2).
-    BgJob {
-        job_id: String,
-        pid: u32,
-        pgid: u32,
-        cmd: String,
-        log_path: String,
-        exit_file: String,
+    /// Register a generic lease preventing `--inbox` idle-timeout exit until either a message
+    /// carrying `Anix-In-Reply-To: <id>` arrives, `Release` is emitted, or `deadline_sec` expires
+    /// (synthesizing a `hold-expired` event, v0.4.0 §4.3.3 & §6.2).
+    Hold {
+        id: String,
+        deadline_sec: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
     },
+    /// Explicitly release a previously registered `Hold` lease.
+    Release { id: String },
 }
 
 #[cfg(test)]
@@ -58,13 +58,13 @@ mod tests {
                 from_turn: 4,
                 summary: None,
             },
-            CtlFrame::BgJob {
-                job_id: "j_1234abcd".into(),
-                pid: 4242,
-                pgid: 4242,
-                cmd: "cargo build".into(),
-                log_path: "/tmp/anix-1000/jobs/j_1234abcd.log".into(),
-                exit_file: "/tmp/anix-1000/jobs/j_1234abcd.exit".into(),
+            CtlFrame::Hold {
+                id: "j_1234abcd".into(),
+                deadline_sec: 600,
+                label: Some("cargo build".into()),
+            },
+            CtlFrame::Release {
+                id: "j_1234abcd".into(),
             },
         ];
 
