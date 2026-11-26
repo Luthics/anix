@@ -528,6 +528,18 @@
 | [`test_interrupt_during_external_decision_identifies_the_decider_in_trace`](../tests/test_approval.py#L388) | [§5.2-06](../docs/RFC.md?plain=1#L279) | 外部审批被 SIGTERM 中断时 Trace 仍应标记 external。 |
 | [`test_interrupt_during_external_decision_identifies_the_decider_in_trace`](../tests/test_approval.py#L388) | [§6.4-03](../docs/RFC.md?plain=1#L410) | 外部审批中收到 SIGTERM，退出 143 并记录中断。 |
 
+## `tests/test_cycle_accounting.py`
+
+| 测试 | RFC 原文 | 本测试的预期结果 |
+| --- | --- | --- |
+| [`test_each_declared_cycle_end_reason_matches_the_cause_and_os_status`](../tests/test_cycle_accounting.py#L49) | [§9.5-15](../docs/RFC.md?plain=1#L695) | 逐个触发 RFC 列举的 cycle_end.reason，包括共享同一进程退出码的不同原因，并与 OS、run_end 对照。 [断言 L82](../tests/test_cycle_accounting.py#L82) · [断言 L87](../tests/test_cycle_accounting.py#L87) |
+| [`test_inbox_cycles_separate_per_request_per_cycle_process_and_session_totals`](../tests/test_cycle_accounting.py#L94) | [§9.5-16](../docs/RFC.md?plain=1#L694) | 对初始输入和两封 Inbox 消息分别核对起止配对、来源、递增编号以及最后一次 idle。 [断言 L134](../tests/test_cycle_accounting.py#L134) · [断言 L137](../tests/test_cycle_accounting.py#L137) · [断言 L140](../tests/test_cycle_accounting.py#L140) |
+| [`test_inbox_cycles_separate_per_request_per_cycle_process_and_session_totals`](../tests/test_cycle_accounting.py#L94) | [§9.5-17](../docs/RFC.md?plain=1#L695) | 四次请求分属三个 cycle；每轮核对轮次数、五字段本轮和累计用量、会话总量及末次回答的水位。 [断言 L163](../tests/test_cycle_accounting.py#L163) |
+| [`test_inbox_cycles_separate_per_request_per_cycle_process_and_session_totals`](../tests/test_cycle_accounting.py#L94) | [§9.5-18](../docs/RFC.md?plain=1#L697) | 将每个 llm_response 与实际发给 anix 的四组五字段 usage 逐项比对。 [断言 L150](../tests/test_cycle_accounting.py#L150) |
+| [`test_inbox_cycles_separate_per_request_per_cycle_process_and_session_totals`](../tests/test_cycle_accounting.py#L94) | [§9.5-19](../docs/RFC.md?plain=1#L701) | 在队列排空并闲置退出后，比对 run_end 总轮数、进程用量、会话用量及最终水位。 [断言 L170](../tests/test_cycle_accounting.py#L170) |
+| [`test_inbox_cycles_separate_per_request_per_cycle_process_and_session_totals`](../tests/test_cycle_accounting.py#L94) | [§9.3-04](../docs/RFC.md?plain=1#L666) | 同一批任务在无状态和恢复旧 WAL 时，on-exit 钩子均能读到独立核算的五项用量及最终水位。 [断言 L168](../tests/test_cycle_accounting.py#L168) |
+| [`test_failed_exit_hook_preserves_reports_later_hooks_and_primary_status`](../tests/test_cycle_accounting.py#L179) | [§9.3-05](../docs/RFC.md?plain=1#L666) | on-exit 钩子非零退出时，后续钩子仍收到相同的退出报告；失败只写 Trace，主进程保留成功或失败状态。 [断言 L191](../tests/test_cycle_accounting.py#L191) · [断言 L194](../tests/test_cycle_accounting.py#L194) · [断言 L197](../tests/test_cycle_accounting.py#L197) |
+
 ## `tests/test_discovery_indexes.py`
 
 | 测试 | RFC 原文 | 本测试的预期结果 |
