@@ -580,7 +580,7 @@ Canonical IR 是 `anix` 核心与外部 Provider、`pre-context.d/` 钩子及外
   * `meta` (`Meta`, 必填)：`{"stderr_mode": "auto"|"explicit", "output_mode": "reply"|"explicit"|"none", "cwd": "<abs_path>"}`，可选含 `turn_budget`（`output_mode` 为 v1.2.0 新增可选字段，保持 `ir_version = 1` 前向兼容）。
   * *前向兼容*：`ir_version = 1` 下遇到未识别扩展字段（如 `x_*`）必须忽略而非报错；钩子应当原样透传未修改字段。
 * **消息项（按 `role` 区分，顺序即时间顺序）**：
-  * **`role = "system"`**：`turn_id` (`uint64`, 必填)、`text` (`string`, 必填)。首条 `role: "system"` 为冻结系统前缀，Provider 必须映射至上游 `system` / `instructions` 且严禁改动其字节内容以保 KV-Cache；尾部因 `runtime_update` 追加的 `role: "system"` 若上游 API 不支持中间 `system` 角色，由 Provider 降级映射为 `user` 消息。
+  * **`role = "system"`**：`turn_id` (`uint64`, 必填)、`text` (`string`, 必填)。首条 `role: "system"` 为冻结系统前缀，Provider 必须将其映射至上游可缓存的系统前缀位置且严禁改动其字节内容以保 KV-Cache（如 Anthropic / OpenAI Chat Completions 映射至 `system`；OpenAI Responses 映射至 `input[0]` 的 `role: "developer"` 消息而非顶层 `instructions`，因 GPT-6.2+ 将顶层 `instructions` 追加在 `input` 之后且不计入前缀缓存，顶层 `instructions` 保留给 `params.instructions` 承载动态单轮指令）；尾部因 `runtime_update` 追加的 `role: "system"` 若上游 API 不支持中间 `system` 角色，由 Provider 降级映射为 `user` 消息。
   * **`role = "user"`**：`turn_id` (`uint64`, 必填)、`text` (`string`, 必填)、`media` (`MediaAttachment[]`, 可选，无附件时省略)。
   * **`role = "assistant"`**：`turn_id` (`uint64`, 必填)、`text` (`string`, 可选)、`reasoning` (`string`, 可选)、`tool_calls` (`ToolCall[]`, 可选，每项含 `id`、`name`、`arguments` JSON 对象；`text` 与 `tool_calls` 不可同时为空)、`provider_opaque` (`object`, 可选，跨 Provider 切换时必须清空)。
   * **`role = "tool"`**：`turn_id` (`uint64`, 必填)、`tool_call_id` (`string`, 必填，精确匹配紧邻前序 `assistant.tool_calls[].id`)、`is_error` (`bool`, 可选，默认 `false`)、`text` (`string`, 必填)、`media` (`MediaAttachment[]`, 可选，承载 `aview` 产生的本地图片附件)。

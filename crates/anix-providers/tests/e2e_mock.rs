@@ -275,7 +275,12 @@ fn busybox_symlink_openai_responses_end_to_end() {
         req.headers.get("authorization").map(String::as_str),
         Some("Bearer sk-resp")
     );
-    assert_eq!(req.body["instructions"], "You are helpful.");
+    assert!(req.body.get("instructions").is_none());
+    assert_eq!(req.body["input"][0]["role"], "developer");
+    assert_eq!(
+        req.body["input"][0]["content"][0]["text"],
+        "You are helpful."
+    );
     assert!(events.contains(&ProviderEvent::TextDelta {
         text: "Responses OK".into()
     }));

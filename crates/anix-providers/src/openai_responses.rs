@@ -37,7 +37,7 @@ pub fn build_request_with_session(
     model: &str,
     session_id: Option<&str>,
 ) -> Result<Value, TranslateError> {
-    let mut instructions: Option<String> = None;
+    let mut saw_frozen_system = false;
     let mut input_items: Vec<Value> = Vec::new();
     let mut pending_tool_media: Vec<(String, MediaAttachment)> = Vec::new();
 
@@ -69,9 +69,18 @@ pub fn build_request_with_session(
         }
         match msg {
             IrMessage::System { text, .. } => {
-                if instructions.is_none() {
-                    // Frozen first system prefix: pass verbatim into `instructions`.
-                    instructions = Some(text.clone());
+                if !saw_frozen_system {
+                    // Frozen first system prefix: emit as leading `role: "developer"` item in
+                    // `input[]` rather than top-level `instructions`, because GPT-6.2+ excludes
+                    // top-level `instructions` from prompt caching (appending it uncached after
+                    // `input`). Top-level `instructions` remains available via `params.instructions`
+                    // for dynamic single-turn directives.
+                    saw_frozen_system = true;
+                    input_items.push(json!({
+                        "type": "message",
+                        "role": "developer",
+                        "content": [{ "type": "input_text", "text": text }]
+                    }));
                 } else {
                     // Trailing runtime_update system message: degrade to `user` item for
                     // broad compatibility across OpenAI Responses and compatible gateways.
@@ -150,9 +159,6 @@ pub fn build_request_with_session(
     let mut body = Map::new();
     body.insert("model".into(), Value::String(model.to_owned()));
     body.insert("stream".into(), Value::Bool(true));
-    if let Some(inst) = instructions {
-        body.insert("instructions".into(), Value::String(inst));
-    }
     body.insert("input".into(), Value::Array(input_items));
 
     if !stream.header.tools.is_empty() {
@@ -225,6 +231,8 @@ pub fn build_request_with_session(
             | "text"
             | "reasoning"
             | "include"
+            | "instructions"
+            | "prompt_cache_retention"
             | "user" => {
                 body.insert(key.clone(), val.clone());
             }
@@ -630,14 +638,17 @@ mod tests {
     use anix_proto::ir::{HeaderTag, IrHeader, IrMeta, StderrMode};
 
     #[test]
-    fn builds_responses_request_with_frozen_instructions_and_reasoning_effort() {
+    fn builds_responses_request_with_frozen_developer_prefix_and_reasoning_effort() {
         let stream = IrStream {
             header: IrHeader {
                 ir_version: IR_VERSION,
                 record_type: HeaderTag::Header,
                 tools: vec![IrStream::msh_tool_def()],
                 max_output_tokens: Some(4096),
-                params: BTreeMap::from([("reasoning_effort".into(), json!("medium"))]),
+                params: BTreeMap::from([
+                    ("reasoning_effort".into(), json!("medium")),
+                    ("instructions".into(), json!("DYNAMIC_TAIL")),
+                ]),
                 meta: IrMeta {
                     output_mode: None,
                     stderr_mode: StderrMode::Auto,
@@ -654,12 +665,16 @@ mod tests {
             ],
         };
 
-        let body = build_request(&stream, "gpt-5").expect("build responses request");
-        assert_eq!(body["instructions"], "FROZEN_SYS");
+        let body = build_request(&stream, "gpt-6.2-sol").expect("build responses request");
+        assert_eq!(body["instructions"], "DYNAMIC_TAIL");
         assert_eq!(body["max_output_tokens"], 4096);
         assert_eq!(body["reasoning"], json!({"effort": "medium"}));
-        assert_eq!(body["input"].as_array().expect("input").len(), 2);
-        assert_eq!(body["input"][1]["role"], "user");
+        let input = body["input"].as_array().expect("input");
+        assert_eq!(input.len(), 3);
+        assert_eq!(input[0]["role"], "developer");
+        assert_eq!(input[0]["content"][0]["text"], "FROZEN_SYS");
+        assert_eq!(input[1]["role"], "user");
+        assert_eq!(input[2]["role"], "user");
     }
 
     #[test]
