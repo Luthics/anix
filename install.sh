@@ -234,6 +234,12 @@ STAGE="${TMP_DIR}/anix-${VERSION}-${TARGET}"
 mkdir -p "${PREFIX}/bin" "${PREFIX}/libexec/anix/tools"
 install -m 0755 "${STAGE}/bin/anix" "${PREFIX}/bin/anix"
 install -m 0755 "${STAGE}/libexec/anix/msh" "${PREFIX}/libexec/anix/msh"
+if [ -f "${STAGE}/libexec/anix/anix-approve" ]; then
+  install -m 0755 "${STAGE}/libexec/anix/anix-approve" "${PREFIX}/libexec/anix/anix-approve"
+fi
+if [ -f "${STAGE}/libexec/anix/anix-hook" ]; then
+  install -m 0755 "${STAGE}/libexec/anix/anix-hook" "${PREFIX}/libexec/anix/anix-hook"
+fi
 if [ -f "${STAGE}/libexec/anix/anix-provider" ]; then
   install -m 0755 "${STAGE}/libexec/anix/anix-provider" "${PREFIX}/libexec/anix/anix-provider"
   for alias_name in anix-provider-openai-responses anix-provider-openai-compat anix-provider-anthropic; do
@@ -251,17 +257,25 @@ fi
 install -m 0755 "${STAGE}/libexec/anix/tools/aview" "${PREFIX}/libexec/anix/tools/aview"
 install -m 0755 "${STAGE}/libexec/anix/tools/aclr" "${PREFIX}/libexec/anix/tools/aclr"
 
-mkdir -p "${CONFIG_DIR}" "${AGENTS_DIR}"
+mkdir -p "${CONFIG_DIR}" "${AGENTS_DIR}" "${CONFIG_DIR}/hooks/pre-context.d"
+chmod 0755 "${CONFIG_DIR}/hooks" "${CONFIG_DIR}/hooks/pre-context.d"
+if [ -x "${PREFIX}/libexec/anix/anix-hook" ]; then
+  for hook_name in 20-skills 30-tips; do
+    if [ ! -e "${CONFIG_DIR}/hooks/pre-context.d/${hook_name}" ] && [ ! -L "${CONFIG_DIR}/hooks/pre-context.d/${hook_name}" ]; then
+      ln -s "${PREFIX}/libexec/anix/anix-hook" "${CONFIG_DIR}/hooks/pre-context.d/${hook_name}"
+    fi
+  done
+fi
 if [ ! -f "${CONFIG_DIR}/config.toml" ]; then
   umask 077
   cat > "${CONFIG_DIR}/config.toml" <<'EOF'
 [defaults]
 provider = "openai-responses"
 model = "deepseek-v4.1-flash"
+shell = "msh"
 max_turns = 100
 max_tokens = 256000
 compact_threshold = 0.8
-approval = "auto"
 output = "reply"
 stderr = "auto"
 
@@ -295,7 +309,6 @@ shell: msh
 max_turns: 100
 max_tokens: 256000
 compact_threshold: 0.8
-approval: auto
 output: reply
 stderr: auto
 ---
@@ -311,7 +324,8 @@ fi
 say ""
 say "Installed Anix successfully:"
 say "  $("${PREFIX}/bin/anix" --version)"
-say "  Binaries: ${PREFIX}/bin/anix, ${PREFIX}/libexec/anix/{msh,anix-provider{,-openai-responses,-openai-compat,-anthropic},tools/{aview,aclr}}"
+say "  Binaries: ${PREFIX}/bin/anix, ${PREFIX}/libexec/anix/{msh,anix-approve,anix-hook,anix-provider{,-openai-responses,-openai-compat,-anthropic},tools/{aview,aclr}}"
+say "  Hooks:    ${CONFIG_DIR}/hooks/pre-context.d/{20-skills,30-tips}"
 say "  Config:   ${CONFIG_DIR}/config.toml"
 say "  Agents:   ${AGENTS_DIR}/bash.agent"
 

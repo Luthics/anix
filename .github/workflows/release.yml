@@ -57,7 +57,7 @@ jobs:
         if: matrix.musl
         run: |
           BIN_DIR="target/${{ matrix.target }}/release"
-          for bin in anix msh anix-provider aview aclr; do
+          for bin in anix msh anix-approve anix-hook anix-provider aview aclr; do
             file "${BIN_DIR}/${bin}"
             if ldd "${BIN_DIR}/${bin}" 2>&1 | grep -q '=>'; then
               echo "ERROR: ${bin} is dynamically linked" >&2
@@ -78,6 +78,8 @@ jobs:
           install -d -m 0755 "${STAGE}/bin" "${STAGE}/libexec/anix/tools" "${STAGE}/examples"
           install -m 0755 "${BIN_DIR}/anix" "${STAGE}/bin/anix"
           install -m 0755 "${BIN_DIR}/msh" "${STAGE}/libexec/anix/msh"
+          install -m 0755 "${BIN_DIR}/anix-approve" "${STAGE}/libexec/anix/anix-approve"
+          install -m 0755 "${BIN_DIR}/anix-hook" "${STAGE}/libexec/anix/anix-hook"
           install -m 0755 "${BIN_DIR}/anix-provider" "${STAGE}/libexec/anix/anix-provider"
           ln -sf anix-provider "${STAGE}/libexec/anix/anix-provider-openai-responses"
           ln -sf anix-provider "${STAGE}/libexec/anix/anix-provider-openai-compat"
