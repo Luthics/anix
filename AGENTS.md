@@ -1,12 +1,15 @@
 # AGENTS.md
 
-## 1. 规范源
-- 协议、I/O、安全门禁与运行时行为以 [docs/RFC.md](docs/RFC.md) 为唯一事实源（版本号记录于文档头部，历史版本通过 Git 追溯），本文档不重复规范正文。
+## 1. 规范源与四层边界
+- **Core 规范（Normative）**：内核协议、I/O、安全门禁与外部线协议以 [docs/RFC.md](docs/RFC.md) 为唯一事实源（`0.x` 版本号记录于文档头部，历史版本通过 Git 追溯），本文档不重复规范正文。
+- **Runtime 说明（Informative）**：`msh`、`anix-provider`、`a*`（`aview`/`aclr`）、`20-skills`/`30-tips` 与 FHS 打包安装详见 [docs/RUNTIME.md](docs/RUNTIME.md)。
+- **分仓边界**：本仓库承载 Layer 1（`anix-core`）与 Layer 2（`anix-runtime`）；高阶交互壳（`anix-agent`）与生态项目（`anix-*`）均在独立仓库演进，严禁向 `anix-core` 反向耦合。
 - 如发现协议缺口或需调整协议/行为，**必须先与用户明确沟通确认，严禁擅自修改 RFC 或偏离规范实现**。
 
 ## 2. Workspace 边界
-- `crates/anix-proto`：唯一线协议事实源，**禁止引入网络 / 异步 / OS 运行时依赖**。
-- `crates/anix-core`（`anix`）、`crates/msh`（`msh`）、`crates/anix-providers`（`anix-provider` 及 BusyBox 软链 `anix-provider-{openai-responses,openai-compat,anthropic}`）、`crates/anix-tools`（`aview`、`aclr`）：各二进制职责严格按 RFC 划分。
+- `crates/anix-proto`（Layer 1）：唯一线协议事实源，**禁止引入网络 / 异步 / OS 运行时依赖**。
+- `crates/anix-core`（Layer 1，`anix`）：纯内核解释器，**严禁依赖** `msh` / `anix-providers` / `anix-tools`。
+- `crates/msh`（`msh`）、`crates/anix-providers`（`anix-provider` 及 BusyBox 软链 `anix-provider-{openai-responses,openai-compat,anthropic}`）、`crates/anix-tools`（`aview`、`aclr`）：属于 Layer 2（`anix-runtime`）可替换参考实现，各二进制职责严格按 [docs/RUNTIME.md](docs/RUNTIME.md) 与 [docs/RFC.md](docs/RFC.md) 划分。
 - Linux 专属系统调用（`pidfd`、`PR_SET_PDEATHSIG`、Landlock）严格隔离在 `#[cfg(target_os = "linux")]` 模块（`crates/anix-core/src/platform/linux.rs`）。
 
 ## 3. Rust 编码规范

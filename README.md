@@ -1,6 +1,17 @@
-# Anix (POSIX-Native Agent Runtime)
+# Anix (POSIX-Native Agent Core & Runtime)
 
-POSIX-native Agent runtime (`ir_version = 1`, v0.2.0-rfc spec in [docs/RFC.md](docs/RFC.md)) built in Rust as independent static binaries with zero external runtime dependencies.
+POSIX-native Agent kernel and reference runtime (`ir_version = 1`, Core spec `v0.2.0-rfc` in [docs/RFC.md](docs/RFC.md), Reference Runtime guide in [docs/RUNTIME.md](docs/RUNTIME.md)) built in Rust as independent static binaries with zero external runtime dependencies.
+
+## Layered Architecture
+
+Anix follows a strict, unidirectional 4-tier progression inspired by Unix and Pi's radical minimalism — enforced at the **POSIX process & wire-protocol boundary**:
+
+| Tier | Name | Scope & Repository | Role |
+| :--- | :--- | :--- | :--- |
+| **Layer 1** | **`anix-core`** | This repo ([docs/RFC.md](docs/RFC.md), Normative) | Minimal POSIX Agent kernel (`anix` + `anix-proto`): CLI/frontmatter, FD 0/1/2/4..9 & 3-axis output contract, WAL, event-driven signals, and language-agnostic external plugin wire protocols. Zero dependencies on any shell, LLM SDK, or TUI. |
+| **Layer 2** | **`anix-runtime`** | This repo ([docs/RUNTIME.md](docs/RUNTIME.md), Informative) | Batteries-included reference distribution: `anix` + `msh` + `a*` (`aview`, `aclr`) + `anix-provider` + built-in hooks (`20-skills`, `30-tips`) + `install.sh`. Every non-core component is replaceable. |
+| **Layer 3** | **`anix-agent`** | Separate repo (out of Core RFC) | High-level interactive shell / coding harness (Claude Code / Pi style: TUI, session tree, approval UI, diff viewer, per-turn dynamic context) driving `anix-runtime` strictly over RFC protocols. |
+| **Layer 4** | **`anix-*`** | Separate repos (out of Core RFC) | Independent ecosystem packages: custom providers, approval engines, vision bridges, trace dashboards, domain agent/skill packs in any language. |
 
 ## Quick Install
 
