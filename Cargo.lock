@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "anix-core"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "anix-proto",
  "clap",
@@ -28,7 +28,7 @@ dependencies = [
 
 [[package]]
 name = "anix-proto"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -37,7 +37,7 @@ dependencies = [
 
 [[package]]
 name = "anix-providers"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "anix-proto",
  "base64 0.22.1",
@@ -48,7 +48,7 @@ dependencies = [
 
 [[package]]
 name = "anix-tools"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "anix-proto",
  "clap",
@@ -527,7 +527,7 @@ dependencies = [
 
 [[package]]
 name = "msh"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "anix-proto",
  "libc",
