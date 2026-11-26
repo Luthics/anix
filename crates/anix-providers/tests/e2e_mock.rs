@@ -830,3 +830,138 @@ fn session_affinity_headers_and_body_mapping_across_all_dialects() {
     let r6 = cap6.lock().unwrap().clone().unwrap();
     assert!(!r6.headers.contains_key("x-session-id"));
 }
+
+#[test]
+fn openai_responses_round_trips_codex_turn_state_via_opaque() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let addr = listener.local_addr().expect("local addr");
+    let captured_all: Arc<Mutex<Vec<CapturedRequest>>> = Arc::new(Mutex::new(Vec::new()));
+    let cap_clone = Arc::clone(&captured_all);
+
+    let sse = concat!(
+        "event: response.output_text.delta\n",
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n\n",
+        "event: response.completed\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"output\":[],\"usage\":{\"input_tokens\":10,\"output_tokens\":2}}}\n\n"
+    )
+    .to_owned();
+
+    let handle = thread::spawn(move || {
+        for turn in 0..2 {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+            let mut request_line = String::new();
+            reader.read_line(&mut request_line).expect("req line");
+            let mut headers = BTreeMap::new();
+            let mut content_length: usize = 0;
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("hdr");
+                let trimmed = line.trim_end_matches(&['\r', '\n'][..]);
+                if trimmed.is_empty() {
+                    break;
+                }
+                if let Some((k, v)) = trimmed.split_once(':') {
+                    let key = k.trim().to_ascii_lowercase();
+                    let val = v.trim().to_owned();
+                    if key == "content-length" {
+                        content_length = val.parse().unwrap_or(0);
+                    }
+                    headers.insert(key, val);
+                }
+            }
+            let mut body_bytes = vec![0u8; content_length];
+            reader.read_exact(&mut body_bytes).expect("body");
+            let body: Value = serde_json::from_slice(&body_bytes).expect("json");
+            cap_clone.lock().unwrap().push(CapturedRequest {
+                request_line: request_line.trim().to_owned(),
+                headers,
+                body,
+            });
+            let extra_hdr = if turn == 0 {
+                "X-Codex-Turn-State: opaque-turn-token-v1\r\n"
+            } else {
+                ""
+            };
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n{extra_hdr}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+                sse.len(),
+                sse
+            );
+            stream.write_all(resp.as_bytes()).expect("write resp");
+            let _ = stream.flush();
+        }
+    });
+
+    // Turn 1: server returns `X-Codex-Turn-State`, provider emits it in `ProviderEvent::Opaque`.
+    let (code1, events1, _) = run_bin(
+        &provider_bin(),
+        &["openai-responses"],
+        &format!("http://{addr}/v1"),
+        "sk-ts",
+        "gpt-6.2-sol",
+        &sample_ir_jsonl(),
+    );
+    assert_eq!(code1, 0);
+    let opaque1 = events1
+        .iter()
+        .find_map(|ev| match ev {
+            ProviderEvent::Opaque { data } => Some(data.clone()),
+            _ => None,
+        })
+        .expect("expected Opaque event with responses_turn_state");
+    assert_eq!(opaque1["responses_turn_state"], "opaque-turn-token-v1");
+
+    // Turn 2: feed Turn 1's `provider_opaque` back via IR -> provider attaches `x-codex-turn-state` header!
+    let turn2_stream = IrStream {
+        header: IrHeader {
+            ir_version: IR_VERSION,
+            record_type: HeaderTag::Header,
+            tools: Vec::new(),
+            max_output_tokens: None,
+            params: BTreeMap::new(),
+            meta: IrMeta {
+                output_mode: None,
+                stderr_mode: StderrMode::Auto,
+                cwd: "/tmp".into(),
+                turn_budget: None,
+                extra: BTreeMap::new(),
+            },
+            extra: BTreeMap::new(),
+        },
+        messages: vec![
+            IrMessage::system(0, "You are helpful."),
+            IrMessage::user(1, "Say hi"),
+            IrMessage::Assistant {
+                turn_id: 2,
+                text: Some("OK".into()),
+                reasoning: None,
+                tool_calls: Vec::new(),
+                provider_opaque: Some(opaque1),
+                extra: BTreeMap::new(),
+            },
+            IrMessage::user(3, "Again"),
+        ],
+    };
+    let (code2, _, _) = run_bin(
+        &provider_bin(),
+        &["openai-responses"],
+        &format!("http://{addr}/v1"),
+        "sk-ts",
+        "gpt-6.2-sol",
+        &turn2_stream.to_jsonl().unwrap(),
+    );
+    handle.join().expect("server");
+    assert_eq!(code2, 0);
+
+    let reqs = captured_all.lock().unwrap();
+    assert_eq!(reqs.len(), 2);
+    assert!(!reqs[0].headers.contains_key("x-codex-turn-state"));
+    assert_eq!(
+        reqs[1]
+            .headers
+            .get("x-codex-turn-state")
+            .map(String::as_str),
+        Some("opaque-turn-token-v1")
+    );
+}

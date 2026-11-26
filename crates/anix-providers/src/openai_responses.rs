@@ -14,6 +14,7 @@ use crate::common::{
 };
 
 const TAG: &str = "anix-provider-openai-responses";
+const TURN_STATE_HEADER: &str = "x-codex-turn-state";
 
 /// Resolve the Responses API endpoint URL from `base_url`.
 pub fn endpoint_url(base_url: &str) -> String {
@@ -270,8 +271,24 @@ struct ResponsesStreamState {
     pending_calls: HashMap<String, PendingFunctionCall>,
     emitted_call_ids: HashSet<String>,
     opaque_items: Vec<Value>,
+    turn_state: Option<String>,
     saw_tool_call: bool,
     saw_done: bool,
+}
+
+fn latest_turn_state(stream: &IrStream) -> Option<String> {
+    stream.messages.iter().rev().find_map(|msg| match msg {
+        IrMessage::Assistant {
+            provider_opaque: Some(opaque),
+            ..
+        } => opaque
+            .get("responses_turn_state")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned),
+        _ => None,
+    })
 }
 
 /// Execute a single-shot streaming POST to `{base_url}/responses`.
@@ -313,6 +330,9 @@ where
     if let Some(h) = resolve_session_header(&stream.header.params, env.session_id.as_deref(), TAG) {
         headers.push(h);
     }
+    if let Some(turn_state) = latest_turn_state(stream) {
+        headers.push((TURN_STATE_HEADER.into(), turn_state));
+    }
 
     let response = match send_post_with_agent(
         agent,
@@ -328,8 +348,16 @@ where
         Err(code) => return code,
     };
 
+    let response_turn_state = response
+        .headers()
+        .get(TURN_STATE_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned);
+
     let reader = BufReader::new(response.into_body().into_reader());
-    consume_sse_stream_with_sink(reader, &mut sink)
+    consume_sse_stream_with_turn_state(reader, response_turn_state, &mut sink)
 }
 
 /// Consume an OpenAI Responses SSE stream into canonical [`ProviderEvent`]s.
@@ -338,7 +366,22 @@ where
     R: BufRead,
     F: FnMut(&ProviderEvent),
 {
-    let mut state = ResponsesStreamState::default();
+    consume_sse_stream_with_turn_state(reader, None, sink)
+}
+
+fn consume_sse_stream_with_turn_state<R, F>(
+    reader: R,
+    turn_state: Option<String>,
+    sink: &mut F,
+) -> ExitCode
+where
+    R: BufRead,
+    F: FnMut(&ProviderEvent),
+{
+    let mut state = ResponsesStreamState {
+        turn_state,
+        ..Default::default()
+    };
     match drive_sse_reader(TAG, reader, sink, |ev, data, s| {
         dispatch_sse_frame(ev, data, &mut state, s)
     }) {
@@ -372,7 +415,7 @@ where
 {
     if data.trim() == "[DONE]" {
         if !state.saw_done {
-            flush_opaque(&mut state.opaque_items, sink);
+            flush_opaque(&mut state.opaque_items, &mut state.turn_state, sink);
             let finish_reason = if state.saw_tool_call {
                 "tool_calls"
             } else {
@@ -538,7 +581,7 @@ where
                 }
             }
 
-            flush_opaque(&mut state.opaque_items, sink);
+            flush_opaque(&mut state.opaque_items, &mut state.turn_state, sink);
 
             let finish_reason = if state.saw_tool_call {
                 "tool_calls"
@@ -616,14 +659,21 @@ where
     }
 }
 
-fn flush_opaque<F>(opaque_items: &mut Vec<Value>, sink: &mut F)
+fn flush_opaque<F>(opaque_items: &mut Vec<Value>, turn_state: &mut Option<String>, sink: &mut F)
 where
     F: FnMut(&ProviderEvent),
 {
+    let mut obj = Map::new();
     if !opaque_items.is_empty() {
         let items = std::mem::take(opaque_items);
+        obj.insert("responses_reasoning_items".into(), Value::Array(items));
+    }
+    if let Some(ts) = turn_state.take() {
+        obj.insert("responses_turn_state".into(), Value::String(ts));
+    }
+    if !obj.is_empty() {
         sink(&ProviderEvent::Opaque {
-            data: json!({ "responses_reasoning_items": items }),
+            data: Value::Object(obj),
         });
     }
 }
