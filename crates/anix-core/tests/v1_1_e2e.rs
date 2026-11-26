@@ -2032,11 +2032,10 @@ for raw in sys.stdin:
         .collect();
     let req8_msgs = reqs_after5[7]["messages"].as_array().unwrap();
     assert_eq!(req8_msgs.len(), 2, "expected [system, user(3)] only");
-    assert!(
-        req8_msgs[1]["text"]
-            .as_str()
-            .unwrap()
-            .contains("root prompt")
+    assert_eq!(
+        req8_msgs[1]["text"].as_str().unwrap(),
+        "root prompt",
+        "CLI positional args must arrive as raw plain text without <args> wrapper"
     );
     let last_wal_line: Value = serde_json::from_str(
         fs::read_to_string(&wal_path)

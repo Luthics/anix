@@ -105,7 +105,7 @@ pub fn assemble_initial_inputs(
     let mut sections: Vec<String> = Vec::new();
 
     if !script_args.is_empty() {
-        sections.push(format!("<args>{}</args>", script_args.join(" ")));
+        sections.push(script_args.join(" "));
     }
 
     // Section 4.1: If `isatty(0)` is true AND `<SCRIPT_ARGS>` were provided (or `--inbox` startup),
@@ -124,7 +124,7 @@ pub fn assemble_initial_inputs(
         sections.push(format!("<input fd=\"{fd}\">\n{text}\n</input>"));
     }
 
-    Ok(sections.join("\n"))
+    Ok(sections.join("\n\n"))
 }
 
 fn read_fd_interruptible(fd: RawFd, signals: &SignalState) -> io::Result<Vec<u8>> {
