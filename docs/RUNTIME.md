@@ -145,7 +145,7 @@ aclr -t <N>                   # 发送 {"op":"fold","from_turn":N}，按 [compac
 
 * **零元数据索引**：`tips` 目录下的 `.md` 常规文件（忽略隐藏文件与子目录）不要求 Frontmatter，文件名本身即索引（推荐 `how-to-<topic>.md`）。
 * **三层来源与同名覆写/单篇屏蔽**（高覆盖低；0 字节文件或指向 `/dev/null` 的软链屏蔽单篇）：
-  1. **内置默认层**：二进制内置 `how-to-background.md`、`how-to-goal.md`、`how-to-loop.md`、`how-to-mcp.md`、`how-to-sub-agent.md`，首次执行时原子释放至 `${XDG_STATE_HOME:-$HOME/.local/state}/anix/builtin-tips/`（只读不可写时回退 `$XDG_RUNTIME_DIR/anix/builtin-tips/`）。
+  1. **内置默认层**：二进制内置 `how-to-background.md`、`how-to-goal.md`、`how-to-loop.md`、`how-to-mcp.md`、`how-to-runtime.md`、`how-to-sub-agent.md`，首次执行时原子释放至 `${XDG_STATE_HOME:-$HOME/.local/state}/anix/builtin-tips/`（只读不可写时回退 `$XDG_RUNTIME_DIR/anix/builtin-tips/`）。
   2. **全局目录**：`${XDG_CONFIG_HOME:-$HOME/.config}/anix/tips/`
   3. **项目目录**：`<cwd>/.anix/tips/`
 * **输出格式**：按文件名 ASCII 字典序输出 `<runtime_tips>` 索引块（合并为空时静默跳过，零 Token 开销）：
@@ -156,6 +156,7 @@ aclr -t <N>                   # 发送 {"op":"fold","from_turn":N}，按 [compac
   /home/user/.local/state/anix/builtin-tips/how-to-goal.md
   /home/user/.local/state/anix/builtin-tips/how-to-loop.md
   /home/user/.local/state/anix/builtin-tips/how-to-mcp.md
+  /home/user/.local/state/anix/builtin-tips/how-to-runtime.md
   /home/user/.local/state/anix/builtin-tips/how-to-sub-agent.md
   </runtime_tips>
   ```

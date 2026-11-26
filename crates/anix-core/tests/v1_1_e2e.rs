@@ -557,6 +557,10 @@ done
         wal_text.contains("how-to-mcp.md"),
         "expected built-in how-to-mcp.md in <runtime_tips>: {wal_text}"
     );
+    assert!(
+        wal_text.contains("how-to-runtime.md"),
+        "expected built-in how-to-runtime.md in <runtime_tips>: {wal_text}"
+    );
 
     // 2. `--no-vision` WITH `[vision].bin`: translates image to `<vision_description>` text, zero media[].
     let bridge = root.join("vision-bridge.sh");

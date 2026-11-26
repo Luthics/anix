@@ -32,6 +32,10 @@ const BUILTIN_TIPS: &[(&str, &str)] = &[
     ("how-to-loop.md", include_str!("../tips/how-to-loop.md")),
     ("how-to-mcp.md", include_str!("../tips/how-to-mcp.md")),
     (
+        "how-to-runtime.md",
+        include_str!("../tips/how-to-runtime.md"),
+    ),
+    (
         "how-to-sub-agent.md",
         include_str!("../tips/how-to-sub-agent.md"),
     ),
