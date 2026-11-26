@@ -528,6 +528,16 @@
 | [`test_interrupt_during_external_decision_identifies_the_decider_in_trace`](../tests/test_approval.py#L388) | [§5.2-06](../docs/RFC.md?plain=1#L279) | 外部审批被 SIGTERM 中断时 Trace 仍应标记 external。 |
 | [`test_interrupt_during_external_decision_identifies_the_decider_in_trace`](../tests/test_approval.py#L388) | [§6.4-03](../docs/RFC.md?plain=1#L410) | 外部审批中收到 SIGTERM，退出 143 并记录中断。 |
 
+## `tests/test_discovery_indexes.py`
+
+| 测试 | RFC 原文 | 本测试的预期结果 |
+| --- | --- | --- |
+| [`test_declared_builtin_guides_match_materialized_files_and_the_first_request`](../tests/test_discovery_indexes.py#L49) | [§9.6-05](../docs/RFC.md?plain=1#L712) | 对照 RFC 内置名单，核对默认及自定义 XDG 状态目录实际释放的指南和 Provider 收到的绝对路径。 [断言 L59](../tests/test_discovery_indexes.py#L59) · [断言 L61](../tests/test_discovery_indexes.py#L61) |
+| [`test_tip_masks_overrides_and_sort_order_across_both_user_layers`](../tests/test_discovery_indexes.py#L67) | [§9.6-06](../docs/RFC.md?plain=1#L715) | 对同一内置指南交叉测试全局和项目层的缺席、替换、空文件及 /dev/null 屏蔽，核对整个索引。 [断言 L110](../tests/test_discovery_indexes.py#L110) |
+| [`test_tip_masks_overrides_and_sort_order_across_both_user_layers`](../tests/test_discovery_indexes.py#L67) | [§9.6-07](../docs/RFC.md?plain=1#L716) | 逐项比对跨目录、大小写与空格的路径排序，排除隐藏文件、子目录、其他后缀和正文。 [断言 L113](../tests/test_discovery_indexes.py#L113) · [断言 L115](../tests/test_discovery_indexes.py#L115) |
+| [`test_skill_index_requires_both_frontmatter_fields_and_excludes_private_text`](../tests/test_discovery_indexes.py#L118) | [§9.4-05](../docs/RFC.md?plain=1#L673) | 仅从 SKILL.md 开头的 YAML 读取两个必需字段，缺字段、正文中的伪字段和其他元数据均不进入索引。 [断言 L135](../tests/test_discovery_indexes.py#L135) · [断言 L137](../tests/test_discovery_indexes.py#L137) |
+| [`test_skill_xml_paths_reopen_files_with_posix_whitespace`](../tests/test_discovery_indexes.py#L140) | [§9.4-06](../docs/RFC.md?plain=1#L679) | 解析实际 XML 后逐项打开技能文件，检查目录名中的空格、Tab、LF、CR 是否仍指向原文件。 |
+
 ## `tests/test_distribution.py`
 
 | 测试 | RFC 原文 | 本测试的预期结果 |
@@ -624,20 +634,20 @@
 
 | 测试 | RFC 原文 | 本测试的预期结果 |
 | --- | --- | --- |
-| [`test_cli_enum_domains_equal_rfc_option_and_frontmatter_sets`](../tests/test_rfc_tables.py#L70) | [§3.3-09](../docs/RFC.md?plain=1#L133) | 从 RFC 读取 approval 的所有合法值，与真实 --help 公布的集合逐项比较。 [断言 L90](../tests/test_rfc_tables.py#L90) |
-| [`test_cli_enum_domains_equal_rfc_option_and_frontmatter_sets`](../tests/test_rfc_tables.py#L70) | [§3.3-10](../docs/RFC.md?plain=1#L134) | 从 RFC 读取 stderr 的所有合法值，与真实 --help 公布的集合逐项比较。 [断言 L90](../tests/test_rfc_tables.py#L90) |
-| [`test_cli_enum_domains_equal_rfc_option_and_frontmatter_sets`](../tests/test_rfc_tables.py#L70) | [§3.1-12](../docs/RFC.md?plain=1#L83) | 对照 §3.1 的封闭选项集合、§3.3 的枚举和真实 CLI help；新增、缺失或多余取值均可定位。 [断言 L88](../tests/test_rfc_tables.py#L88) |
-| [`test_cli_enum_domains_equal_rfc_option_and_frontmatter_sets`](../tests/test_rfc_tables.py#L70) | [§3.3-14](../docs/RFC.md?plain=1#L128) | 从 RFC 读取 output 的所有合法值，与真实 --help 公布的集合逐项比较。 [断言 L90](../tests/test_rfc_tables.py#L90) |
-| [`test_effective_enum_defaults_choices_and_rejections_match_rfc`](../tests/test_rfc_tables.py#L96) | [§3.3-09](../docs/RFC.md?plain=1#L133) | 读取 approval 默认值；用 CLI 和 Frontmatter 逐个选择合法值，核对 session_init.config。 [断言 L113](../tests/test_rfc_tables.py#L113) · [断言 L122](../tests/test_rfc_tables.py#L122) |
-| [`test_effective_enum_defaults_choices_and_rejections_match_rfc`](../tests/test_rfc_tables.py#L96) | [§3.3-10](../docs/RFC.md?plain=1#L134) | 读取 stderr 默认值；用 CLI 和 Frontmatter 逐个选择合法值，核对 session_init.config。 [断言 L113](../tests/test_rfc_tables.py#L113) · [断言 L122](../tests/test_rfc_tables.py#L122) |
-| [`test_effective_enum_defaults_choices_and_rejections_match_rfc`](../tests/test_rfc_tables.py#L96) | [§3.3-14](../docs/RFC.md?plain=1#L128) | 读取 output 默认值；用 CLI 和 Frontmatter 逐个选择合法值，核对 session_init.config。 [断言 L113](../tests/test_rfc_tables.py#L113) · [断言 L122](../tests/test_rfc_tables.py#L122) |
-| [`test_effective_enum_defaults_choices_and_rejections_match_rfc`](../tests/test_rfc_tables.py#L96) | [§3.4-10](../docs/RFC.md?plain=1#L150) | 未知 output、approval 或 stderr 在 CLI 与 Frontmatter 两条路径都返回 2，WAL 和 Provider 请求均不存在。 [断言 L128](../tests/test_rfc_tables.py#L128) · [断言 L131](../tests/test_rfc_tables.py#L131) |
-| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L139) | [§6.5-09](../docs/RFC.md?plain=1#L426) | Provider 消费完请求后向主进程发送 INT 或 TERM，实际退出状态等于 128 加相应信号编号。 [断言 L171](../tests/test_rfc_tables.py#L171) · [断言 L174](../tests/test_rfc_tables.py#L174) |
-| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L139) | [§6.5-10](../docs/RFC.md?plain=1#L421) | 正常回复的进程状态等于表中 EX_OK。 [断言 L174](../tests/test_rfc_tables.py#L174) |
-| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L139) | [§6.5-11](../docs/RFC.md?plain=1#L422) | 永久 Provider 错误的进程状态等于 GENERAL_ERR。 [断言 L174](../tests/test_rfc_tables.py#L174) |
-| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L139) | [§6.5-12](../docs/RFC.md?plain=1#L423) | 未知 CLI 选项的进程状态等于 EX_USAGE。 [断言 L174](../tests/test_rfc_tables.py#L174) |
-| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L139) | [§6.5-13](../docs/RFC.md?plain=1#L424) | 拒绝工具并启用 fail-on-deny 时进程状态等于 EX_TEMPFAIL。 [断言 L174](../tests/test_rfc_tables.py#L174) |
-| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L139) | [§6.5-14](../docs/RFC.md?plain=1#L425) | 第一轮仍需执行工具且 max_turns=1 时进程状态等于 EX_TIMEOUT。 [断言 L174](../tests/test_rfc_tables.py#L174) |
+| [`test_cli_enum_domains_equal_rfc_option_and_frontmatter_sets`](../tests/test_rfc_tables.py#L57) | [§3.3-09](../docs/RFC.md?plain=1#L133) | 从 RFC 读取 approval 的所有合法值，与真实 --help 公布的集合逐项比较。 [断言 L77](../tests/test_rfc_tables.py#L77) |
+| [`test_cli_enum_domains_equal_rfc_option_and_frontmatter_sets`](../tests/test_rfc_tables.py#L57) | [§3.3-10](../docs/RFC.md?plain=1#L134) | 从 RFC 读取 stderr 的所有合法值，与真实 --help 公布的集合逐项比较。 [断言 L77](../tests/test_rfc_tables.py#L77) |
+| [`test_cli_enum_domains_equal_rfc_option_and_frontmatter_sets`](../tests/test_rfc_tables.py#L57) | [§3.1-12](../docs/RFC.md?plain=1#L83) | 对照 §3.1 的封闭选项集合、§3.3 的枚举和真实 CLI help；新增、缺失或多余取值均可定位。 [断言 L75](../tests/test_rfc_tables.py#L75) |
+| [`test_cli_enum_domains_equal_rfc_option_and_frontmatter_sets`](../tests/test_rfc_tables.py#L57) | [§3.3-14](../docs/RFC.md?plain=1#L128) | 从 RFC 读取 output 的所有合法值，与真实 --help 公布的集合逐项比较。 [断言 L77](../tests/test_rfc_tables.py#L77) |
+| [`test_effective_enum_defaults_choices_and_rejections_match_rfc`](../tests/test_rfc_tables.py#L83) | [§3.3-09](../docs/RFC.md?plain=1#L133) | 读取 approval 默认值；用 CLI 和 Frontmatter 逐个选择合法值，核对 session_init.config。 [断言 L100](../tests/test_rfc_tables.py#L100) · [断言 L109](../tests/test_rfc_tables.py#L109) |
+| [`test_effective_enum_defaults_choices_and_rejections_match_rfc`](../tests/test_rfc_tables.py#L83) | [§3.3-10](../docs/RFC.md?plain=1#L134) | 读取 stderr 默认值；用 CLI 和 Frontmatter 逐个选择合法值，核对 session_init.config。 [断言 L100](../tests/test_rfc_tables.py#L100) · [断言 L109](../tests/test_rfc_tables.py#L109) |
+| [`test_effective_enum_defaults_choices_and_rejections_match_rfc`](../tests/test_rfc_tables.py#L83) | [§3.3-14](../docs/RFC.md?plain=1#L128) | 读取 output 默认值；用 CLI 和 Frontmatter 逐个选择合法值，核对 session_init.config。 [断言 L100](../tests/test_rfc_tables.py#L100) · [断言 L109](../tests/test_rfc_tables.py#L109) |
+| [`test_effective_enum_defaults_choices_and_rejections_match_rfc`](../tests/test_rfc_tables.py#L83) | [§3.4-10](../docs/RFC.md?plain=1#L150) | 未知 output、approval 或 stderr 在 CLI 与 Frontmatter 两条路径都返回 2，WAL 和 Provider 请求均不存在。 [断言 L115](../tests/test_rfc_tables.py#L115) · [断言 L118](../tests/test_rfc_tables.py#L118) |
+| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L126) | [§6.5-09](../docs/RFC.md?plain=1#L426) | Provider 消费完请求后向主进程发送 INT 或 TERM，实际退出状态等于 128 加相应信号编号。 [断言 L158](../tests/test_rfc_tables.py#L158) · [断言 L161](../tests/test_rfc_tables.py#L161) |
+| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L126) | [§6.5-10](../docs/RFC.md?plain=1#L421) | 正常回复的进程状态等于表中 EX_OK。 [断言 L161](../tests/test_rfc_tables.py#L161) |
+| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L126) | [§6.5-11](../docs/RFC.md?plain=1#L422) | 永久 Provider 错误的进程状态等于 GENERAL_ERR。 [断言 L161](../tests/test_rfc_tables.py#L161) |
+| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L126) | [§6.5-12](../docs/RFC.md?plain=1#L423) | 未知 CLI 选项的进程状态等于 EX_USAGE。 [断言 L161](../tests/test_rfc_tables.py#L161) |
+| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L126) | [§6.5-13](../docs/RFC.md?plain=1#L424) | 拒绝工具并启用 fail-on-deny 时进程状态等于 EX_TEMPFAIL。 [断言 L161](../tests/test_rfc_tables.py#L161) |
+| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L126) | [§6.5-14](../docs/RFC.md?plain=1#L425) | 第一轮仍需执行工具且 max_turns=1 时进程状态等于 EX_TIMEOUT。 [断言 L161](../tests/test_rfc_tables.py#L161) |
 
 ## `tests/test_shell_pipeline.py`
 

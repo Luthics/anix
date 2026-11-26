@@ -2,12 +2,21 @@
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def rfc_section(number):
+    lines = (ROOT / "docs/RFC.md").read_text(encoding="utf-8").splitlines()
+    header = re.compile(rf"^### {re.escape(number)}\s")
+    start, = [i for i, line in enumerate(lines) if header.match(line)]
+    end = next((i for i in range(start + 1, len(lines)) if re.match(r"^#{1,3} ", lines[i])), len(lines))
+    return lines[start + 1:end]
 
 
 class OfflineAnixCase(unittest.TestCase):

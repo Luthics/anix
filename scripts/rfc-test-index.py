@@ -76,15 +76,22 @@ def python_tests(source):
 
 
 def assertion_lines(source):
-    """Only live Python assertion statements qualify, not arbitrary calls or strings."""
+    """A marked comparison must read at least one operand beyond literal values."""
     for node in ast.walk(ast.parse(source)):
+        operands = []
         if isinstance(node, ast.Assert):
-            yield node.lineno
-        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
-            func = node.value.func
+            operands = [node.test]
+        elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+            call = node.value
+            func = call.func
             if (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
                     and func.value.id == "self" and func.attr in UNITTEST_ASSERTIONS):
-                yield node.lineno
+                # The optional failure message can reference the CLI even when the
+                # comparison itself only checks constants. Exclude both forms of msg.
+                arity = 1 if func.attr in {"assertTrue", "assertFalse", "assertIsNone", "assertIsNotNone"} else 2
+                operands = call.args[:arity] + [kw.value for kw in call.keywords if kw.arg != "msg"]
+        if any(isinstance(part, (ast.Name, ast.Call)) for operand in operands for part in ast.walk(operand)):
+            yield node.lineno
 
 
 # Only comparison methods that perform an assertion when directly called are eligible.
@@ -133,7 +140,8 @@ def read_cases(root):
                     continue
                 marker = MARKER.fullmatch(lines[i].strip())
                 if not marker or i + 2 not in valid_assertions:
-                    raise ValueError(f"{rel}:{i+1} {name}: RFC-ASSERT must immediately precede an assertion")
+                    raise ValueError(f"{rel}:{i+1} {name}: RFC-ASSERT must immediately precede an assertion "
+                                     "with a nonliteral operand in its condition")
                 for token in marker[1].split(", "):
                     id_ = token[1:]
                     if i + 2 in assertions[id_]:

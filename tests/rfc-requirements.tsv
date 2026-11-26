@@ -258,6 +258,8 @@
 9.4-02	无需磁盘预置脚本	20-skills 内置、同名覆写与禁用	each_builtin_can_be_replaced_globally_then_overridden_or_masked_by_the_project
 9.4-03	./.claude/skills/	六层搜索顺序和同名覆盖	each_skill_search_layer_wins_once_and_the_body_stays_out_of_the_index
 9.4-04	索引提取	SKILL.md 生成转义 XML 元数据，正文不进首轮	test_skill_index_round_trips_xml_metadata_and_msh_reads_the_indexed_file_on_demand each_skill_search_layer_wins_once_and_the_body_stays_out_of_the_index
+9.4-05	YAML Frontmatter 中必需字段	混合合法与缺字段的 SKILL.md，索引只包含 YAML 中声明的技能名、路径与描述	!test_skill_index_requires_both_frontmatter_fields_and_excludes_private_text
+9.4-06	读取完整说明	XML 解码后的技能路径应能打开原文件，覆盖目录名含空格、Tab、LF 和 CR	test_skill_xml_paths_reopen_files_with_posix_whitespace #62
 9.5-01	写入遇到 `EPIPE`	采集端在第一条记录前或期间断开，Payload、stderr 和退出码保持一致	disconnected_trace_recipient_does_not_change_payload_stderr_or_exit_status
 9.5-02	严禁阻塞推理循环	消费者保持连接但停止读取时的背压及恢复语义	#11
 9.5-03	携带 `session_id`（v1.1.1）	初始 Trace 与 WAL、Provider 环境和协进程信封可用同一标识关联	latest_checkpoint_supplies_exact_stored_id_to_trace_env_and_coprocess_envelope
@@ -276,6 +278,10 @@
 9.6-02	自动原子释放	首次释放、版本更新和状态目录不可写时回退	tips_are_restored_after_version_drift_and_fall_back_to_runtime_when_state_is_unwritable masking_the_whole_tips_hook_suppresses_both_its_index_and_first_run_files
 9.6-03	整块覆写与禁用	整块覆写、两类禁用及磁盘副作用	masking_the_whole_tips_hook_suppresses_both_its_index_and_first_run_files each_builtin_can_be_replaced_globally_then_overridden_or_masked_by_the_project
 9.6-04	合并后若条目为空	屏蔽所有指南后不向系统提示词注入 tips 索引	an_empty_merged_tips_index_costs_no_prompt_bytes
+9.6-05	内置默认层（最低优先级）	从本版 RFC 读取完整指南名单，双向核对首次释放的文件和绝对路径索引，覆盖默认及自定义 XDG_STATE_HOME	!test_declared_builtin_guides_match_materialized_files_and_the_first_request
+9.6-06	可单独屏蔽该篇 tip	全局和项目各选四种状态，16 种组合逐一检查内置同名指南被替换、屏蔽或恢复	!test_tip_masks_overrides_and_sort_order_across_both_user_layers
+9.6-07	按文件名 ASCII 字典序排列	比较完整路径列表的顺序和唯一性，覆盖空格、大小写、排除项、配置根切换以及正文留在磁盘	!test_tip_masks_overrides_and_sort_order_across_both_user_layers
+9.6-08	输出格式（绝对路径）	合法文件名含 LF 时，逐行索引如何表示可供读取的完整路径待明确	#63
 10.2-01	进程树回收	Linux 上主进程异常终止后，活跃的 Provider 或 shell 子进程也终止	abrupt_parent_exit_stops_the_active_provider_or_shell_child
 10.2-02	进程树回收	缺少 pidfd 时，等待处理了 SIGTERM 的 Provider 和退出钩子仍须遵守各自期限	sigint_bounds_cleanup_of_a_provider_that_acknowledges_term sigterm_bounds_cleanup_of_a_provider_that_acknowledges_term on_exit_timeout_is_local_to_one_hook_and_preserves_the_primary_exit_code #48
 10.2-03	Landlock LSM	探测内核 ABI 与可用性，启用后的写入范围与不支持时的 strict 行为仍待专项验证	probes_platform_capabilities TODO

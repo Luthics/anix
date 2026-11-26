@@ -1,25 +1,12 @@
 """Exercise finite RFC tables against the CLI built from this checkout."""
 import json
-from pathlib import Path
 import re
 import signal
-from anix_fixture import OfflineAnixCase
-
-
-ROOT = Path(__file__).resolve().parents[1]
-RFC = ROOT / "docs/RFC.md"
-
-
-def section(number):
-    lines = RFC.read_text(encoding="utf-8").splitlines()
-    header = re.compile(rf"^### {re.escape(number)}\s")
-    start, = [i for i, line in enumerate(lines) if header.match(line)]
-    end = next((i for i in range(start + 1, len(lines)) if re.match(r"^#{1,3} ", lines[i])), len(lines))
-    return lines[start + 1:end]
+from anix_fixture import OfflineAnixCase, rfc_section
 
 
 def table_rows(number):
-    lines = [line for line in section(number) if line.lstrip().startswith("|")]
+    lines = [line for line in rfc_section(number) if line.lstrip().startswith("|")]
     if len(lines) < 3:
         raise ValueError(f"§{number}: missing table or data rows")
 
@@ -69,7 +56,7 @@ class RfcTables(OfflineAnixCase):
     # RFC §3.3-14 — 从 RFC 读取 output 的所有合法值，与真实 --help 公布的集合逐项比较。
     def test_cli_enum_domains_equal_rfc_option_and_frontmatter_sets(self):
         declared = {}
-        for line in section("3.1"):
+        for line in rfc_section("3.1"):
             # --shell <PATH|none> accepts arbitrary paths and has an open domain.
             for name, values in re.findall(r"--([\w-]+) <([a-z][a-z0-9_|-]*\|[a-z0-9_|-]+)>", line):
                 self.assertNotIn(name, declared)

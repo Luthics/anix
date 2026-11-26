@@ -32,8 +32,9 @@ class IndexChecks(unittest.TestCase):
             class Sample(unittest.TestCase):
                 # RFC §3.3-01 — 默认返回 reply。
                 def test_default(self):
+                    observed = self.id().split(".")[-1]
                     # RFC-ASSERT §3.3-01
-                    self.assertEqual("reply", "reply")
+                    self.assertEqual(observed, "test_default")
 
                 # RFC §3.3-02 — 拒绝非法值。
                 def test_invalid(self):
@@ -55,7 +56,7 @@ class IndexChecks(unittest.TestCase):
         for lines in docs.values():
             doc = "\n".join(lines)
             self.assertIn("docs/RFC.md?plain=1#L5)", doc)
-            self.assertIn("[断言 L6](../tests/test_example.py#L6)", doc)
+            self.assertIn("[断言 L7](../tests/test_example.py#L7)", doc)
 
     def test_rejects_edges_missing_in_either_direction_even_if_indexes_are_regenerated(self):
         self.mutate(self.catalog, "!test_default", "test_invalid", "missing catalog reference: §3.3-01")
@@ -79,12 +80,19 @@ class IndexChecks(unittest.TestCase):
     def test_rejects_unowned_or_empty_assertion_witnesses(self):
         self.mutate(self.source, "# RFC-ASSERT §3.3-01", "# ordinary comment", "missing assertion witness")
         self.mutate(self.catalog, "!test_default", "test_default", "undeclared assertion witness")
-        self.mutate(self.source, 'self.assertEqual("reply", "reply")', "pass", "immediately precede an assertion")
+        self.mutate(self.source, 'self.assertEqual(observed, "test_default")', "pass", "immediately precede an assertion")
         self.mutate(self.source, "self.assertEqual", "self.assertSomething", "immediately precede an assertion")
         self.mutate(self.source, "    # RFC §3.3-02", "    # RFC §3.3-02 — dangling\n\n    # RFC §3.3-02",
                     "orphan or malformed")
         self.mutate(self.source, "    # RFC §3.3-02", "    def helper(self):\n        # RFC-ASSERT §3.3-01\n"
                     "        self.assertTrue(True)\n    # RFC §3.3-02", "orphan or malformed")
+
+    def test_literal_comparisons_cannot_gain_evidence_from_a_dynamic_failure_message(self):
+        for expression in ('self.assertEqual("reply", "reply")', 'self.assertEqual(1, 1, observed)',
+                           'self.assertTrue(True, msg=observed)', 'assert 2 + 2 == 4, observed'):
+            with self.subTest(expression=expression):
+                self.mutate(self.source, 'self.assertEqual(observed, "test_default")', expression,
+                            "immediately precede an assertion")
 
     def test_unreached_comparison_fails_even_when_the_test_itself_passes(self):
         # An early return leaves both static links intact and unittest reports OK.
