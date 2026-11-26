@@ -24,7 +24,7 @@ use crate::provider::{self, ProviderError, ProviderPool};
 use crate::signal::SignalState;
 use crate::trace::Tracer;
 use crate::trust::{self, TrustError};
-use crate::wal::{WalError, WalStore};
+use crate::wal::{ActiveEntry, WalError, WalStore};
 
 const DEFAULT_COMPACT_PROMPT: &str = "\
 Summarize the conversation so far into a concise, factual checkpoint. Preserve all user goals, key decisions, verified facts, file paths, command outcomes, constraints, and remaining open tasks. Output plain text only.";
@@ -99,9 +99,12 @@ pub fn estimate_context_tokens(
 /// Result of a completed full compaction checkpoint.
 #[derive(Debug)]
 pub struct CompactionOutcome {
-    pub new_messages: Vec<IrMessage>,
+    pub new_entries: Vec<ActiveEntry>,
     pub checkpoint_turn_id: u64,
     pub next_turn_id: u64,
+    pub checkpoint_node_id: Option<u64>,
+    pub head_id: Option<u64>,
+    pub next_node_id: u64,
     pub summary_len: usize,
     pub compact_usage: Option<TokenUsage>,
     pub cumulative_usage: TokenUsage,
@@ -117,6 +120,9 @@ pub fn run_full_compaction(
     session_id: &str,
     current_messages: &[IrMessage],
     next_turn_id: u64,
+    tree_mode: bool,
+    parent_head_id: Option<u64>,
+    mut next_node_id: u64,
     session_usage_before_compact: TokenUsage,
     reason: &str,
     wal: &mut WalStore,
@@ -213,8 +219,23 @@ pub fn run_full_compaction(
     let normalized_compact = compact_usage.map(|u| u.normalized_5());
     let normalized_cumulative = cumulative_usage.normalized_5();
 
+    let mut alloc_id = || -> Option<u64> {
+        if tree_mode {
+            let id = next_node_id;
+            next_node_id = next_node_id.saturating_add(1);
+            Some(id)
+        } else {
+            None
+        }
+    };
+    let ckpt_node_id = alloc_id();
+    let sys_node_id = alloc_id();
+    let sum_node_id = alloc_id();
+
     let ts = posix::timestamp_rfc3339_utc();
     wal.append(&WalEvent::Checkpoint {
+        id: ckpt_node_id,
+        parent_id: if tree_mode { parent_head_id } else { None },
         ir_version: IR_VERSION,
         turn_id: checkpoint_turn,
         ts,
@@ -229,13 +250,23 @@ pub fn run_full_compaction(
         compact_usage: normalized_compact,
         cumulative_usage: Some(normalized_cumulative),
     })?;
-    wal.append_message(&system_msg)?;
-    wal.append_message(&summary_msg)?;
+    wal.append_message(sys_node_id, ckpt_node_id, &system_msg)?;
+    wal.append_message(sum_node_id, sys_node_id, &summary_msg)?;
 
     let mut fields = Map::new();
     fields.insert("reason".into(), Value::String(reason.to_owned()));
     fields.insert("checkpoint_turn".into(), Value::from(checkpoint_turn));
     fields.insert("summary_bytes".into(), Value::from(summary.len() as u64));
+    if cfg.context.is_some()
+        && let Some(cid) = ckpt_node_id
+    {
+        fields.insert("checkpoint_node_id".into(), Value::from(cid));
+    }
+    if cfg.context.is_some()
+        && let Some(lid) = sum_node_id
+    {
+        fields.insert("leaf_id".into(), Value::from(lid));
+    }
     if let Some(cu) = normalized_compact
         && let Ok(val) = serde_json::to_value(cu)
     {
@@ -247,9 +278,23 @@ pub fn run_full_compaction(
     tracer.emit_event("compact", fields);
 
     Ok(CompactionOutcome {
-        new_messages: vec![system_msg, summary_msg],
+        new_entries: vec![
+            ActiveEntry {
+                node_id: sys_node_id,
+                message: system_msg,
+                entry_usage: TokenUsage::default(),
+            },
+            ActiveEntry {
+                node_id: sum_node_id,
+                message: summary_msg,
+                entry_usage: TokenUsage::default(),
+            },
+        ],
         checkpoint_turn_id: checkpoint_turn,
         next_turn_id: summary_turn.saturating_add(1),
+        checkpoint_node_id: ckpt_node_id,
+        head_id: sum_node_id,
+        next_node_id,
         summary_len: summary.len(),
         compact_usage,
         cumulative_usage: normalized_cumulative,

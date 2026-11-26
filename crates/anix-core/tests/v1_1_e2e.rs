@@ -85,8 +85,16 @@ fn setup_fhs_home(root: &Path) -> PathBuf {
         write_exec(
             &tools.join("aclr"),
             r#"#!/usr/bin/env sh
+if [ "$1" = "-s" ]; then
+  printf '{"op":"compact"}\n' > "$ANIX_CTL"
+  exit 0
+fi
 if [ "$1" = "-t" ] && [ "$#" -eq 2 ]; then
   printf '{"op":"fold","from_turn":%s}\n' "$2" > "$ANIX_CTL"
+  exit 0
+fi
+if [ "$1" = "-t" ] && [ "$#" -eq 3 ]; then
+  printf '{"op":"fold","from_turn":%s,"summary":"%s"}\n' "$2" "$3" > "$ANIX_CTL"
   exit 0
 fi
 exit 2
@@ -112,6 +120,7 @@ fn base_cmd(home: &Path, workdir: &Path) -> Command {
         .env_remove("ANIX_STDERR")
         .env_remove("ANIX_YES")
         .env_remove("ANIX_CONTEXT")
+        .env_remove("ANIX_LEAF")
         .env_remove("ANIX_INBOX");
     cmd
 }
@@ -1687,6 +1696,408 @@ done
     assert!(
         String::from_utf8_lossy(&out_err.stderr).contains("PARTIAL_BEFORE_ERR"),
         "partial text before error should flush to fd 2 for diagnostics"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn test_v0_3_0_tree_wal_branching_fold_checkpoint_and_leaf_validation() {
+    let root = make_temp_env("v030-tree-wal");
+    let home = setup_fhs_home(&root);
+    let work = root.join("work");
+    fs::create_dir_all(&work).unwrap();
+    let cfg_dir = home.join(".config/anix");
+    fs::create_dir_all(cfg_dir.join("hooks/on-exit.d")).unwrap();
+
+    // Hook capturing OnExitPayload (including v0.3.0 `leaf_id`).
+    let on_exit_log = root.join("on_exit.jsonl");
+    write_exec(
+        &cfg_dir.join("hooks/on-exit.d/10-capture"),
+        &format!(
+            "#!/usr/bin/env sh\ncat >> \"{}\"\nprintf '\\n' >> \"{}\"\n",
+            on_exit_log.display(),
+            on_exit_log.display()
+        ),
+    );
+
+    let req_log = root.join("reqs.jsonl");
+    let step_file = root.join("step");
+    let mock_prov = root.join("mock-tree-prov.py");
+    write_exec(
+        &mock_prov,
+        &format!(
+            r#"#!/usr/bin/env python3
+import json, os, sys
+req_log = {req_log:?}
+step_file = {step_file:?}
+
+for raw in sys.stdin:
+    line = raw.strip()
+    if not line:
+        continue
+    with open(req_log, "a") as f:
+        f.write(line + "\n")
+    n = 0
+    if os.path.exists(step_file):
+        with open(step_file) as f:
+            n = int(f.read().strip() or "0")
+    n += 1
+    with open(step_file, "w") as f:
+        f.write(str(n))
+
+    if n == 1:
+        # Run 1: root branch initial reply
+        print(json.dumps({{"type": "text_delta", "text": "BRANCH_A_ROOT_REPLY"}}), flush=True)
+        print(json.dumps({{"type": "usage", "input_tokens": 100, "output_tokens": 20}}), flush=True)
+        print(json.dumps({{"type": "done", "finish_reason": "stop"}}), flush=True)
+    elif n == 2:
+        # Run 2 turn 1: execute tool that folds turns >= 3 (`aclr -t 3 "dead-end A"`)
+        print(json.dumps({{"type": "tool_call", "id": "c1", "name": "msh", "arguments": {{"cmd": "aclr -t 3 'dead-end A'"}}}}), flush=True)
+        print(json.dumps({{"type": "usage", "input_tokens": 300, "output_tokens": 30}}), flush=True)
+        print(json.dumps({{"type": "done", "finish_reason": "tool_calls"}}), flush=True)
+    elif n == 3:
+        # Run 2 turn 2: final reply after fold
+        print(json.dumps({{"type": "text_delta", "text": "AFTER_FOLD_OK"}}), flush=True)
+        print(json.dumps({{"type": "usage", "input_tokens": 120, "output_tokens": 10}}), flush=True)
+        print(json.dumps({{"type": "done", "finish_reason": "stop"}}), flush=True)
+    elif n == 4:
+        # Run 3 turn 1: trigger full compaction (`aclr -s`)
+        print(json.dumps({{"type": "tool_call", "id": "c2", "name": "msh", "arguments": {{"cmd": "aclr -s"}}}}), flush=True)
+        print(json.dumps({{"type": "usage", "input_tokens": 140, "output_tokens": 15}}), flush=True)
+        print(json.dumps({{"type": "done", "finish_reason": "tool_calls"}}), flush=True)
+    elif n == 5:
+        # Run 3 compactor call (tools == [])
+        print(json.dumps({{"type": "text_delta", "text": "Compacted Branch A summary"}}), flush=True)
+        print(json.dumps({{"type": "usage", "input_tokens": 50, "output_tokens": 10}}), flush=True)
+        print(json.dumps({{"type": "done", "finish_reason": "stop"}}), flush=True)
+    elif n == 6:
+        # Run 3 turn 2: post-checkpoint reply
+        print(json.dumps({{"type": "text_delta", "text": "POST_CKPT_OK"}}), flush=True)
+        print(json.dumps({{"type": "usage", "input_tokens": 80, "output_tokens": 12}}), flush=True)
+        print(json.dumps({{"type": "done", "finish_reason": "stop"}}), flush=True)
+    elif n == 7:
+        # Run 4 (`--leaf 4`): Branch B reply
+        print(json.dumps({{"type": "text_delta", "text": "BRANCH_B_REPLY"}}), flush=True)
+        print(json.dumps({{"type": "usage", "input_tokens": 110, "output_tokens": 18}}), flush=True)
+        print(json.dumps({{"type": "done", "finish_reason": "stop"}}), flush=True)
+    else:
+        # Run 5 (`ANIX_LEAF=3` empty stdin): Regenerate from user node 3
+        print(json.dumps({{"type": "text_delta", "text": "REGEN_FROM_USER3"}}), flush=True)
+        print(json.dumps({{"type": "usage", "input_tokens": 90, "output_tokens": 14}}), flush=True)
+        print(json.dumps({{"type": "done", "finish_reason": "stop"}}), flush=True)
+"#,
+            req_log = req_log.display().to_string(),
+            step_file = step_file.display().to_string(),
+        ),
+    );
+
+    fs::write(
+        cfg_dir.join("config.toml"),
+        format!(
+            "[defaults]\nprovider = \"mock\"\nmodel = \"m1\"\n\n[providers.mock]\nbin = \"{}\"\nmode = \"coprocess\"\napi_key_env = \"\"\n",
+            mock_prov.display()
+        ),
+    )
+    .unwrap();
+
+    let script = work.join("tree.agent");
+    fs::write(
+        &script,
+        "---\nname: tree-agent\napproval: auto\noutput: reply\n---\nTree test agent.\n",
+    )
+    .unwrap();
+
+    let wal_path = root.join("tree.wal.jsonl");
+
+    // -------------------------------------------------------------------------
+    // Run 1: Fresh Tree WAL (`id` 1=session_init, 2=system, 3=user, 4=assistant)
+    // -------------------------------------------------------------------------
+    let trace1_path = root.join("trace1.jsonl");
+    let trace1_file = File::create(&trace1_path).unwrap();
+    let mut cmd1 = base_cmd(&home, &work);
+    cmd1.args(["-c"])
+        .arg(&wal_path)
+        .args(["--trace-fd", "6"])
+        .arg(&script)
+        .arg("root prompt")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_child_fds(&mut cmd1, Some((&trace1_file, 6)));
+    let out1 = cmd1.output().expect("run 1");
+    drop(trace1_file);
+    assert_eq!(
+        out1.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&out1.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out1.stdout), "BRANCH_A_ROOT_REPLY");
+
+    let t1_events: Vec<Value> = fs::read_to_string(&trace1_path)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let run1_start = t1_events.iter().find(|e| e["type"] == "run_start").unwrap();
+    assert!(run1_start.get("leaf_id").is_none());
+    let run1_end = t1_events.iter().find(|e| e["type"] == "run_end").unwrap();
+    assert_eq!(run1_end["leaf_id"], 4);
+    let cyc1_end = t1_events.iter().find(|e| e["type"] == "cycle_end").unwrap();
+    assert_eq!(cyc1_end["leaf_id"], 4);
+
+    let on_exit1: Value = serde_json::from_str(
+        fs::read_to_string(&on_exit_log)
+            .unwrap()
+            .lines()
+            .last()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(on_exit1["leaf_id"], 4);
+
+    // -------------------------------------------------------------------------
+    // Run 2: Resume Branch A -> tool calls `aclr -t 3 'dead-end A'` -> fold node links parent_id=4
+    // -------------------------------------------------------------------------
+    let trace2_path = root.join("trace2.jsonl");
+    let trace2_file = File::create(&trace2_path).unwrap();
+    let mut cmd2 = base_cmd(&home, &work);
+    cmd2.args(["-c"])
+        .arg(&wal_path)
+        .args(["--trace-fd", "6"])
+        .arg(&script)
+        .arg("try dead end A")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_child_fds(&mut cmd2, Some((&trace2_file, 6)));
+    let out2 = cmd2.output().expect("run 2");
+    drop(trace2_file);
+    assert_eq!(
+        out2.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&out2.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out2.stdout), "AFTER_FOLD_OK");
+
+    let t2_events: Vec<Value> = fs::read_to_string(&trace2_path)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let fold_ev = t2_events.iter().find(|e| e["type"] == "fold").unwrap();
+    assert_eq!(fold_ev["node_id"], 8);
+    assert_eq!(fold_ev["parent_id"], 4);
+    let run2_end = t2_events.iter().find(|e| e["type"] == "run_end").unwrap();
+    assert_eq!(run2_end["leaf_id"], 9);
+
+    // Verify WAL fold event persisted `parent_id: 4` and `pruned_usage.input_tokens: 300`.
+    let wal_lines2: Vec<Value> = fs::read_to_string(&wal_path)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let fold_wal = wal_lines2
+        .iter()
+        .find(|v| v["type"] == "fold")
+        .expect("fold WAL line");
+    assert_eq!(fold_wal["id"], 8);
+    assert_eq!(fold_wal["parent_id"], 4);
+    assert_eq!(fold_wal["pruned_usage"]["input_tokens"], 300);
+
+    // -------------------------------------------------------------------------
+    // Run 3: Resume Branch A across fold -> triggers `aclr -s` checkpoint
+    //        Verify exact branch usage continuity across fold restart!
+    // -------------------------------------------------------------------------
+    let trace3_path = root.join("trace3.jsonl");
+    let trace3_file = File::create(&trace3_path).unwrap();
+    let mut cmd3 = base_cmd(&home, &work);
+    cmd3.args(["-c"])
+        .arg(&wal_path)
+        .args(["--trace-fd", "6"])
+        .arg(&script)
+        .arg("compact branch A")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_child_fds(&mut cmd3, Some((&trace3_file, 6)));
+    let out3 = cmd3.output().expect("run 3");
+    drop(trace3_file);
+    assert_eq!(
+        out3.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&out3.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out3.stdout), "POST_CKPT_OK");
+
+    let t3_events: Vec<Value> = fs::read_to_string(&trace3_path)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let run3_start = t3_events.iter().find(|e| e["type"] == "run_start").unwrap();
+    assert_eq!(run3_start["leaf_id"], 9);
+    let compact_ev = t3_events.iter().find(|e| e["type"] == "compact").unwrap();
+    let ckpt_node_id = compact_ev["checkpoint_node_id"].as_u64().unwrap();
+    let run3_end = t3_events.iter().find(|e| e["type"] == "run_end").unwrap();
+    let branch_a_tip = run3_end["leaf_id"].as_u64().unwrap();
+    assert!(branch_a_tip > ckpt_node_id);
+    // Exact lineage usage across fold + checkpoint: 100 (run1) + 300 (pruned) + 120 (after fold)
+    // + 140 (pre-ckpt turn) + 50 (compact) + 80 (post-ckpt turn) = 790!
+    assert_eq!(run3_end["session_usage"]["input_tokens"], 790);
+
+    // -------------------------------------------------------------------------
+    // Run 4: `--leaf 4` branches back BEFORE both `fold` (8) AND `checkpoint`!
+    // -------------------------------------------------------------------------
+    let trace4_path = root.join("trace4.jsonl");
+    let trace4_file = File::create(&trace4_path).unwrap();
+    let mut cmd4 = base_cmd(&home, &work);
+    cmd4.args(["-c"])
+        .arg(&wal_path)
+        .args(["--leaf", "4", "--trace-fd", "6"])
+        .arg(&script)
+        .arg("try branch B")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_child_fds(&mut cmd4, Some((&trace4_file, 6)));
+    let out4 = cmd4.output().expect("run 4");
+    drop(trace4_file);
+    assert_eq!(
+        out4.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&out4.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out4.stdout), "BRANCH_B_REPLY");
+
+    let t4_events: Vec<Value> = fs::read_to_string(&trace4_path)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let run4_start = t4_events.iter().find(|e| e["type"] == "run_start").unwrap();
+    assert_eq!(run4_start["leaf_id"], 4);
+    let run4_end = t4_events.iter().find(|e| e["type"] == "run_end").unwrap();
+    let branch_b_tip = run4_end["leaf_id"].as_u64().unwrap();
+    assert!(branch_b_tip > branch_a_tip);
+    // Branch B usage MUST only include node 4's lineage (100) + Branch B's turn (110) = 210!
+    assert_eq!(run4_end["session_usage"]["input_tokens"], 210);
+
+    // Verify req 7 (Branch B) saw ONLY root lineage + new prompt (no Branch A fold/checkpoint leakage).
+    let reqs: Vec<Value> = fs::read_to_string(&req_log)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let req7_str = reqs[6].to_string();
+    assert!(req7_str.contains("BRANCH_A_ROOT_REPLY"));
+    assert!(req7_str.contains("try branch B"));
+    assert!(!req7_str.contains("dead-end A"));
+    assert!(!req7_str.contains("Compacted Branch A summary"));
+    assert!(!req7_str.contains("POST_CKPT_OK"));
+
+    // -------------------------------------------------------------------------
+    // Run 5: `ANIX_LEAF=3` with empty stdin regenerates directly from user node 3!
+    // -------------------------------------------------------------------------
+    let mut cmd5 = base_cmd(&home, &work);
+    cmd5.env("ANIX_LEAF", "3")
+        .args(["-c"])
+        .arg(&wal_path)
+        .arg(&script)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_child_fds(&mut cmd5, None);
+    let out5 = cmd5.output().expect("run 5");
+    assert_eq!(
+        out5.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&out5.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out5.stdout), "REGEN_FROM_USER3");
+
+    let reqs_after5: Vec<Value> = fs::read_to_string(&req_log)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let req8_msgs = reqs_after5[7]["messages"].as_array().unwrap();
+    assert_eq!(req8_msgs.len(), 2, "expected [system, user(3)] only");
+    assert!(
+        req8_msgs[1]["text"]
+            .as_str()
+            .unwrap()
+            .contains("root prompt")
+    );
+    let last_wal_line: Value = serde_json::from_str(
+        fs::read_to_string(&wal_path)
+            .unwrap()
+            .lines()
+            .last()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(last_wal_line["parent_id"], 3);
+    assert_eq!(last_wal_line["text"], "REGEN_FROM_USER3");
+
+    // -------------------------------------------------------------------------
+    // Run 6: Fail-Fast `--leaf` exit code 2 validation (zero WAL mutation)
+    // -------------------------------------------------------------------------
+    let wal_snapshot = fs::read(&wal_path).unwrap();
+    let bad_cases: Vec<Vec<String>> = vec![
+        vec![
+            "-c".into(),
+            wal_path.display().to_string(),
+            "--leaf".into(),
+            "0".into(),
+        ],
+        vec![
+            "-c".into(),
+            wal_path.display().to_string(),
+            "--leaf".into(),
+            "1".into(),
+        ],
+        vec![
+            "-c".into(),
+            wal_path.display().to_string(),
+            "--leaf".into(),
+            ckpt_node_id.to_string(),
+        ],
+        vec![
+            "-c".into(),
+            wal_path.display().to_string(),
+            "--leaf".into(),
+            "9999".into(),
+        ],
+        vec!["-c".into(), String::new(), "--leaf".into(), "4".into()],
+    ];
+    for args in bad_cases {
+        let mut cmd_bad = base_cmd(&home, &work);
+        cmd_bad
+            .args(&args)
+            .arg(&script)
+            .arg("nope")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        configure_child_fds(&mut cmd_bad, None);
+        let out_bad = cmd_bad.output().expect("run invalid --leaf");
+        assert_eq!(
+            out_bad.status.code(),
+            Some(2),
+            "args={args:?} stderr={}",
+            String::from_utf8_lossy(&out_bad.stderr)
+        );
+    }
+    assert_eq!(
+        fs::read(&wal_path).unwrap(),
+        wal_snapshot,
+        "invalid --leaf calls must NEVER mutate WAL"
     );
 
     let _ = fs::remove_dir_all(&root);

@@ -30,7 +30,7 @@ use crate::provider::{self, ProviderError, ProviderPool, TextStreamMode};
 use crate::signal::{self, SignalState};
 use crate::trace::Tracer;
 use crate::vision::{self, VisionBridgeOutcome};
-use crate::wal::{self, WalStore};
+use crate::wal::{self, ActiveEntry, WalStore};
 
 /// Structured termination reason emitted on `cycle_end` Trace events (v1.1 §9.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,7 +124,7 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
         None => WalStore::stateless(),
     };
 
-    let replayed = match wal.load_active_window() {
+    let replayed = match wal.load_active_window(cfg.leaf) {
         Ok(r) => r,
         Err(err) => {
             stderr_tracker.writeln_line(&format!("anix: {err}"));
@@ -150,6 +150,11 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
     run_fields.insert("vision".into(), Value::Bool(cfg.vision));
     run_fields.insert("fresh_session".into(), Value::Bool(replayed.is_fresh));
     run_fields.insert("inbox_mode".into(), Value::Bool(cfg.inbox.is_some()));
+    if cfg.context.is_some()
+        && let Some(lid) = replayed.head_id
+    {
+        run_fields.insert("leaf_id".into(), Value::from(lid));
+    }
     tracer.emit_event("run_start", run_fields);
 
     for warn in cfg.startup_warnings(&script.prompt) {
@@ -171,6 +176,7 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                     TokenUsage::default(),
                     TokenUsage::default(),
                     0,
+                    None,
                     true,
                     &stderr_tracker,
                     &mut tracer,
@@ -202,6 +208,7 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                         state.run_usage,
                         state.session_usage,
                         state.current_context_tokens(),
+                        state.reported_leaf_id(cfg),
                         true,
                         &stderr_tracker,
                         &mut tracer,
@@ -233,6 +240,7 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                         state.run_usage,
                         state.session_usage,
                         state.current_context_tokens(),
+                        state.reported_leaf_id(cfg),
                         false,
                         &stderr_tracker,
                         &mut tracer,
@@ -257,6 +265,7 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                     state.run_usage,
                     state.session_usage,
                     state.current_context_tokens(),
+                    state.reported_leaf_id(cfg),
                     true,
                     &stderr_tracker,
                     &mut tracer,
@@ -293,13 +302,14 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                             state.run_usage,
                             state.session_usage,
                             state.current_context_tokens(),
+                            state.reported_leaf_id(cfg),
                             true,
                             &stderr_tracker,
                             &mut tracer,
                         );
                         return code;
                     }
-                } else if state.messages.len() <= 1
+                } else if state.entries.len() <= 1
                     && let Err(code) = state.push_user_message("", &mut wal, &stderr_tracker)
                 {
                     provider_pool.shutdown();
@@ -310,6 +320,7 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
                         state.run_usage,
                         state.session_usage,
                         state.current_context_tokens(),
+                        state.reported_leaf_id(cfg),
                         true,
                         &stderr_tracker,
                         &mut tracer,
@@ -355,6 +366,7 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
         state.run_usage,
         state.session_usage,
         state.current_context_tokens(),
+        state.reported_leaf_id(cfg),
         !usage_already_printed_on_cycle,
         &stderr_tracker,
         &mut tracer,
@@ -376,19 +388,25 @@ struct TrackedBgJob {
 
 struct SessionState {
     session_id: String,
-    messages: Vec<IrMessage>,
+    entries: Vec<ActiveEntry>,
     /// Per-turn `usage` for surviving active-window `assistant` messages (never written to IR).
     assistant_usages: BTreeMap<u64, TokenUsage>,
     last_checkpoint_turn: u64,
     next_turn_id: u64,
+    /// True for fresh sessions and v0.3 tree WALs (`id`/`parent_id`); false for legacy pre-v0.3 WALs.
+    tree_mode: bool,
+    /// Active branch tip WAL node ID (`Some` in tree mode once initialized).
+    head_id: Option<u64>,
+    /// Next file-wide monotonic WAL node ID to allocate (`>= 1`).
+    next_node_id: u64,
     next_cycle_id: u64,
     turns_executed: u32,
     /// Cumulative 5-field usage for this process run (including built-in compactor & auto-fold calls).
     run_usage: TokenUsage,
-    /// Cross-compaction cumulative 5-field usage across the WAL session.
+    /// Cross-compaction cumulative 5-field usage along the active branch lineage.
     session_usage: TokenUsage,
     pending_compact: bool,
-    /// Background `msh` jobs yielded during this process run (v1.1.2 §§7.1.5 & 7.2).
+    /// Background `msh` jobs yielded during this process run (v0.1.2 §§7.1 & 7.2).
     bg_jobs: Vec<TrackedBgJob>,
 }
 
@@ -422,8 +440,19 @@ impl SessionState {
                 }
             };
 
+            let mut next_node_id = replayed.next_node_id;
+            let init_node_id = if replayed.tree_mode {
+                let id = next_node_id;
+                next_node_id = next_node_id.saturating_add(1);
+                Some(id)
+            } else {
+                None
+            };
+            let mut head_id = init_node_id;
+
             let ts = posix::timestamp_rfc3339_utc();
             if let Err(err) = wal.append(&WalEvent::SessionInit {
+                id: init_node_id,
                 ir_version: IR_VERSION,
                 ts,
                 session_id: Some(session_id.clone()),
@@ -440,20 +469,40 @@ impl SessionState {
             }
 
             let mut max_tid = 0u64;
-            for msg in &processed.messages {
+            let mut entries = Vec::with_capacity(processed.messages.len());
+            for msg in processed.messages {
                 max_tid = max_tid.max(msg.turn_id());
-                if let Err(err) = wal.append_message(msg) {
+                let node_id = if replayed.tree_mode {
+                    let id = next_node_id;
+                    next_node_id = next_node_id.saturating_add(1);
+                    Some(id)
+                } else {
+                    None
+                };
+                let parent_id = if replayed.tree_mode { head_id } else { None };
+                if let Err(err) = wal.append_message(node_id, parent_id, &msg) {
                     stderr_tracker.writeln_line(&format!("anix: {err}"));
                     return Err(err.exit_code());
                 }
+                if replayed.tree_mode {
+                    head_id = node_id;
+                }
+                entries.push(ActiveEntry {
+                    node_id,
+                    message: msg,
+                    entry_usage: TokenUsage::default(),
+                });
             }
 
             return Ok(Self {
                 session_id,
-                messages: processed.messages,
+                entries,
                 assistant_usages: BTreeMap::new(),
                 last_checkpoint_turn: 0,
                 next_turn_id: max_tid.saturating_add(1).max(1),
+                tree_mode: replayed.tree_mode,
+                head_id,
+                next_node_id,
                 next_cycle_id: 1,
                 turns_executed: 0,
                 run_usage: TokenUsage::default(),
@@ -463,14 +512,17 @@ impl SessionState {
             });
         }
 
-        // Resumed WAL session: preserve frozen system prefix verbatim and emit trailing
-        // `runtime_update` ONLY if contract config (`output`, `shell`, `stderr`, `approval`, or `vision`) drifted.
-        let mut messages = replayed.messages;
+        // Resumed (or `--leaf` branched) WAL session: preserve frozen system prefix verbatim and
+        // emit trailing `runtime_update` ONLY if contract config drifted along this branch lineage.
+        let mut entries = replayed.entries;
         let mut next_turn_id = replayed.next_turn_id;
+        let tree_mode = replayed.tree_mode;
+        let mut head_id = replayed.head_id;
+        let mut next_node_id = replayed.next_node_id;
 
         if let Some(prev_cfg) = replayed.latest_config {
             let mut diffs = Vec::new();
-            // v1.2.0 compatibility: pre-v1.2 WALs without `output` ran under `output=explicit`.
+            // v0.2.0 compatibility: pre-v0.2 WALs without `output` ran under `output=explicit`.
             let prev_output = prev_cfg.output.unwrap_or(OutputMode::Explicit);
             if prev_output != cfg.output {
                 diffs.push(format!(
@@ -524,8 +576,18 @@ impl SessionState {
                 let content = diffs.join("; ");
                 let turn_id = next_turn_id;
                 next_turn_id = next_turn_id.saturating_add(1);
+                let node_id = if tree_mode {
+                    let id = next_node_id;
+                    next_node_id = next_node_id.saturating_add(1);
+                    Some(id)
+                } else {
+                    None
+                };
+                let parent_id = if tree_mode { head_id } else { None };
                 let ts = posix::timestamp_rfc3339_utc();
                 if let Err(err) = wal.append(&WalEvent::RuntimeUpdate {
+                    id: node_id,
+                    parent_id,
                     turn_id,
                     ts,
                     content: content.clone(),
@@ -540,19 +602,29 @@ impl SessionState {
                     stderr_tracker.writeln_line(&format!("anix: {err}"));
                     return Err(err.exit_code());
                 }
-                messages.push(IrMessage::system(
-                    turn_id,
-                    format!("<runtime_update>{content}</runtime_update>"),
-                ));
+                if tree_mode {
+                    head_id = node_id;
+                }
+                entries.push(ActiveEntry {
+                    node_id,
+                    message: IrMessage::system(
+                        turn_id,
+                        format!("<runtime_update>{content}</runtime_update>"),
+                    ),
+                    entry_usage: TokenUsage::default(),
+                });
             }
         }
 
         Ok(Self {
             session_id,
-            messages,
+            entries,
             assistant_usages: replayed.assistant_usages,
             last_checkpoint_turn: replayed.last_checkpoint_turn,
             next_turn_id,
+            tree_mode,
+            head_id,
+            next_node_id,
             next_cycle_id: 1,
             turns_executed: 0,
             run_usage: TokenUsage::default(),
@@ -568,10 +640,61 @@ impl SessionState {
         tid
     }
 
+    fn alloc_node_id(&mut self) -> Option<u64> {
+        if self.tree_mode {
+            let id = self.next_node_id;
+            self.next_node_id = self.next_node_id.saturating_add(1);
+            Some(id)
+        } else {
+            None
+        }
+    }
+
+    fn current_parent_id(&self) -> Option<u64> {
+        if self.tree_mode { self.head_id } else { None }
+    }
+
+    /// WAL leaf ID to expose in Trace / `on-exit.d/` (`None` for stateless or legacy WAL runs).
+    fn reported_leaf_id(&self, cfg: &ResolvedConfig) -> Option<u64> {
+        if cfg.context.is_some() && self.tree_mode {
+            self.head_id
+        } else {
+            None
+        }
+    }
+
     fn alloc_cycle_id(&mut self) -> u64 {
         let cid = self.next_cycle_id;
         self.next_cycle_id = self.next_cycle_id.saturating_add(1);
         cid
+    }
+
+    fn messages_cloned(&self) -> Vec<IrMessage> {
+        self.entries.iter().map(|e| e.message.clone()).collect()
+    }
+
+    fn push_message(
+        &mut self,
+        msg: IrMessage,
+        usage: Option<TokenUsage>,
+        wal: &mut WalStore,
+        stderr_tracker: &StderrTracker,
+    ) -> Result<(), ExitCode> {
+        let node_id = self.alloc_node_id();
+        let parent_id = self.current_parent_id();
+        if let Err(err) = wal.append_message_with_usage(node_id, parent_id, &msg, usage) {
+            stderr_tracker.writeln_line(&format!("anix: {err}"));
+            return Err(err.exit_code());
+        }
+        if self.tree_mode {
+            self.head_id = node_id;
+        }
+        self.entries.push(ActiveEntry {
+            node_id,
+            message: msg,
+            entry_usage: usage.unwrap_or_default(),
+        });
+        Ok(())
     }
 
     fn push_user_message(
@@ -582,27 +705,23 @@ impl SessionState {
     ) -> Result<(), ExitCode> {
         let tid = self.alloc_turn_id();
         let msg = IrMessage::user(tid, text);
-        if let Err(err) = wal.append_message(&msg) {
-            stderr_tracker.writeln_line(&format!("anix: {err}"));
-            return Err(err.exit_code());
-        }
-        self.messages.push(msg);
-        Ok(())
+        self.push_message(msg, None, wal, stderr_tracker)
     }
 
     fn current_context_tokens(&self) -> u64 {
-        compact::estimate_context_tokens(&self.messages, &self.assistant_usages)
+        let msgs = self.messages_cloned();
+        compact::estimate_context_tokens(&msgs, &self.assistant_usages)
     }
 
     fn build_ir_stream(&self, cfg: &ResolvedConfig) -> IrStream {
         IrStream {
             header: make_ir_header(cfg),
-            messages: self.messages.clone(),
+            messages: self.messages_cloned(),
         }
     }
 
     /// Inspect tracked background `msh` jobs and emit `<runtime_update>` + `bg_job_finished`
-    /// notifications for any jobs that exited since the last turn (v1.1.2 §§7.1.5 & 7.2).
+    /// notifications for any jobs that exited since the last turn (v0.1.2 §§7.1 & 7.2).
     fn poll_completed_bg_jobs(
         &mut self,
         cfg: &ResolvedConfig,
@@ -651,8 +770,12 @@ impl SessionState {
             }
 
             let turn_id = self.alloc_turn_id();
+            let node_id = self.alloc_node_id();
+            let parent_id = self.current_parent_id();
             let ts = posix::timestamp_rfc3339_utc();
             if let Err(err) = wal.append(&WalEvent::RuntimeUpdate {
+                id: node_id,
+                parent_id,
                 turn_id,
                 ts,
                 content: content.clone(),
@@ -667,10 +790,17 @@ impl SessionState {
                 stderr_tracker.writeln_line(&format!("anix: {err}"));
                 return Err(err.exit_code());
             }
-            self.messages.push(IrMessage::system(
-                turn_id,
-                format!("<runtime_update>{content}</runtime_update>"),
-            ));
+            if self.tree_mode {
+                self.head_id = node_id;
+            }
+            self.entries.push(ActiveEntry {
+                node_id,
+                message: IrMessage::system(
+                    turn_id,
+                    format!("<runtime_update>{content}</runtime_update>"),
+                ),
+                entry_usage: TokenUsage::default(),
+            });
 
             let mut fin_fields = Map::new();
             fin_fields.insert("job_id".into(), Value::String(job.job_id));
@@ -873,6 +1003,9 @@ fn execute_tracked_cycle(
     if let Ok(v) = serde_json::to_value(context) {
         end_fields.insert("context".into(), v);
     }
+    if let Some(lid) = state.reported_leaf_id(cfg) {
+        end_fields.insert("leaf_id".into(), Value::from(lid));
+    }
     tracer.emit_event("cycle_end", end_fields);
 
     outcome
@@ -1059,12 +1192,16 @@ fn run_inference_cycle(
             };
             state.pending_compact = false;
 
+            let current_msgs = state.messages_cloned();
             match compact::run_full_compaction(
                 cfg,
                 &script.prompt,
                 &state.session_id,
-                &state.messages,
+                &current_msgs,
                 state.next_turn_id,
+                state.tree_mode,
+                state.head_id,
+                state.next_node_id,
                 state.session_usage,
                 reason,
                 wal,
@@ -1074,10 +1211,14 @@ fn run_inference_cycle(
                 tracer,
             ) {
                 Ok(outcome) => {
-                    state.messages = outcome.new_messages;
+                    state.entries = outcome.new_entries;
                     state.assistant_usages.clear();
                     state.last_checkpoint_turn = outcome.checkpoint_turn_id;
                     state.next_turn_id = outcome.next_turn_id;
+                    if state.tree_mode {
+                        state.head_id = outcome.head_id;
+                        state.next_node_id = outcome.next_node_id;
+                    }
                     if let Some(ref cu) = outcome.compact_usage {
                         state.run_usage.add_assign(cu);
                     }
@@ -1205,15 +1346,13 @@ fn run_inference_cycle(
             extra: BTreeMap::new(),
         };
 
-        if let Err(err) = wal.append_message_with_usage(&assistant_msg, response.usage) {
-            stderr_tracker.writeln_line(&format!("anix: {err}"));
+        if let Err(code) = state.push_message(assistant_msg, response.usage, wal, stderr_tracker) {
             return CycleOutcome {
-                exit_code: err.exit_code(),
+                exit_code: code,
                 reason: CycleEndReason::Error,
                 turns: cycle_turns,
             };
         }
-        state.messages.push(assistant_msg);
 
         // No tool calls => inference task finished!
         if response.tool_calls.is_empty() {
@@ -1290,15 +1429,13 @@ fn run_inference_cycle(
                     media: Vec::new(),
                     extra: BTreeMap::new(),
                 };
-                if let Err(err) = wal.append_message(&tool_msg) {
-                    stderr_tracker.writeln_line(&format!("anix: {err}"));
+                if let Err(code) = state.push_message(tool_msg, None, wal, stderr_tracker) {
                     return CycleOutcome {
-                        exit_code: err.exit_code(),
+                        exit_code: code,
                         reason: CycleEndReason::Error,
                         turns: cycle_turns,
                     };
                 }
-                state.messages.push(tool_msg);
                 continue;
             }
 
@@ -1315,15 +1452,13 @@ fn run_inference_cycle(
                     media: Vec::new(),
                     extra: BTreeMap::new(),
                 };
-                if let Err(err) = wal.append_message(&tool_msg) {
-                    stderr_tracker.writeln_line(&format!("anix: {err}"));
+                if let Err(code) = state.push_message(tool_msg, None, wal, stderr_tracker) {
                     return CycleOutcome {
-                        exit_code: err.exit_code(),
+                        exit_code: code,
                         reason: CycleEndReason::Error,
                         turns: cycle_turns,
                     };
                 }
-                state.messages.push(tool_msg);
                 continue;
             }
 
@@ -1405,15 +1540,13 @@ fn run_inference_cycle(
                         media: Vec::new(),
                         extra: BTreeMap::new(),
                     };
-                    if let Err(err) = wal.append_message(&tool_msg) {
-                        stderr_tracker.writeln_line(&format!("anix: {err}"));
+                    if let Err(code) = state.push_message(tool_msg, None, wal, stderr_tracker) {
                         return CycleOutcome {
-                            exit_code: err.exit_code(),
+                            exit_code: code,
                             reason: CycleEndReason::Error,
                             turns: cycle_turns,
                         };
                     }
-                    state.messages.push(tool_msg);
                     continue;
                 }
                 ApprovalDecision::AbortTempFail { reason, .. } => {
@@ -1662,7 +1795,7 @@ fn run_inference_cycle(
                     media: media.clone(),
                     extra: BTreeMap::new(),
                 };
-                let mut preview_msgs = state.messages.clone();
+                let mut preview_msgs = state.messages_cloned();
                 preview_msgs.push(candidate_tool_msg);
                 let aligned_from =
                     wal::align_fold_from_turn(&preview_msgs, req_from).min(assistant_turn_id);
@@ -1737,42 +1870,58 @@ fn run_inference_cycle(
                 extra: BTreeMap::new(),
             };
 
-            if let Err(err) = wal.append_message(&tool_msg) {
-                stderr_tracker.writeln_line(&format!("anix: {err}"));
+            if let Err(code) = state.push_message(tool_msg, None, wal, stderr_tracker) {
                 return CycleOutcome {
-                    exit_code: err.exit_code(),
+                    exit_code: code,
                     reason: CycleEndReason::Error,
                     turns: cycle_turns,
                 };
             }
-            state.messages.push(tool_msg);
 
-            // Apply validated (and optionally auto-summarized) `aclr -t` tail fold (v1.1 §6.1).
+            // Apply validated (and optionally auto-summarized) `aclr -t` tail fold (v0.3 §6.1 & §6.2).
             if let Some((aligned_from, summary, fold_usage)) = resolved_fold {
                 let to_turn = tool_turn_id;
 
-                // v1.1 §6.1: Count auto-fold usage in `run_usage` / `session_usage`, NEVER in `T_cur`.
+                // Count auto-fold usage in `run_usage` / `session_usage`, NEVER in `T_cur`.
                 let normalized_fold_usage = fold_usage.map(|u| u.normalized_5());
                 if let Some(ref fu) = normalized_fold_usage {
                     state.run_usage.add_assign(fu);
                     state.session_usage.add_assign(fu);
                 }
 
-                state.messages.retain(|m| m.turn_id() < aligned_from);
+                let mut kept = Vec::with_capacity(state.entries.len());
+                let mut pruned_total = TokenUsage::default();
+                for entry in std::mem::take(&mut state.entries) {
+                    if entry.message.turn_id() < aligned_from {
+                        kept.push(entry);
+                    } else {
+                        pruned_total.add_assign(&entry.entry_usage);
+                    }
+                }
                 state.assistant_usages.retain(|&tid, _| tid < aligned_from);
-                let folded_msg = IrMessage::user(
-                    aligned_from,
-                    format!("<folded turns=\"{aligned_from}..{to_turn}\">{summary}</folded>"),
-                );
-                state.messages.push(folded_msg);
+
+                let pruned_usage = if state.tree_mode && !pruned_total.is_zero() {
+                    Some(pruned_total.normalized_5())
+                } else {
+                    None
+                };
+                let anchor_parent_id = if state.tree_mode {
+                    kept.last().and_then(|e| e.node_id)
+                } else {
+                    None
+                };
+                let fold_node_id = state.alloc_node_id();
 
                 let ts = posix::timestamp_rfc3339_utc();
                 if let Err(err) = wal.append(&WalEvent::Fold {
+                    id: fold_node_id,
+                    parent_id: anchor_parent_id,
                     ts,
                     from_turn: aligned_from,
                     to_turn,
                     summary: summary.clone(),
                     fold_usage: normalized_fold_usage,
+                    pruned_usage,
                 }) {
                     stderr_tracker.writeln_line(&format!("anix: {err}"));
                     return CycleOutcome {
@@ -1782,10 +1931,38 @@ fn run_inference_cycle(
                     };
                 }
 
+                if state.tree_mode {
+                    state.head_id = fold_node_id;
+                }
+                let mut fold_entry_usage = pruned_total;
+                if let Some(ref fu) = normalized_fold_usage {
+                    fold_entry_usage.add_assign(fu);
+                }
+                let folded_msg = IrMessage::user(
+                    aligned_from,
+                    format!("<folded turns=\"{aligned_from}..{to_turn}\">{summary}</folded>"),
+                );
+                kept.push(ActiveEntry {
+                    node_id: fold_node_id,
+                    message: folded_msg,
+                    entry_usage: fold_entry_usage,
+                });
+                state.entries = kept;
+
                 let mut ff = Map::new();
                 ff.insert("from_turn".into(), Value::from(aligned_from));
                 ff.insert("to_turn".into(), Value::from(to_turn));
                 ff.insert("summary".into(), Value::String(summary));
+                if cfg.context.is_some()
+                    && let Some(nid) = fold_node_id
+                {
+                    ff.insert("node_id".into(), Value::from(nid));
+                }
+                if cfg.context.is_some()
+                    && let Some(pid) = anchor_parent_id
+                {
+                    ff.insert("parent_id".into(), Value::from(pid));
+                }
                 if let Some(fu) = normalized_fold_usage
                     && let Ok(v) = serde_json::to_value(fu)
                 {
@@ -1834,6 +2011,7 @@ fn finish_session(
     run_usage: TokenUsage,
     session_usage: TokenUsage,
     ctx_tokens: u64,
+    leaf_id: Option<u64>,
     emit_usage_stderr: bool,
     stderr_tracker: &StderrTracker,
     tracer: &mut Tracer,
@@ -1875,6 +2053,7 @@ fn finish_session(
             .as_ref()
             .map(|p| p.display().to_string())
             .unwrap_or_default(),
+        leaf_id,
     };
 
     hooks::run_on_exit(&payload, &cfg.paths, tracer);
@@ -1890,6 +2069,9 @@ fn finish_session(
     }
     if let Ok(v) = serde_json::to_value(context) {
         fields.insert("context".into(), v);
+    }
+    if let Some(lid) = leaf_id {
+        fields.insert("leaf_id".into(), Value::from(lid));
     }
     tracer.emit_event("run_end", fields);
 }

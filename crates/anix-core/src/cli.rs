@@ -48,6 +48,10 @@ pub struct Cli {
     #[arg(short = 'c', long = "context")]
     pub context: Option<String>,
 
+    /// Target historical WAL node ID (`>= 1`) to branch from (requires `-c <FILE>`, v0.3.0).
+    #[arg(long = "leaf", value_name = "NODE_ID")]
+    pub leaf: Option<u64>,
+
     #[arg(long = "provider")]
     pub provider: Option<String>,
 
@@ -247,6 +251,21 @@ mod tests {
         assert_eq!(cli.context.as_deref(), Some(""));
         assert_eq!(cli.script, Some(PathBuf::from("bash.agent")));
         assert_eq!(cli.script_args, vec!["check", "disk"]);
+
+        let cli_leaf = Cli::try_parse_from([
+            "anix",
+            "-c",
+            "sess.jsonl",
+            "--leaf",
+            "12",
+            "bash.agent",
+            "hi",
+        ])
+        .expect("parse --leaf with -c");
+        assert_eq!(cli_leaf.context.as_deref(), Some("sess.jsonl"));
+        assert_eq!(cli_leaf.leaf, Some(12));
+        assert_eq!(cli_leaf.script, Some(PathBuf::from("bash.agent")));
+        assert_eq!(cli_leaf.script_args, vec!["hi"]);
 
         let cli =
             Cli::try_parse_from(["anix", "bash.agent", ""]).expect("parse empty quoted script arg");

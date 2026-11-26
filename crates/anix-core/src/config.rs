@@ -439,6 +439,7 @@ pub struct ResolvedConfig {
     pub stderr: StderrMode,
     pub trace_fd: Option<RawFd>,
     pub context: Option<PathBuf>,
+    pub leaf: Option<u64>,
     pub inbox: Option<PathBuf>,
     pub idle_timeout_sec: u64,
     pub params: BTreeMap<String, serde_json::Value>,
@@ -675,6 +676,31 @@ impl ResolvedConfig {
             }
         });
 
+        let leaf = match cli.leaf {
+            Some(v) => Some(v),
+            None => match env_non_empty("ANIX_LEAF") {
+                Some(raw) => Some(raw.trim().parse::<u64>().map_err(|_| {
+                    ConfigError::Invalid(format!(
+                        "invalid ANIX_LEAF `{raw}` (expected positive integer >= 1)"
+                    ))
+                })?),
+                None => None,
+            },
+        };
+        if let Some(leaf_id) = leaf {
+            if leaf_id == 0 {
+                return Err(ConfigError::Invalid(
+                    "--leaf / ANIX_LEAF must be >= 1".into(),
+                ));
+            }
+            if context.is_none() {
+                return Err(ConfigError::Invalid(
+                    "--leaf / ANIX_LEAF requires a persistent WAL context file (-c / --context)"
+                        .into(),
+                ));
+            }
+        }
+
         let msh_timeout_sec = env_non_empty("MSH_TIMEOUT_SEC")
             .and_then(|s| s.parse::<u64>().ok())
             .filter(|&v| v > 0)
@@ -739,6 +765,7 @@ impl ResolvedConfig {
             stderr,
             trace_fd,
             context,
+            leaf,
             inbox,
             idle_timeout_sec,
             params,

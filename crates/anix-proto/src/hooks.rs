@@ -57,4 +57,6 @@ pub struct OnExitPayload {
     pub session_usage: TokenUsage,
     pub context: ContextWatermark,
     pub context_file: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leaf_id: Option<u64>,
 }
