@@ -5,6 +5,7 @@
 2-02	私有组件解析顺序	Provider 的命令名依次查找 PATH 和私有目录，显式路径直接执行	a_named_provider_searches_path_then_libexec_while_a_path_executes_directly #28
 2-03	默认 PATH 注入	子进程优先解析私有工具	tool_receives_control_channels_tools_path_and_no_parent_model_or_wal test_installed_pipeline_and_fold
 2-04	BusyBox 软链	参考 Provider 按入口选择对应 HTTP 方言，其本地模拟响应可转换为协议事件	resolves_anthropic_endpoint_urls resolves_dialect_from_argv0_symlink_and_version resolves_dialect_from_subcommand_flag_and_env endpoint_url_appends_chat_completions_once version_flag_works_for_base_binary_and_busybox_symlinks busybox_symlink_openai_responses_end_to_end busybox_symlink_openai_compat_end_to_end_and_unauthenticated_local busybox_symlink_anthropic_end_to_end_with_inclusive_usage_and_headers
+2-05	独立静态二进制	x86_64 musl 发行包的五个二进制均可执行，没有 PT_INTERP 或 DT_NEEDED	test_every_musl_release_executable_has_no_interpreter_or_needed_libraries
 3.1-01	[<SCRIPT_ARGS>...]	直接传参、可选分隔符及以短横线开头的参数	script_arguments_accept_an_optional_separator_and_preserve_option_like_literals parses_script_and_args_with_double_dash parses_direct_and_quoted_script_args_without_double_dash
 3.1-02	anix trust <PATH>	trust 子命令与普通脚本参数分别解析	trust_subcommand_does_not_conflict_with_script_args
 3.1-03	anix --doctor	自检与凭据诊断	doctor_distinguishes_required_missing_empty_and_fallback_credentials #31
@@ -45,7 +46,9 @@
 3.4-08	输出至 `fd 2`	脚本正文引用未挂载的 ANIX_OUT 时给出迁移提示	test_v1_2_0_orthogonal_output_contracts_and_shell_none
 3.4-09	`output == explicit` 且	无 shell 或禁止执行时请求工具直通，启动失败且不写 WAL	test_v1_2_0_orthogonal_output_contracts_and_shell_none
 3.4-10	枚举值非法	未知 output、approval 或 stderr 在 CLI 与 Frontmatter 两条路径都返回 2，WAL 和 Provider 请求均不存在	!test_effective_enum_defaults_choices_and_rejections_match_rfc
-3.4-11	具备 `+x` 权限的 Shell	配置无法解析的 shell 时返回 2，目标 WAL 不被创建	test_v1_2_0_orthogonal_output_contracts_and_shell_none
+3.4-11	具备 `+x` 权限的 Shell	配置无法解析的 shell 时返回 2，目标 WAL 不被创建	test_v1_2_0_orthogonal_output_contracts_and_shell_none !test_shell_resolution_requires_an_executable_file_before_any_provider_request
+3.4-12	CLI 参数 > 环境变量	output 的五个覆盖层各自可缺省，最终 stdout、WAL 快照和请求 IR 采用同一优先级	!test_output_resolves_every_subset_of_cli_env_script_project_and_global
+3.4-13	非阻断警告	两种 shell 能力、三种 output 和三种 approval 组合分别核实退出状态、诊断、WAL 与 Provider 请求，包括正文引用 ANIX_OUT 的情形	!test_output_startup_matrix_warns_or_stops_before_wal_and_provider
 4.1-01	严禁阻塞等待	有参数的可执行脚本通过 PATH 或相对路径启动，TTY 保持打开即可推理	test_installed_bash_script_accepts_args_on_path_and_by_relative_name_without_tty_eof
 4.1-02	仅当 `isatty(0)` 为真且未传入	无参数且 stdin 为终端时等待实际 EOF，再将输入交给 Provider	test_executable_script_on_path_and_by_relative_name_obeys_tty_eof_rules #34
 4.1-03	直接以 `<SCRIPT_ARGS>`	带参数启动，Provider 首帧前是否必须显示等待提示	#36
@@ -64,6 +67,10 @@
 4.1-16	静态单写者	默认只向管道交付最终回复，禁用工具时可串联两级脚本	test_v1_2_0_orthogonal_output_contracts_and_shell_none
 4.1-17	静态单写者	explicit 逐字节交付工具输出，none 保持零字节并允许磁盘副作用	test_v1_2_0_orthogonal_output_contracts_and_shell_none
 4.1-18	按轮缓冲	带工具的轮次及失败轮次的部分文本进入诊断流，stdout 只交付成功终轮的回复	test_v1_2_0_orthogonal_output_contracts_and_shell_none
+4.1-19	零延迟实时流式直出	在 Provider 尚不能发出终结帧时，观察纯文本首段与启用 shell 的缓冲行为，覆盖两种 Provider 模式	!test_reply_visibility_before_done_in_oneshot_and_coprocess
+4.1-20	仅当 `isatty(1)`	stdout 连接 PTY 和管道时分别核对空文本、非空文本、一个或多个尾部 LF	!test_reply_newline_depends_on_stdout_tty_and_last_byte
+4.1-21	零延迟实时流式直出	纯文本输出后遇到错误、中断或重试时，已交付字节的保留和重发语义待裁决	#61
+4.1-22	人类诊断流（stderr）	比较真实终端和文件中的 auto 与 explicit 诊断流，核对工具诊断、思考及 usage 可见性	test_stdout_and_stderr_terminal_modes_are_independent
 4.2-01	所有 `tool_calls` 闭合	当前工具批次闭合后才取下一条已发布消息	concurrent_publications_wait_for_tool_closure_and_preserve_each_complete_body
 4.2-02	作为面向外层	成功消息先提交，下一条被中断时仍可识别已完成的轮次	test_inbox_commits_one_message_then_interrupts_the_next_in_the_same_coprocess #37 aclr_auto_summary_tail_fold_and_coprocess_inbox_lifecycle
 4.2-03	向 Trace 发出一次	Linux 空闲时只发一次 idle，新任务结束后重新待命	an_idle_inbox_sleeps_without_periodic_wakeups_then_consumes_a_publication
@@ -77,6 +84,8 @@
 4.3-04	ANIX_CTL=/dev/fd/6	控制管道写端与实际 JSONL 帧	test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity concatenated_and_split_media_frames_keep_order_and_tool_identity_after_resume
 4.3-05	截断陷阱	连续工具重定向到普通文件时顺序追加	repeated_payload_redirection_appends_raw_bytes_in_both_stderr_modes
 4.3-06	确保 `fd 1` 严格单写者	reply 模式下真实 shell 观察到 fd 4 关闭且 ANIX_OUT 缺失	test_v1_2_0_orthogonal_output_contracts_and_shell_none
+4.3-07	确保 `fd 1` 严格单写者	三个 output 模式下 fd 4 的开闭与 ANIX_OUT 一致，fd 5、6 保持只写匿名管道	!test_output_mode_controls_payload_fd_without_changing_diagnostic_or_control_pipes
+4.3-08	绑定至 `msh` 内部捕获管道	msh 子进程的 stdout 和 stderr 均进入模型工具结果，外部 quiet 诊断流保持干净	!test_output_mode_controls_payload_fd_without_changing_diagnostic_or_control_pipes
 4.4-01	默认逻辑必须内置	同名全局或已信任项目钩子可覆写和屏蔽	each_builtin_can_be_replaced_globally_then_overridden_or_masked_by_the_project
 4.4-02	普通回复展示于	output=explicit、stderr=auto 首轮提示中的交付通道和工具，实际 fd 2 可见性	runtime_contract_depends_on_stderr_and_only_changes_at_the_tail_on_resume test_stdout_and_stderr_terminal_modes_are_independent
 4.4-03	普通回复仅为内心独白	output=explicit、stderr=explicit 的首轮契约、切换 stderr 后的冻结前缀及输出	runtime_contract_depends_on_stderr_and_only_changes_at_the_tail_on_resume test_stdout_and_stderr_terminal_modes_are_independent
@@ -137,6 +146,7 @@
 6.2-17	遇到 `checkpoint` 或	分节版本检查与前缀和	cli_rejects_corrupted_tails_and_unknown_section_versions_before_inference two_checkpoints_carry_folded_usage_once_and_refresh_the_prefix_across_processes
 6.2-18	按时间正序	正序回放与前向参考模型逐轮对照	all_live_anchors_across_three_successive_folds_match_forward_replay_and_usage
 6.2-19	若逆读的旧版 WAL 缺失	恢复旧 WAL 时默认 reply 在尾部通知原 explicit 契约发生变化	test_v1_2_0_orthogonal_output_contracts_and_shell_none
+6.2-20	Config Drift 尾部通知	恢复时比较 output 和 shell 启用状态；换用另一个可执行 shell 不触发漂移，同时改变两项只追加一条	!test_resume_distinguishes_shell_capability_from_executable_path_and_output
 6.3-01	零空闲唤醒	无截止时间的 Linux 空闲循环持续睡眠，发布消息可以唤醒	an_idle_inbox_sleeps_without_periodic_wakeups_then_consumes_a_publication
 6.3-02	精确超时	子进程清理与退出钩子的截止时间在正常和缺少 pidfd 的 Linux 上可检查	sigint_bounds_cleanup_of_a_provider_that_acknowledges_term on_exit_timeout_is_local_to_one_hook_and_preserves_the_primary_exit_code #48
 6.3-03	固定间隔睡眠轮询	强杀时组长退出、有限子进程仍在，Linux 宽限期的等待不应持续空转	test_hard_kill_grace_waits_for_a_living_descendant_without_repeated_polling #57

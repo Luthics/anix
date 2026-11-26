@@ -68,6 +68,39 @@ fi
         self.assertEqual((reply["role"], reply["tool_call_id"]), ("tool", "fixture-id"))
         return result, reply
 
+    # RFC §4.3-07 — 分别在三种 output 下检查真实 msh 的 fd 4 和 ANIX_OUT，并核对 fd 5、6 始终是只写管道。
+    # RFC §4.3-08 — 向工具 stdout 与 stderr 分别写入不同文本，两者均进入同一条模型工具结果。
+    def test_output_mode_controls_payload_fd_without_changing_diagnostic_or_control_pipes(self):
+        (self.root / "observe.py").write_text("""import errno, fcntl, json, os, stat
+channels = []
+for fd, name in [(4, "ANIX_OUT"), (5, "ANIX_ERR"), (6, "ANIX_CTL")]:
+    try:
+        pipe = stat.S_ISFIFO(os.fstat(fd).st_mode)
+        write_only = fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE == os.O_WRONLY
+    except OSError as exc:
+        if exc.errno != errno.EBADF:
+            raise
+        pipe, write_only = None, None
+    channels.append([os.environ.get(name), pipe, write_only])
+print(json.dumps(channels), flush=True)
+os.write(2, b"captured-stderr\\n")
+""")
+        for mode in ("none", "explicit", "reply"):
+            with self.subTest(mode=mode):
+                (self.root / "first.ir").unlink(missing_ok=True)
+                (self.root / "second.ir").unlink(missing_ok=True)
+                _, tool = self.invoke('exec "$FIXTURE_PYTHON" observe.py',
+                                      {"ANIX_OUTPUT": mode, "ANIX_OUT": "stale-parent-value",
+                                       "FIXTURE_PYTHON": sys.executable})
+                lines = tool["text"].splitlines()[1:]
+                # RFC-ASSERT §4.3-08
+                self.assertEqual(sorted("channels" if line.startswith("[[") else line for line in lines),
+                                 ["captured-stderr", "channels"])
+                channels = json.loads(next(line for line in lines if line.startswith("[[")))
+                payload = ["/dev/fd/4", True, True] if mode == "explicit" else [None, None, None]
+                # RFC-ASSERT §4.3-07
+                self.assertEqual(channels, [payload, ["/dev/fd/5", True, True], ["/dev/fd/6", True, True]])
+
     # RFC §7.2-02 — 按含 LF 的实际序列化长度逐个比较 aclr 发送端和内核接收端的判定。
     # RFC §7.2-07 — 按序列化字节数逐一比较发送端及接收端的 64 KiB 边界。
     def test_aclr_and_anix_agree_on_the_serialized_fold_frame_size_limit(self):
@@ -473,6 +506,7 @@ for name, channel in (("output","ANIX_OUT"), ("diagnostic","ANIX_ERR")):
     # RFC §4.1-12 — stdout 与 stderr 各自为终端或普通文件的四种组合，测试 auto 和 explicit。
     # RFC §4.4-02 — stdout/stderr 独立连接到 TTY 或文件，核对 auto 模式诊断字节。
     # RFC §4.4-03 — explicit 模式只交付约定诊断，并在四种 TTY 组合下保持原始输出。
+    # RFC §4.1-22 — auto 模式在 stderr 显示思考和 usage，explicit 模式只留下工具发出的诊断。
     def test_stdout_and_stderr_terminal_modes_are_independent(self):
         cmd = r"""printf 'a\000\377b' > "$ANIX_OUT"; printf 'human\n' > "$ANIX_ERR" """
         reply = [{"type": "reasoning_delta", "text": "reasoning-fixture"},

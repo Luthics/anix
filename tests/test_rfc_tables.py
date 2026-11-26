@@ -1,12 +1,9 @@
 """Exercise finite RFC tables against the CLI built from this checkout."""
 import json
-import os
 from pathlib import Path
 import re
 import signal
-import subprocess
-import tempfile
-import unittest
+from anix_fixture import OfflineAnixCase
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,35 +62,7 @@ def enum_rows():
     return rows
 
 
-class RfcTables(unittest.TestCase):
-    def setUp(self):
-        area = tempfile.TemporaryDirectory(prefix="anix-rfc-tables-")
-        self.addCleanup(area.cleanup)
-        self.root = Path(area.name)
-        bins = Path(os.environ.get("ANIX_TEST_BIN_DIR", ROOT / "target/debug")).resolve()
-        self.anix = bins / "anix"
-        self.env = {"HOME": str(self.root), "PATH": f"{bins}:/usr/bin:/bin",
-                    "XDG_RUNTIME_DIR": str(self.root / "run"), "LC_ALL": "C"}
-        config = self.root / ".config/anix"
-        config.mkdir(parents=True)
-        self.provider = self.root / "provider"
-        (config / "config.toml").write_text(
-            f'[defaults]\nprovider="fixture"\nmodel="local"\n[providers.fixture]\n'
-            f'bin="{self.provider}"\nmode="oneshot"\n')
-        self.script = self.root / "case.agent"
-        self.script.write_text("reply")
-        self.reply([{"type": "text_delta", "text": "OK"}, {"type": "done", "finish_reason": "stop"}])
-
-    def reply(self, events):
-        (self.root / "events").write_text("".join(json.dumps(event) + "\n" for event in events))
-        self.provider.write_text("#!/bin/sh\ncat > request\ncat events\n")
-        self.provider.chmod(0o700)
-
-    def invoke(self, *args):
-        return subprocess.run([self.anix, *args], cwd=self.root, env=self.env,
-                              stdin=subprocess.DEVNULL, capture_output=True,
-                              start_new_session=True, timeout=10)
-
+class RfcTables(OfflineAnixCase):
     # RFC §3.3-09 — 从 RFC 读取 approval 的所有合法值，与真实 --help 公布的集合逐项比较。
     # RFC §3.3-10 — 从 RFC 读取 stderr 的所有合法值，与真实 --help 公布的集合逐项比较。
     # RFC §3.1-12 — 对照 §3.1 的封闭选项集合、§3.3 的枚举和真实 CLI help；新增、缺失或多余取值均可定位。

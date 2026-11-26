@@ -152,7 +152,46 @@ def read_cases(root):
     return cases
 
 
-def read_requirements(root):
+# The first column identifies each closed table in the canonical RFC. New data rows need
+# their own source-line evidence even if both the catalog and the annotations omit them.
+CONTRACT_TABLES = {"3.3": "字段", "4.1": "FD", "4.3": "子进程 FD", "6.4": "信号", "6.5": "退出码"}
+
+
+def check_table_rows(lines, sections, requirements, tables):
+    covered = {r.line for r in requirements.values()
+               if any(ref != "TODO" and not ref.startswith("#") for ref in r.refs)}
+    for section, title in tables.items():
+        if section not in sections:
+            raise ValueError(f"{RFC}: missing table section §{section}")
+        start = sections[section]
+        end = next((line for line in sections.values() if line > start), len(lines) + 1)
+        headers = [i for i in range(start, end - 1)
+                   if re.match(rf"^\s*\|\s*{re.escape(title)}\s*\|", lines[i])]
+        if len(headers) != 1:
+            raise ValueError(f"{RFC}: §{section} expected one table headed {title!r}")
+        header = headers[0]
+        if header + 1 >= end - 1:
+            raise ValueError(f"{RFC}:{header + 1} missing separator for §{section}")
+        columns = [cell.strip() for cell in lines[header + 1].strip().strip("|").split("|")]
+        if not columns or not all(re.fullmatch(r":?-+:?", cell) for cell in columns):
+            raise ValueError(f"{RFC}:{header + 2} malformed separator for §{section}")
+        first = header + 2
+        keys = set()
+        for i in range(first, end - 1):
+            row = lines[i].strip()
+            if not row.startswith("|"):
+                break
+            key = row.split("|", 2)[1].strip()
+            if not key or key in keys:
+                raise ValueError(f"{RFC}:{i + 1} §{section} empty or duplicate table key {key!r}")
+            if i + 1 not in covered:
+                raise ValueError(f"{RFC}:{i + 1} §{section} {key}: table row needs executable test evidence")
+            keys.add(key)
+        if not keys:
+            raise ValueError(f"{RFC}:{first + 1} empty table in §{section}")
+
+
+def read_requirements(root, *, checked_tables=CONTRACT_TABLES):
     # LF bytes match GitHub source line anchors even in tables.
     lines = (root / RFC).read_bytes().decode("utf-8").split("\n")
     versions = [m[1] for line in lines if (m := re.match(r"^\*\*版本\*\*.*?\b(v\d+\.\d+\.\d+)\b", line))]
@@ -189,6 +228,7 @@ def read_requirements(root):
         requirements[id_] = Requirement(id_, behavior, matches[0], evidence.split())
     if not requirements:
         raise ValueError("empty requirement catalog")
+    check_table_rows(lines, sections, requirements, checked_tables)
     return versions[0], requirements
 
 
@@ -232,8 +272,8 @@ def cell(text):
     return text.replace("|", r"\|")
 
 
-def build_index(root=ROOT):
-    version, requirements = read_requirements(root)
+def build_index(root=ROOT, *, checked_tables=CONTRACT_TABLES):
+    version, requirements = read_requirements(root, checked_tables=checked_tables)
     cases = read_cases(root)
     edges, strict = reconcile(cases, requirements)
     forward = [f"# {version} RFC 逐测试索引", "",
@@ -263,7 +303,7 @@ def build_index(root=ROOT):
                "在源码测试声明前写 `RFC §编号 — 本用例的输入或操作及预期结果。`。"
                "编辑 [rfc-requirements.tsv](rfc-requirements.tsv) 时保留已有编号，为新行为分配新编号。"
                "清单中的 `!测试名` 还要求在 Python 断言正上方写 `# RFC-ASSERT §编号`。构建二进制后，运行 `python3 scripts/check-rfc-assertions.py` 验证每处标记的断言都已执行。", "",
-               "单列 issue 的行仍待规范裁决，TODO 表示还有待补断言。执行结果见对应提交的 CI。"
+               "CI 逐行检查 §3.3、§4.1、§4.3、§6.4、§6.5 的五张表，每行至少关联一项可执行测试。单列 issue 的验收项仍待规范裁决，TODO 表示还有待补断言。执行结果见对应提交的 CI。"
                "按测试查找见[逐测试索引](RFC-cases.md)。"]
     section = None
     for req in requirements.values():

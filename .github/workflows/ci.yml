@@ -117,16 +117,14 @@ jobs:
         env:
           CC_x86_64_unknown_linux_musl: musl-gcc
         run: cargo build --release --workspace --target x86_64-unknown-linux-musl
-      - name: Verify static linkage and smoke test
+      - name: Verify static release ELF headers, interpreter and dependencies
+        env:
+          ANIX_STATIC_BIN_DIR: target/x86_64-unknown-linux-musl/release
+          PYTHONPATH: tests
+        run: python3 -B -m unittest -v test_static_release.StaticRelease.test_every_musl_release_executable_has_no_interpreter_or_needed_libraries
+      - name: Smoke test static binaries
         run: |
           BIN_DIR="target/x86_64-unknown-linux-musl/release"
-          for bin in anix msh anix-provider aview aclr; do
-            file "${BIN_DIR}/${bin}"
-            if ldd "${BIN_DIR}/${bin}" 2>&1 | grep -q '=>'; then
-              echo "ERROR: ${bin} is dynamically linked" >&2
-              exit 1
-            fi
-          done
           "${BIN_DIR}/anix" --version
           "${BIN_DIR}/anix-provider" --version
           test "$("${BIN_DIR}/msh" -c 'echo static-ok')" = "static-ok"

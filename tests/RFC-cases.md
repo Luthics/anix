@@ -567,6 +567,17 @@
 | [`test_finished_group_without_an_exit_file_reports_null_exactly_once`](../tests/test_msh_jobs.py#L346) | [§9.5-07](../docs/RFC.md?plain=1#L699) | 检查已终止的任务组且没有退出码文件时，完成事件含显式 null，后续推理不重复通知。 |
 | [`test_hard_kill_grace_waits_for_a_living_descendant_without_repeated_polling`](../tests/test_msh_jobs.py#L390) | [§6.3-03](../docs/RFC.md?plain=1#L399) | 强杀时组长退出、有限子进程仍在，Linux 宽限期的等待不应持续空转。 |
 
+## `tests/test_output_contract.py`
+
+| 测试 | RFC 原文 | 本测试的预期结果 |
+| --- | --- | --- |
+| [`test_output_resolves_every_subset_of_cli_env_script_project_and_global`](../tests/test_output_contract.py#L17) | [§3.4-12](../docs/RFC.md?plain=1#L141) | 对五层覆盖的 32 种开关组合轮换三个候选值，最高生效层决定 WAL、IR 和 stdout。 [断言 L50](../tests/test_output_contract.py#L50) |
+| [`test_output_startup_matrix_warns_or_stops_before_wal_and_provider`](../tests/test_output_contract.py#L54) | [§3.4-13](../docs/RFC.md?plain=1#L153) | 遍历 shell、output、approval 组合和正文迁移提示；禁止的组合在 WAL 或 Provider 请求出现之前报错。 [断言 L69](../tests/test_output_contract.py#L69) |
+| [`test_shell_resolution_requires_an_executable_file_before_any_provider_request`](../tests/test_output_contract.py#L74) | [§3.4-11](../docs/RFC.md?plain=1#L152) | 对不可执行的文件和目录，分别通过 PATH 名称与绝对路径启动，须在写 WAL 和启动 Provider 前以 2 退出。 [断言 L92](../tests/test_output_contract.py#L92) |
+| [`test_reply_visibility_before_done_in_oneshot_and_coprocess`](../tests/test_output_contract.py#L96) | [§4.1-19](../docs/RFC.md?plain=1#L172) | 以已处理的第二帧作同步点：纯文本的首段在 done 前可读，启用 shell 时同一时点的 stdout 为空。 [断言 L149](../tests/test_output_contract.py#L149) · [断言 L155](../tests/test_output_contract.py#L155) |
+| [`test_reply_newline_depends_on_stdout_tty_and_last_byte`](../tests/test_output_contract.py#L158) | [§4.1-20](../docs/RFC.md?plain=1#L172) | 比较真实 TTY 和管道；空回复、无换行、已有一个或两个换行时只在规定条件下补一个 LF。 [断言 L183](../tests/test_output_contract.py#L183) |
+| [`test_resume_distinguishes_shell_capability_from_executable_path_and_output`](../tests/test_output_contract.py#L186) | [§6.2-20](../docs/RFC.md?plain=1#L366) | 恢复同一 WAL 时只对 output 或 shell 启用状态的实际变化追加一次尾部通知，冻结前缀保持原样。 [断言 L206](../tests/test_output_contract.py#L206) · [断言 L211](../tests/test_output_contract.py#L211) · [断言 L215](../tests/test_output_contract.py#L215) |
+
 ## `tests/test_provider_dialects.py`
 
 | 测试 | RFC 原文 | 本测试的预期结果 |
@@ -613,48 +624,57 @@
 
 | 测试 | RFC 原文 | 本测试的预期结果 |
 | --- | --- | --- |
-| [`test_cli_enum_domains_equal_rfc_option_and_frontmatter_sets`](../tests/test_rfc_tables.py#L101) | [§3.3-09](../docs/RFC.md?plain=1#L133) | 从 RFC 读取 approval 的所有合法值，与真实 --help 公布的集合逐项比较。 [断言 L121](../tests/test_rfc_tables.py#L121) |
-| [`test_cli_enum_domains_equal_rfc_option_and_frontmatter_sets`](../tests/test_rfc_tables.py#L101) | [§3.3-10](../docs/RFC.md?plain=1#L134) | 从 RFC 读取 stderr 的所有合法值，与真实 --help 公布的集合逐项比较。 [断言 L121](../tests/test_rfc_tables.py#L121) |
-| [`test_cli_enum_domains_equal_rfc_option_and_frontmatter_sets`](../tests/test_rfc_tables.py#L101) | [§3.1-12](../docs/RFC.md?plain=1#L83) | 对照 §3.1 的封闭选项集合、§3.3 的枚举和真实 CLI help；新增、缺失或多余取值均可定位。 [断言 L119](../tests/test_rfc_tables.py#L119) |
-| [`test_cli_enum_domains_equal_rfc_option_and_frontmatter_sets`](../tests/test_rfc_tables.py#L101) | [§3.3-14](../docs/RFC.md?plain=1#L128) | 从 RFC 读取 output 的所有合法值，与真实 --help 公布的集合逐项比较。 [断言 L121](../tests/test_rfc_tables.py#L121) |
-| [`test_effective_enum_defaults_choices_and_rejections_match_rfc`](../tests/test_rfc_tables.py#L127) | [§3.3-09](../docs/RFC.md?plain=1#L133) | 读取 approval 默认值；用 CLI 和 Frontmatter 逐个选择合法值，核对 session_init.config。 [断言 L144](../tests/test_rfc_tables.py#L144) · [断言 L153](../tests/test_rfc_tables.py#L153) |
-| [`test_effective_enum_defaults_choices_and_rejections_match_rfc`](../tests/test_rfc_tables.py#L127) | [§3.3-10](../docs/RFC.md?plain=1#L134) | 读取 stderr 默认值；用 CLI 和 Frontmatter 逐个选择合法值，核对 session_init.config。 [断言 L144](../tests/test_rfc_tables.py#L144) · [断言 L153](../tests/test_rfc_tables.py#L153) |
-| [`test_effective_enum_defaults_choices_and_rejections_match_rfc`](../tests/test_rfc_tables.py#L127) | [§3.3-14](../docs/RFC.md?plain=1#L128) | 读取 output 默认值；用 CLI 和 Frontmatter 逐个选择合法值，核对 session_init.config。 [断言 L144](../tests/test_rfc_tables.py#L144) · [断言 L153](../tests/test_rfc_tables.py#L153) |
-| [`test_effective_enum_defaults_choices_and_rejections_match_rfc`](../tests/test_rfc_tables.py#L127) | [§3.4-10](../docs/RFC.md?plain=1#L150) | 未知 output、approval 或 stderr 在 CLI 与 Frontmatter 两条路径都返回 2，WAL 和 Provider 请求均不存在。 [断言 L159](../tests/test_rfc_tables.py#L159) · [断言 L162](../tests/test_rfc_tables.py#L162) |
-| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L170) | [§6.5-09](../docs/RFC.md?plain=1#L426) | Provider 消费完请求后向主进程发送 INT 或 TERM，实际退出状态等于 128 加相应信号编号。 [断言 L202](../tests/test_rfc_tables.py#L202) · [断言 L205](../tests/test_rfc_tables.py#L205) |
-| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L170) | [§6.5-10](../docs/RFC.md?plain=1#L421) | 正常回复的进程状态等于表中 EX_OK。 [断言 L205](../tests/test_rfc_tables.py#L205) |
-| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L170) | [§6.5-11](../docs/RFC.md?plain=1#L422) | 永久 Provider 错误的进程状态等于 GENERAL_ERR。 [断言 L205](../tests/test_rfc_tables.py#L205) |
-| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L170) | [§6.5-12](../docs/RFC.md?plain=1#L423) | 未知 CLI 选项的进程状态等于 EX_USAGE。 [断言 L205](../tests/test_rfc_tables.py#L205) |
-| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L170) | [§6.5-13](../docs/RFC.md?plain=1#L424) | 拒绝工具并启用 fail-on-deny 时进程状态等于 EX_TEMPFAIL。 [断言 L205](../tests/test_rfc_tables.py#L205) |
-| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L170) | [§6.5-14](../docs/RFC.md?plain=1#L425) | 第一轮仍需执行工具且 max_turns=1 时进程状态等于 EX_TIMEOUT。 [断言 L205](../tests/test_rfc_tables.py#L205) |
+| [`test_cli_enum_domains_equal_rfc_option_and_frontmatter_sets`](../tests/test_rfc_tables.py#L70) | [§3.3-09](../docs/RFC.md?plain=1#L133) | 从 RFC 读取 approval 的所有合法值，与真实 --help 公布的集合逐项比较。 [断言 L90](../tests/test_rfc_tables.py#L90) |
+| [`test_cli_enum_domains_equal_rfc_option_and_frontmatter_sets`](../tests/test_rfc_tables.py#L70) | [§3.3-10](../docs/RFC.md?plain=1#L134) | 从 RFC 读取 stderr 的所有合法值，与真实 --help 公布的集合逐项比较。 [断言 L90](../tests/test_rfc_tables.py#L90) |
+| [`test_cli_enum_domains_equal_rfc_option_and_frontmatter_sets`](../tests/test_rfc_tables.py#L70) | [§3.1-12](../docs/RFC.md?plain=1#L83) | 对照 §3.1 的封闭选项集合、§3.3 的枚举和真实 CLI help；新增、缺失或多余取值均可定位。 [断言 L88](../tests/test_rfc_tables.py#L88) |
+| [`test_cli_enum_domains_equal_rfc_option_and_frontmatter_sets`](../tests/test_rfc_tables.py#L70) | [§3.3-14](../docs/RFC.md?plain=1#L128) | 从 RFC 读取 output 的所有合法值，与真实 --help 公布的集合逐项比较。 [断言 L90](../tests/test_rfc_tables.py#L90) |
+| [`test_effective_enum_defaults_choices_and_rejections_match_rfc`](../tests/test_rfc_tables.py#L96) | [§3.3-09](../docs/RFC.md?plain=1#L133) | 读取 approval 默认值；用 CLI 和 Frontmatter 逐个选择合法值，核对 session_init.config。 [断言 L113](../tests/test_rfc_tables.py#L113) · [断言 L122](../tests/test_rfc_tables.py#L122) |
+| [`test_effective_enum_defaults_choices_and_rejections_match_rfc`](../tests/test_rfc_tables.py#L96) | [§3.3-10](../docs/RFC.md?plain=1#L134) | 读取 stderr 默认值；用 CLI 和 Frontmatter 逐个选择合法值，核对 session_init.config。 [断言 L113](../tests/test_rfc_tables.py#L113) · [断言 L122](../tests/test_rfc_tables.py#L122) |
+| [`test_effective_enum_defaults_choices_and_rejections_match_rfc`](../tests/test_rfc_tables.py#L96) | [§3.3-14](../docs/RFC.md?plain=1#L128) | 读取 output 默认值；用 CLI 和 Frontmatter 逐个选择合法值，核对 session_init.config。 [断言 L113](../tests/test_rfc_tables.py#L113) · [断言 L122](../tests/test_rfc_tables.py#L122) |
+| [`test_effective_enum_defaults_choices_and_rejections_match_rfc`](../tests/test_rfc_tables.py#L96) | [§3.4-10](../docs/RFC.md?plain=1#L150) | 未知 output、approval 或 stderr 在 CLI 与 Frontmatter 两条路径都返回 2，WAL 和 Provider 请求均不存在。 [断言 L128](../tests/test_rfc_tables.py#L128) · [断言 L131](../tests/test_rfc_tables.py#L131) |
+| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L139) | [§6.5-09](../docs/RFC.md?plain=1#L426) | Provider 消费完请求后向主进程发送 INT 或 TERM，实际退出状态等于 128 加相应信号编号。 [断言 L171](../tests/test_rfc_tables.py#L171) · [断言 L174](../tests/test_rfc_tables.py#L174) |
+| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L139) | [§6.5-10](../docs/RFC.md?plain=1#L421) | 正常回复的进程状态等于表中 EX_OK。 [断言 L174](../tests/test_rfc_tables.py#L174) |
+| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L139) | [§6.5-11](../docs/RFC.md?plain=1#L422) | 永久 Provider 错误的进程状态等于 GENERAL_ERR。 [断言 L174](../tests/test_rfc_tables.py#L174) |
+| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L139) | [§6.5-12](../docs/RFC.md?plain=1#L423) | 未知 CLI 选项的进程状态等于 EX_USAGE。 [断言 L174](../tests/test_rfc_tables.py#L174) |
+| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L139) | [§6.5-13](../docs/RFC.md?plain=1#L424) | 拒绝工具并启用 fail-on-deny 时进程状态等于 EX_TEMPFAIL。 [断言 L174](../tests/test_rfc_tables.py#L174) |
+| [`test_process_exit_statuses_match_every_rfc_table_row`](../tests/test_rfc_tables.py#L139) | [§6.5-14](../docs/RFC.md?plain=1#L425) | 第一轮仍需执行工具且 max_turns=1 时进程状态等于 EX_TIMEOUT。 [断言 L174](../tests/test_rfc_tables.py#L174) |
 
 ## `tests/test_shell_pipeline.py`
 
 | 测试 | RFC 原文 | 本测试的预期结果 |
 | --- | --- | --- |
-| [`test_aclr_and_anix_agree_on_the_serialized_fold_frame_size_limit`](../tests/test_shell_pipeline.py#L73) | [§7.2-02](../docs/RFC.md?plain=1#L461) | 按含 LF 的实际序列化长度逐个比较 aclr 发送端和内核接收端的判定。 |
-| [`test_aclr_and_anix_agree_on_the_serialized_fold_frame_size_limit`](../tests/test_shell_pipeline.py#L73) | [§7.2-07](../docs/RFC.md?plain=1#L461) | 按序列化字节数逐一比较发送端及接收端的 64 KiB 边界。 |
-| [`test_wal_append_failure_preserves_the_prefix_and_reopens_according_to_tail_state`](../tests/test_shell_pipeline.py#L125) | [§6.2-07](../docs/RFC.md?plain=1#L389) | 文件增长受限时保留原有字节，只在尾行完整可回放时继续。 |
-| [`test_wal_append_failure_preserves_the_prefix_and_reopens_according_to_tail_state`](../tests/test_shell_pipeline.py#L125) | [§6.2-12](../docs/RFC.md?plain=1#L368) | 限制文件增长制造写入失败，检查已写字节和恢复边界。 |
-| [`test_wal_append_failure_preserves_the_prefix_and_reopens_according_to_tail_state`](../tests/test_shell_pipeline.py#L125) | [§6.5-04](../docs/RFC.md?plain=1#L422) | WAL 无法追加时返回 1，已有前缀保留。 |
-| [`test_archived_wal_growth_keeps_resume_reads_bounded_at_the_latest_checkpoint`](../tests/test_shell_pipeline.py#L170) | [§6.2-08](../docs/RFC.md?plain=1#L388) | 活跃窗口不变时将归档从 1 MiB 增至 32 MiB，用系统调用计量恢复读取量。 |
-| [`test_skill_index_round_trips_xml_metadata_and_msh_reads_the_indexed_file_on_demand`](../tests/test_shell_pipeline.py#L225) | [§9.4-01](../docs/RFC.md?plain=1#L679) | 模型从真实 XML 索引读取含特殊字符的技能路径，经 msh 按需获取完整正文。 |
-| [`test_skill_index_round_trips_xml_metadata_and_msh_reads_the_indexed_file_on_demand`](../tests/test_shell_pipeline.py#L225) | [§9.4-04](../docs/RFC.md?plain=1#L673) | 含特殊字符的路径能从 XML 索引解码，并由 msh 按需读取正文。 |
-| [`test_open_input_descriptor_defers_inference_until_eof`](../tests/test_shell_pipeline.py#L300) | [§4.1-10](../docs/RFC.md?plain=1#L171) | 真实管道有无脚本参数均等到 EOF，保留跨写入的 UTF-8 及内嵌 NUL。 |
-| [`test_open_input_descriptor_defers_inference_until_eof`](../tests/test_shell_pipeline.py#L300) | [§4.1-11](../docs/RFC.md?plain=1#L175) | 逐个通过真实管道连接 fd 4 至 9，读完后保留输入来源和完整正文。 |
-| [`test_open_input_descriptor_defers_inference_until_eof`](../tests/test_shell_pipeline.py#L300) | [§4.1-13](../docs/RFC.md?plain=1#L175) | 每个额外输入管道跨写入拼接字节，读到 EOF 后才生成带编号的输入。 |
-| [`test_cancelling_input_does_not_need_eof_or_dispatch_the_partial_message`](../tests/test_shell_pipeline.py#L326) | [§6.5-02](../docs/RFC.md?plain=1#L426) | 读 stdin 或额外输入管道期间取消，写端仍打开也能返回 shell 可见的 130 或 143。 |
-| [`test_msh_timeout_signals_the_whole_group_and_grants_two_seconds_before_kill`](../tests/test_shell_pipeline.py#L339) | [§7.1-01](../docs/RFC.md?plain=1#L455) | 独立 msh 显式强杀时向整组发 TERM，2 秒宽限后强制回收并返回 124。 |
-| [`test_interrupting_a_live_msh_discards_its_partial_result_and_replays_a_closed_history`](../tests/test_shell_pipeline.py#L378) | [§6.2-16](../docs/RFC.md?plain=1#L393) | 打断有部分输出的 msh，恢复后没有半条工具结果或悬空调用。 |
-| [`test_interrupting_a_live_msh_discards_its_partial_result_and_replays_a_closed_history`](../tests/test_shell_pipeline.py#L378) | [§6.4-04](../docs/RFC.md?plain=1#L409) | 工具输出一部分后中断，shell 后代收到 TERM、释放 WAL 锁，恢复时没有半截工具结果。 |
-| [`test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity`](../tests/test_shell_pipeline.py#L434) | [§4.3-01](../docs/RFC.md?plain=1#L214) | output=explicit 时真实 msh 子进程的标准输入指向空设备，fd 4、5、6 都是只写匿名管道。 |
-| [`test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity`](../tests/test_shell_pipeline.py#L434) | [§4.3-02](../docs/RFC.md?plain=1#L216) | 多次打开输出管道，超过 1 MiB 的二进制 Payload 逐字节完整转发。 |
-| [`test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity`](../tests/test_shell_pipeline.py#L434) | [§4.3-03](../docs/RFC.md?plain=1#L217) | 诊断管道可独立传输超过 1 MiB 的二进制数据。 |
-| [`test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity`](../tests/test_shell_pipeline.py#L434) | [§4.3-04](../docs/RFC.md?plain=1#L218) | 真实 msh 子进程中 fd 6 是只写匿名管道。 |
-| [`test_stdout_and_stderr_terminal_modes_are_independent`](../tests/test_shell_pipeline.py#L476) | [§4.1-12](../docs/RFC.md?plain=1#L172) | stdout 与 stderr 各自为终端或普通文件的四种组合，测试 auto 和 explicit。 |
-| [`test_stdout_and_stderr_terminal_modes_are_independent`](../tests/test_shell_pipeline.py#L476) | [§4.4-02](../docs/RFC.md?plain=1#L228) | stdout/stderr 独立连接到 TTY 或文件，核对 auto 模式诊断字节。 |
-| [`test_stdout_and_stderr_terminal_modes_are_independent`](../tests/test_shell_pipeline.py#L476) | [§4.4-03](../docs/RFC.md?plain=1#L228) | explicit 模式只交付约定诊断，并在四种 TTY 组合下保持原始输出。 |
-| [`test_path_precedes_libexec_and_explicit_shell_path_has_priority_over_both`](../tests/test_shell_pipeline.py#L542) | [§2-01](../docs/RFC.md?plain=1#L62) | PATH 中的同名 msh 可覆盖私有安装位置，显式路径仍优先。 |
-| [`test_path_precedes_libexec_and_explicit_shell_path_has_priority_over_both`](../tests/test_shell_pipeline.py#L542) | [§3.3-05](../docs/RFC.md?plain=1#L127) | shell 路径或命令名。 |
-| [`test_nested_anix_uses_own_model_wal_and_budget_and_inherits_cli_auto`](../tests/test_shell_pipeline.py#L606) | [§3.4-01](../docs/RFC.md?plain=1#L156) | 父进程 CLI 开启 auto 后子进程无需重新审批，子模型及 WAL 仍独立。 |
-| [`test_nested_anix_inherits_cli_deny_over_its_own_auto_frontmatter`](../tests/test_shell_pipeline.py#L610) | [§3.4-01](../docs/RFC.md?plain=1#L156) | 父进程的 deny 覆盖子脚本的 auto；子命令没有产生磁盘副作用。 |
+| [`test_output_mode_controls_payload_fd_without_changing_diagnostic_or_control_pipes`](../tests/test_shell_pipeline.py#L73) | [§4.3-07](../docs/RFC.md?plain=1#L216) | 分别在三种 output 下检查真实 msh 的 fd 4 和 ANIX_OUT，并核对 fd 5、6 始终是只写管道。 [断言 L102](../tests/test_shell_pipeline.py#L102) |
+| [`test_output_mode_controls_payload_fd_without_changing_diagnostic_or_control_pipes`](../tests/test_shell_pipeline.py#L73) | [§4.3-08](../docs/RFC.md?plain=1#L215) | 向工具 stdout 与 stderr 分别写入不同文本，两者均进入同一条模型工具结果。 [断言 L97](../tests/test_shell_pipeline.py#L97) |
+| [`test_aclr_and_anix_agree_on_the_serialized_fold_frame_size_limit`](../tests/test_shell_pipeline.py#L106) | [§7.2-02](../docs/RFC.md?plain=1#L461) | 按含 LF 的实际序列化长度逐个比较 aclr 发送端和内核接收端的判定。 |
+| [`test_aclr_and_anix_agree_on_the_serialized_fold_frame_size_limit`](../tests/test_shell_pipeline.py#L106) | [§7.2-07](../docs/RFC.md?plain=1#L461) | 按序列化字节数逐一比较发送端及接收端的 64 KiB 边界。 |
+| [`test_wal_append_failure_preserves_the_prefix_and_reopens_according_to_tail_state`](../tests/test_shell_pipeline.py#L158) | [§6.2-07](../docs/RFC.md?plain=1#L389) | 文件增长受限时保留原有字节，只在尾行完整可回放时继续。 |
+| [`test_wal_append_failure_preserves_the_prefix_and_reopens_according_to_tail_state`](../tests/test_shell_pipeline.py#L158) | [§6.2-12](../docs/RFC.md?plain=1#L368) | 限制文件增长制造写入失败，检查已写字节和恢复边界。 |
+| [`test_wal_append_failure_preserves_the_prefix_and_reopens_according_to_tail_state`](../tests/test_shell_pipeline.py#L158) | [§6.5-04](../docs/RFC.md?plain=1#L422) | WAL 无法追加时返回 1，已有前缀保留。 |
+| [`test_archived_wal_growth_keeps_resume_reads_bounded_at_the_latest_checkpoint`](../tests/test_shell_pipeline.py#L203) | [§6.2-08](../docs/RFC.md?plain=1#L388) | 活跃窗口不变时将归档从 1 MiB 增至 32 MiB，用系统调用计量恢复读取量。 |
+| [`test_skill_index_round_trips_xml_metadata_and_msh_reads_the_indexed_file_on_demand`](../tests/test_shell_pipeline.py#L258) | [§9.4-01](../docs/RFC.md?plain=1#L679) | 模型从真实 XML 索引读取含特殊字符的技能路径，经 msh 按需获取完整正文。 |
+| [`test_skill_index_round_trips_xml_metadata_and_msh_reads_the_indexed_file_on_demand`](../tests/test_shell_pipeline.py#L258) | [§9.4-04](../docs/RFC.md?plain=1#L673) | 含特殊字符的路径能从 XML 索引解码，并由 msh 按需读取正文。 |
+| [`test_open_input_descriptor_defers_inference_until_eof`](../tests/test_shell_pipeline.py#L333) | [§4.1-10](../docs/RFC.md?plain=1#L171) | 真实管道有无脚本参数均等到 EOF，保留跨写入的 UTF-8 及内嵌 NUL。 |
+| [`test_open_input_descriptor_defers_inference_until_eof`](../tests/test_shell_pipeline.py#L333) | [§4.1-11](../docs/RFC.md?plain=1#L175) | 逐个通过真实管道连接 fd 4 至 9，读完后保留输入来源和完整正文。 |
+| [`test_open_input_descriptor_defers_inference_until_eof`](../tests/test_shell_pipeline.py#L333) | [§4.1-13](../docs/RFC.md?plain=1#L175) | 每个额外输入管道跨写入拼接字节，读到 EOF 后才生成带编号的输入。 |
+| [`test_cancelling_input_does_not_need_eof_or_dispatch_the_partial_message`](../tests/test_shell_pipeline.py#L359) | [§6.5-02](../docs/RFC.md?plain=1#L426) | 读 stdin 或额外输入管道期间取消，写端仍打开也能返回 shell 可见的 130 或 143。 |
+| [`test_msh_timeout_signals_the_whole_group_and_grants_two_seconds_before_kill`](../tests/test_shell_pipeline.py#L372) | [§7.1-01](../docs/RFC.md?plain=1#L455) | 独立 msh 显式强杀时向整组发 TERM，2 秒宽限后强制回收并返回 124。 |
+| [`test_interrupting_a_live_msh_discards_its_partial_result_and_replays_a_closed_history`](../tests/test_shell_pipeline.py#L411) | [§6.2-16](../docs/RFC.md?plain=1#L393) | 打断有部分输出的 msh，恢复后没有半条工具结果或悬空调用。 |
+| [`test_interrupting_a_live_msh_discards_its_partial_result_and_replays_a_closed_history`](../tests/test_shell_pipeline.py#L411) | [§6.4-04](../docs/RFC.md?plain=1#L409) | 工具输出一部分后中断，shell 后代收到 TERM、释放 WAL 锁，恢复时没有半截工具结果。 |
+| [`test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity`](../tests/test_shell_pipeline.py#L467) | [§4.3-01](../docs/RFC.md?plain=1#L214) | output=explicit 时真实 msh 子进程的标准输入指向空设备，fd 4、5、6 都是只写匿名管道。 |
+| [`test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity`](../tests/test_shell_pipeline.py#L467) | [§4.3-02](../docs/RFC.md?plain=1#L216) | 多次打开输出管道，超过 1 MiB 的二进制 Payload 逐字节完整转发。 |
+| [`test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity`](../tests/test_shell_pipeline.py#L467) | [§4.3-03](../docs/RFC.md?plain=1#L217) | 诊断管道可独立传输超过 1 MiB 的二进制数据。 |
+| [`test_real_msh_side_channels_are_write_end_pipes_and_relay_beyond_pipe_capacity`](../tests/test_shell_pipeline.py#L467) | [§4.3-04](../docs/RFC.md?plain=1#L218) | 真实 msh 子进程中 fd 6 是只写匿名管道。 |
+| [`test_stdout_and_stderr_terminal_modes_are_independent`](../tests/test_shell_pipeline.py#L510) | [§4.1-12](../docs/RFC.md?plain=1#L172) | stdout 与 stderr 各自为终端或普通文件的四种组合，测试 auto 和 explicit。 |
+| [`test_stdout_and_stderr_terminal_modes_are_independent`](../tests/test_shell_pipeline.py#L510) | [§4.4-02](../docs/RFC.md?plain=1#L228) | stdout/stderr 独立连接到 TTY 或文件，核对 auto 模式诊断字节。 |
+| [`test_stdout_and_stderr_terminal_modes_are_independent`](../tests/test_shell_pipeline.py#L510) | [§4.4-03](../docs/RFC.md?plain=1#L228) | explicit 模式只交付约定诊断，并在四种 TTY 组合下保持原始输出。 |
+| [`test_stdout_and_stderr_terminal_modes_are_independent`](../tests/test_shell_pipeline.py#L510) | [§4.1-22](../docs/RFC.md?plain=1#L173) | auto 模式在 stderr 显示思考和 usage，explicit 模式只留下工具发出的诊断。 |
+| [`test_path_precedes_libexec_and_explicit_shell_path_has_priority_over_both`](../tests/test_shell_pipeline.py#L576) | [§2-01](../docs/RFC.md?plain=1#L62) | PATH 中的同名 msh 可覆盖私有安装位置，显式路径仍优先。 |
+| [`test_path_precedes_libexec_and_explicit_shell_path_has_priority_over_both`](../tests/test_shell_pipeline.py#L576) | [§3.3-05](../docs/RFC.md?plain=1#L127) | shell 路径或命令名。 |
+| [`test_nested_anix_uses_own_model_wal_and_budget_and_inherits_cli_auto`](../tests/test_shell_pipeline.py#L640) | [§3.4-01](../docs/RFC.md?plain=1#L156) | 父进程 CLI 开启 auto 后子进程无需重新审批，子模型及 WAL 仍独立。 |
+| [`test_nested_anix_inherits_cli_deny_over_its_own_auto_frontmatter`](../tests/test_shell_pipeline.py#L644) | [§3.4-01](../docs/RFC.md?plain=1#L156) | 父进程的 deny 覆盖子脚本的 auto；子命令没有产生磁盘副作用。 |
+
+## `tests/test_static_release.py`
+
+| 测试 | RFC 原文 | 本测试的预期结果 |
+| --- | --- | --- |
+| [`test_every_musl_release_executable_has_no_interpreter_or_needed_libraries`](../tests/test_static_release.py#L32) | [§2-05](../docs/RFC.md?plain=1#L53) | 核对五个发行程序均是可执行的 x86_64 ELF，并逐个排除动态解释器和共享库依赖。 |

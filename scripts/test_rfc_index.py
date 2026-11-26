@@ -1,5 +1,6 @@
 """Negative controls for the CI index checker. These fixtures are not product tests."""
 from contextlib import redirect_stderr
+from functools import partial
 from io import StringIO
 from pathlib import Path
 import runpy
@@ -8,7 +9,8 @@ from textwrap import dedent
 import unittest
 
 
-build_index = runpy.run_path(str(Path(__file__).with_name("rfc-test-index.py")))["build_index"]
+build_index = partial(runpy.run_path(str(Path(__file__).with_name("rfc-test-index.py")))["build_index"],
+                      checked_tables={"3.3": "字段"})
 
 
 class IndexChecks(unittest.TestCase):
@@ -21,7 +23,8 @@ class IndexChecks(unittest.TestCase):
         self.catalog = self.root / "tests/rfc-requirements.tsv"
         self.spec.parent.mkdir()
         self.source.parent.mkdir()
-        self.spec.write_text("**版本** v1.2.0\n### 3.3 Fields\nDefault is reply.\nInvalid value rejects.\n")
+        self.spec.write_text("**版本** v1.2.0\n### 3.3 Fields\n| 字段 | 行为 |\n| --- | --- |\n"
+                             "| default | Default is reply. |\n| unknown | Invalid value rejects. |\n")
         self.catalog.write_text("3.3-01\tDefault is reply.\t默认回复\t!test_default\n"
                                 "3.3-02\tInvalid value rejects.\t非法值\ttest_invalid\n")
         self.source.write_text(dedent("""\
@@ -51,14 +54,20 @@ class IndexChecks(unittest.TestCase):
         docs, _ = build_index(self.root)
         for lines in docs.values():
             doc = "\n".join(lines)
-            self.assertIn("docs/RFC.md?plain=1#L3)", doc)
+            self.assertIn("docs/RFC.md?plain=1#L5)", doc)
             self.assertIn("[断言 L6](../tests/test_example.py#L6)", doc)
 
     def test_rejects_edges_missing_in_either_direction_even_if_indexes_are_regenerated(self):
-        self.mutate(self.catalog, "!test_default", "#12", "missing catalog reference: §3.3-01")
+        self.mutate(self.catalog, "!test_default", "test_invalid", "missing catalog reference: §3.3-01")
         self.mutate(self.source, "§3.3-02 —", "§3.3-01 —", "missing source annotation: §3.3-02")
         self.mutate(self.catalog, "test_invalid", "removed_test", "unknown or ambiguous test")
         self.mutate(self.source, "    # RFC §3.3-02", "    # §3.3-02", "missing a detailed RFC annotation")
+
+    def test_a_new_table_row_cannot_disappear_from_both_indexes_or_be_covered_only_by_an_issue(self):
+        self.mutate(self.spec, "| unknown |", "| future | New behavior. |\n| unknown |",
+                    r"§3.3 future: table row needs executable test evidence")
+        self.mutate(self.catalog, "!test_default", "#12 TODO", "table row needs executable test evidence")
+        self.mutate(self.spec, "| unknown |", "| default |", "duplicate table key")
 
     def test_rejects_missing_stale_duplicate_or_ambiguous_anchors(self):
         self.mutate(self.spec, "Default is reply.", "Default changed.", "0 matches")
