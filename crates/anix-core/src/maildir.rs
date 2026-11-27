@@ -428,7 +428,7 @@ impl InboxQueue {
                         }
                     }
                 }
-                let batch = self.claim_all_new()?;
+                let batch = self.try_claim_all_new()?;
                 if !batch.is_empty() {
                     return Ok(InboxWaitOutcome::Batch(batch));
                 }
@@ -499,7 +499,8 @@ impl InboxQueue {
         Ok(false)
     }
 
-    fn claim_all_new(&self) -> io::Result<Vec<InboxMessage>> {
+    /// Non-blocking atomic drain of all pending messages from `new/` into `cur/` in ASCII order.
+    pub fn try_claim_all_new(&self) -> io::Result<Vec<InboxMessage>> {
         let names = list_sorted_entries(&self.new_dir)?;
         let mut claimed = Vec::with_capacity(names.len());
         for name in names {

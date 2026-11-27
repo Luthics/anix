@@ -1596,3 +1596,186 @@ for raw in sys.stdin:
 
     let _ = fs::remove_dir_all(&root);
 }
+
+#[test]
+fn mid_cycle_steering_injects_after_full_tool_group_never_between_tools() {
+    let root = make_temp_env("mid-cycle-steer");
+    let home = setup_fhs_home(&root);
+    let work = root.join("work");
+    mkdir_0755(&work);
+    let inbox = root.join("inbox");
+    let wal_path = root.join("session.wal.jsonl");
+    let trace_path = root.join("trace.jsonl");
+    let ir_log = root.join("ir_turn2.json");
+
+    // Provider turn 1: emit TWO tool calls (`tc_1`, `tc_2`).
+    // `tc_1` drops a steering message into `inbox/new/` while running.
+    // Turn 2: record exact message roles seen by provider and assert `STEER_NOW` arrived ONLY
+    // AFTER both `tool(tc_1)` and `tool(tc_2)`!
+    let mock_prov = root.join("mock-steer.py");
+    write_exec(
+        &mock_prov,
+        &format!(
+            r#"#!/usr/bin/env python3
+import json, sys
+
+turn = 0
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    req = json.loads(line)
+    turn += 1
+    if turn == 1:
+        events = [
+            {{"type": "tool_call", "id": "tc_1", "name": "shell", "arguments": {{"cmd": "anix_steer_drop"}}}},
+            {{"type": "tool_call", "id": "tc_2", "name": "shell", "arguments": {{"cmd": "echo second_tool_ok"}}}},
+            {{"type": "usage", "input_tokens": 50, "output_tokens": 20}},
+            {{"type": "done", "finish_reason": "tool_calls"}},
+        ]
+    else:
+        with open({ir_log:?}, "w") as f:
+            json.dump(req["messages"], f)
+        events = [
+            {{"type": "text_delta", "text": "steered-ok"}},
+            {{"type": "usage", "input_tokens": 80, "output_tokens": 10}},
+            {{"type": "done", "finish_reason": "stop"}},
+        ]
+    for ev in events:
+        sys.stdout.write(json.dumps(ev) + "\n")
+    sys.stdout.flush()
+"#,
+            ir_log = ir_log.display().to_string(),
+        ),
+    );
+
+    // Custom shell that handles `anix_steer_drop` by atomically dropping a steering message into inbox/new/.
+    let test_shell = root.join("steer-shell.sh");
+    write_exec(
+        &test_shell,
+        &format!(
+            r#"#!/usr/bin/env sh
+if [ "$1" = "-c" ] && [ "$2" = "anix_steer_drop" ]; then
+  printf 'Anix-Message-Id: steer_01\nAnix-From: user\n\nSTEER_NOW\n' > "{inbox}/tmp/steer.msg"
+  mv "{inbox}/tmp/steer.msg" "{inbox}/new/9999999999-steer.msg"
+  printf 'first_tool_ok\n'
+  exit 0
+fi
+exec /bin/sh "$@"
+"#,
+            inbox = inbox.display(),
+        ),
+    );
+
+    let cfg_dir = home.join(".config/anix");
+    mkdir_0755(&cfg_dir);
+    fs::write(
+        cfg_dir.join("config.toml"),
+        format!(
+            "[defaults]\nprovider = \"mock\"\nmodel = \"m1\"\n\n[providers.mock]\nbin = \"{}\"\nmode = \"coprocess\"\napi_key_env = \"\"\n",
+            mock_prov.display()
+        ),
+    )
+    .unwrap();
+
+    let script = work.join("steer.agent");
+    fs::write(
+        &script,
+        format!(
+            "---\nname: steer-demo\nshell: {}\noutput: reply\n---\nSteer test.\n",
+            test_shell.display()
+        ),
+    )
+    .unwrap();
+
+    let trace_file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&trace_path)
+        .unwrap();
+
+    let mut daemon = base_cmd(&home, &work);
+    daemon
+        .args([
+            "--inbox",
+            &inbox.display().to_string(),
+            "--idle-timeout",
+            "1",
+            "--inbox-debounce-ms",
+            "20",
+            "--trace-fd",
+            "9",
+            "-c",
+            &wal_path.display().to_string(),
+        ])
+        .arg(&script)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    configure_child_fds(&mut daemon, Some((&trace_file, 9)));
+    let child = daemon.spawn().expect("spawn steering daemon");
+    drop(trace_file);
+
+    // Wait briefly for Maildir creation, then send initial message via `anix send`.
+    let wait_start = Instant::now();
+    while !inbox.join("new").is_dir() && wait_start.elapsed() < Duration::from_secs(5) {
+        thread::sleep(Duration::from_millis(20));
+    }
+    let send_out = base_cmd(&home, &work)
+        .args(["send", &inbox.display().to_string(), "START_CYCLE"])
+        .output()
+        .expect("send START_CYCLE");
+    assert!(send_out.status.success());
+
+    let out = child.wait_with_output().expect("wait daemon");
+    assert!(
+        out.status.success(),
+        "daemon failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // Verify exact turn-2 IR message order:
+    // [system, user(START_CYCLE), assistant(tc_1, tc_2), tool(tc_1), tool(tc_2), user(STEER_NOW)]
+    let ir_raw = fs::read_to_string(&ir_log).expect("read turn 2 IR log");
+    let msgs: Vec<Value> = serde_json::from_str(&ir_raw).expect("parse IR messages");
+    let roles: Vec<&str> = msgs
+        .iter()
+        .map(|m| m.get("role").and_then(Value::as_str).unwrap_or(""))
+        .collect();
+    assert_eq!(
+        roles,
+        vec!["system", "user", "assistant", "tool", "tool", "user"],
+        "steered user message MUST appear ONLY after ALL paired tool results, never between tc_1 and tc_2"
+    );
+    assert_eq!(
+        msgs[3].get("tool_call_id").and_then(Value::as_str),
+        Some("tc_1")
+    );
+    assert_eq!(
+        msgs[4].get("tool_call_id").and_then(Value::as_str),
+        Some("tc_2")
+    );
+    assert!(
+        msgs[5]
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .contains("STEER_NOW"),
+        "expected STEER_NOW in steered user message: {:?}",
+        msgs[5]
+    );
+
+    // Verify `inbox_steered` trace event fired and steered file moved to `done/`.
+    let trace_raw = fs::read_to_string(&trace_path).expect("read trace");
+    assert!(
+        trace_raw.contains("\"type\":\"inbox_steered\"") && trace_raw.contains("steer_01"),
+        "expected inbox_steered trace event, got: {trace_raw}"
+    );
+    assert!(
+        inbox.join("done/9999999999-steer.msg").is_file(),
+        "steered message must be moved to done/ on cycle commit"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}

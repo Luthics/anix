@@ -806,7 +806,7 @@ fn execute_tracked_cycle(
     let start_turn_id = state.next_turn_id;
     let usage_before = state.run_usage.normalized_5();
 
-    let batch_message_ids: Vec<String> = inbox_commit
+    let mut batch_message_ids: Vec<String> = inbox_commit
         .map(|(_, msgs)| msgs.iter().map(|m| m.message_id().to_owned()).collect())
         .unwrap_or_default();
 
@@ -827,6 +827,8 @@ fn execute_tracked_cycle(
     }
     tracer.emit_event("cycle_start", start_fields);
 
+    let inbox_queue_ref = inbox_commit.map(|(q, _)| q);
+    let mut steered_msgs: Vec<InboxMessage> = Vec::new();
     let mut outcome = run_inference_cycle(
         cfg,
         script,
@@ -837,15 +839,25 @@ fn execute_tracked_cycle(
         provider_pool,
         stderr_tracker,
         tracer,
+        inbox_queue_ref,
+        &mut steered_msgs,
     );
 
+    for sm in &steered_msgs {
+        batch_message_ids.push(sm.message_id().to_owned());
+    }
+
     // Commit barrier (RFC §4.3.3 & §8.4):
-    // 1. On success, move all batch `cur/<name>` -> `done/<name>`.
+    // 1. On success, move all batch + mid-cycle steered `cur/<name>` -> `done/<name>`.
     // 2. Deliver replies to all `Anix-Reply-To` Maildir targets (even on non-zero exit so callers unblock!).
     // 3. Emit `cycle_end`.
     if let Some((queue, msgs)) = inbox_commit {
+        let mut all_msgs: Vec<&InboxMessage> = Vec::with_capacity(msgs.len() + steered_msgs.len());
+        all_msgs.extend(msgs.iter());
+        all_msgs.extend(steered_msgs.iter());
+
         if outcome.exit_code == ExitCode::Success {
-            for msg in msgs {
+            for msg in &all_msgs {
                 if let Err(err) = queue.mark_done(msg) {
                     stderr_tracker.writeln_line(&format!(
                         "anix: failed to move inbox message `{}` to done/: {err}",
@@ -858,7 +870,7 @@ fn execute_tracked_cycle(
             }
         }
         deliver_batch_replies(
-            msgs,
+            &all_msgs,
             &cfg.name,
             outcome.exit_code.as_i32(),
             &outcome.delivered_output,
@@ -929,7 +941,7 @@ fn execute_tracked_cycle(
 }
 
 fn deliver_batch_replies(
-    msgs: &[InboxMessage],
+    msgs: &[&InboxMessage],
     agent_name: &str,
     exit_code: i32,
     body: &str,
@@ -1253,13 +1265,21 @@ fn process_inbox_batch(
                 for m in msgs {
                     let _ = queue.mark_done(m);
                 }
-                deliver_batch_replies(msgs, &cfg.name, 0, "compacted\n", tracer);
+                let msg_refs: Vec<&InboxMessage> = msgs.iter().collect();
+                deliver_batch_replies(&msg_refs, &cfg.name, 0, "compacted\n", tracer);
                 return Ok((ExitCode::Success, String::new(), false));
             }
             Err(err) => {
                 stderr_tracker.writeln_line(&format!("anix: {err}"));
                 let code = err.exit_code();
-                deliver_batch_replies(msgs, &cfg.name, code.as_i32(), &err.to_string(), tracer);
+                let msg_refs: Vec<&InboxMessage> = msgs.iter().collect();
+                deliver_batch_replies(
+                    &msg_refs,
+                    &cfg.name,
+                    code.as_i32(),
+                    &err.to_string(),
+                    tracer,
+                );
                 return Ok((code, String::new(), false));
             }
         }
@@ -1315,6 +1335,8 @@ fn run_inference_cycle(
     provider_pool: &mut ProviderPool,
     stderr_tracker: &StderrTracker,
     tracer: &mut Tracer,
+    inbox_queue: Option<&InboxQueue>,
+    steered_out: &mut Vec<InboxMessage>,
 ) -> CycleOutcome {
     let Some(provider_cfg) = cfg.active_provider().cloned() else {
         stderr_tracker.writeln_line(&format!("anix: provider `{}` not found", cfg.provider));
@@ -2059,6 +2081,78 @@ fn run_inference_cycle(
                 }
 
                 folded_this_turn = true;
+            }
+        }
+
+        // Mid-cycle Maildir batch steering strictly at the turn boundary:
+        // ONLY after ALL paired `tool_calls` of the current assistant turn have finished and
+        // committed their `Tool` results to WAL (never between tool calls of the same turn!).
+        if let Some(queue) = inbox_queue {
+            match queue.try_claim_all_new() {
+                Ok(mut steered) if !steered.is_empty() => {
+                    let mut steered_ids = Vec::with_capacity(steered.len());
+                    let mut body_sections = Vec::new();
+                    for msg in &steered {
+                        steered_ids.push(msg.message_id().to_owned());
+                        if let Some(ref reply_id) = msg.envelope.headers.in_reply_to
+                            && let Some(released) = state.release_hold(reply_id)
+                        {
+                            let mut rf = Map::new();
+                            rf.insert("id".into(), Value::String(released.id));
+                            rf.insert("reason".into(), Value::String("in_reply_to".into()));
+                            if let Some(lbl) = released.label {
+                                rf.insert("label".into(), Value::String(lbl));
+                            }
+                            tracer.emit_event("hold_released", rf);
+                        }
+                        if msg
+                            .envelope
+                            .headers
+                            .control
+                            .as_deref()
+                            .is_some_and(|op| op.eq_ignore_ascii_case("compact"))
+                        {
+                            state.pending_compact = true;
+                        }
+                        if !msg.envelope.body.is_empty() {
+                            body_sections.push(msg.format_for_user_turn());
+                        }
+                    }
+                    if !body_sections.is_empty() {
+                        let combined = body_sections.join("\n\n");
+                        if let Err(code) = state.push_user_message(
+                            &combined,
+                            steered_ids.clone(),
+                            wal,
+                            stderr_tracker,
+                        ) {
+                            steered_out.append(&mut steered);
+                            return CycleOutcome {
+                                exit_code: code,
+                                reason: CycleEndReason::Error,
+                                turns: cycle_turns,
+                                delivered_output: String::new(),
+                            };
+                        }
+                    }
+                    let mut sf = Map::new();
+                    sf.insert("count".into(), Value::from(steered.len() as u64));
+                    sf.insert(
+                        "message_ids".into(),
+                        Value::Array(steered_ids.into_iter().map(Value::String).collect()),
+                    );
+                    tracer.emit_event("inbox_steered", sf);
+                    steered_out.append(&mut steered);
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    let mut wf = Map::new();
+                    wf.insert(
+                        "message".into(),
+                        Value::String(format!("mid-cycle inbox drain failed: {err}")),
+                    );
+                    tracer.emit_event("warning", wf);
+                }
             }
         }
     }
