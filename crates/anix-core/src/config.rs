@@ -24,7 +24,7 @@ const DEFAULT_PROVIDER: &str = "openai-responses";
 const DEFAULT_SHELL: &str = "msh";
 const DEFAULT_TOOL_NAME: &str = "shell";
 const DEFAULT_MAX_TURNS: u32 = 20;
-const DEFAULT_MAX_TOKENS: u32 = 128_000;
+const DEFAULT_MAX_TOKENS: u32 = 256_000;
 const DEFAULT_COMPACT_THRESHOLD: CompactThreshold = CompactThreshold::Ratio(0.8);
 const DEFAULT_PROVIDER_TIMEOUT_SEC: u64 = 120;
 const DEFAULT_IDLE_TIMEOUT_SEC: u64 = 300;
@@ -352,6 +352,8 @@ pub struct ResolvedConfig {
     pub paths: AgentPaths,
     pub config_file: PathBuf,
     pub hooks_dir: PathBuf,
+    /// Canonical path to the active `*.agent` script (exposed to shell children as `$ANIX_AGENT`).
+    pub script_path: Option<PathBuf>,
     pub name: String,
     pub provider: String,
     pub model: String,
@@ -652,10 +654,16 @@ impl ResolvedConfig {
             (String::new(), Vec::new())
         };
 
+        let script_path = cli
+            .script
+            .as_ref()
+            .map(|p| fs::canonicalize(p).unwrap_or_else(|_| p.clone()));
+
         Ok(Self {
             paths,
             config_file,
             hooks_dir,
+            script_path,
             name,
             provider,
             model,

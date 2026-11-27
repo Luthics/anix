@@ -561,6 +561,7 @@ pub fn deliver_reap_notify_once(
             from: Some("msh".into()),
             control: None,
             exit_code: Some(exit_code),
+            media: Vec::new(),
         },
         body,
     };

@@ -256,11 +256,14 @@ else
 fi
 install -m 0755 "${STAGE}/libexec/anix/tools/aview" "${PREFIX}/libexec/anix/tools/aview"
 install -m 0755 "${STAGE}/libexec/anix/tools/aclr" "${PREFIX}/libexec/anix/tools/aclr"
+if [ -f "${STAGE}/libexec/anix/tools/aplan" ]; then
+  install -m 0755 "${STAGE}/libexec/anix/tools/aplan" "${PREFIX}/libexec/anix/tools/aplan"
+fi
 
 mkdir -p "${CONFIG_DIR}" "${AGENTS_DIR}" "${CONFIG_DIR}/hooks/pre-context.d"
 chmod 0755 "${CONFIG_DIR}/hooks" "${CONFIG_DIR}/hooks/pre-context.d"
 if [ -x "${PREFIX}/libexec/anix/anix-hook" ]; then
-  for hook_name in 20-skills 30-tips; do
+  for hook_name in 10-agents-md 15-memory 20-skills 30-tips; do
     if [ ! -e "${CONFIG_DIR}/hooks/pre-context.d/${hook_name}" ] && [ ! -L "${CONFIG_DIR}/hooks/pre-context.d/${hook_name}" ]; then
       ln -s "${PREFIX}/libexec/anix/anix-hook" "${CONFIG_DIR}/hooks/pre-context.d/${hook_name}"
     fi
@@ -324,8 +327,8 @@ fi
 say ""
 say "Installed Anix successfully:"
 say "  $("${PREFIX}/bin/anix" --version)"
-say "  Binaries: ${PREFIX}/bin/anix, ${PREFIX}/libexec/anix/{msh,anix-approve,anix-hook,anix-provider{,-openai-responses,-openai-compat,-anthropic},tools/{aview,aclr}}"
-say "  Hooks:    ${CONFIG_DIR}/hooks/pre-context.d/{20-skills,30-tips}"
+say "  Binaries: ${PREFIX}/bin/anix, ${PREFIX}/libexec/anix/{msh,anix-approve,anix-hook,anix-provider{,-openai-responses,-openai-compat,-anthropic},tools/{aview,aclr,aplan}}"
+say "  Hooks:    ${CONFIG_DIR}/hooks/pre-context.d/{10-agents-md,15-memory,20-skills,30-tips}"
 say "  Config:   ${CONFIG_DIR}/config.toml"
 say "  Agents:   ${AGENTS_DIR}/bash.agent"
 

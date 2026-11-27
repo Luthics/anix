@@ -15,7 +15,7 @@ You are running as a standard POSIX process (`anix` executing a `*.agent` script
 - **Non-interactive isolation**: every call runs in an isolated process group with `stdin` on `/dev/null` and anti-hang env (`PAGER=cat`, `NO_COLOR=1`, `GIT_TERMINAL_PROMPT=0`, `DEBIAN_FRONTEND=noninteractive`).
 - **Output folding & binary circuit breaker**: outputs exceeding `200` lines or `8192` bytes (`MSH_MAX_LINES` / `MSH_MAX_BYTES`) are folded to the first 20 + last 20 lines with the full text saved to `/tmp/msh_<uuid>.log`. Binary output is suppressed to a temp file (inspect images/PDFs with `aview` when your provider supports vision, or text tools otherwise). Prefer targeted reads (`rg`, `head`, `tail`, `sed -n`, `jq`) over dumping huge files at once.
 - **Timeouts, `hold` leases & Maildir wakeup**: exceeding `timeout_sec` yields to background by default, emits a `hold` lease on `$ANIX_CTL` (preventing `--idle-timeout` exit), and in `--inbox` mode automatically delivers a completion message back to `$ANIX_INBOX` when finished (see `how-to-background.md`).
-- **Env isolation & approval wrappers**: `anix` clears `ANIX_*` vars before spawning the shell (preserving only `ANIX_LOG`/`ANIX_TRACE_LEVEL` and actively injecting `$ANIX_OUT`/`$ANIX_ERR`/`$ANIX_CTL`, `$ANIX_TOOL_ARGS`, and `$ANIX_INBOX` when running in `--inbox` mode). If your agent is wrapped with `anix-approve`, disallowed commands return an error tool result or abort with exit `75`.
+- **Env isolation & approval wrappers**: `anix` clears `ANIX_*` vars before spawning the shell (preserving only `ANIX_LOG`/`ANIX_TRACE_LEVEL` and actively injecting `$ANIX_OUT`/`$ANIX_ERR`/`$ANIX_CTL`, `$ANIX_TOOL_ARGS`, `$ANIX_WAL`/`$ANIX_LEAF`/`$ANIX_AGENT`, and `$ANIX_INBOX` when running in `--inbox` mode). If your agent is wrapped with `anix-approve`, disallowed commands return an error tool result or abort with exit `75`.
 
 ## 3. Context Lifecycle, Tree WAL, Parallel `fork`, Folding & Compaction
 - **Frozen prefix (KV-Cache)**: your initial `system` message (`turn_id: 0`) is frozen on turn 0 so the provider can hit prompt cache across turns. Runtime notices append at the tail as `<runtime_update>` without invalidating the prefix.
@@ -29,6 +29,8 @@ You are running as a standard POSIX process (`anix` executing a `*.agent` script
   - Fold dead-end exploration tails without breaking your frozen KV-cache prefix: `aclr -t <turn_id> "Checked X; Y failed"` (explicit) or `aclr -t <turn_id>` (auto-summary).
 - **Full Compaction (`aclr -s` / auto-threshold / `SIGUSR1` / `Anix-Control: compact`)**:
   - Summarizes the active window into a `<checkpoint>` section and refreshes the frozen system prefix.
+- **Live Progress Checklist (`aplan`)**:
+  - For multi-step tasks (3+ steps), emit live UI progress over `$ANIX_CTL` without adding WAL bloat using Markdown checkboxes on stdin (`aplan <<'EOF'\n- [x] Done\n- [~] Working\n- [ ] Next\nEOF`) or flags (`aplan -d "Done" -i "Working" -p "Next"` / `aplan clear`).
 
 ## 4. Budgets & Self-Discipline
 - You run under hard `max_turns` and `max_tokens` limits (hitting either exits `124`).

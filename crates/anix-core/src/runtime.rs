@@ -167,6 +167,22 @@ pub fn execute(cfg: &ResolvedConfig, script: &AgentScript, script_args: &[String
     {
         run_fields.insert("leaf_id".into(), Value::from(lid));
     }
+    let initial_ctx_tokens = if replayed.is_fresh {
+        0
+    } else {
+        let initial_msgs: Vec<IrMessage> =
+            replayed.entries.iter().map(|e| e.message.clone()).collect();
+        compact::estimate_context_tokens(&initial_msgs, &replayed.assistant_usages)
+    };
+    if let Ok(u) = serde_json::to_value(replayed.session_usage) {
+        run_fields.insert("session_usage".into(), u);
+    }
+    if let Ok(cw) = serde_json::to_value(ContextWatermark {
+        tokens: initial_ctx_tokens,
+        max_tokens: cfg.max_tokens,
+    }) {
+        run_fields.insert("context".into(), cw);
+    }
     tracer.emit_event("run_start", run_fields);
 
     for warn in cfg.startup_warnings(&script.prompt) {
@@ -696,8 +712,28 @@ impl SessionState {
         wal: &mut WalStore,
         stderr_tracker: &StderrTracker,
     ) -> Result<(), ExitCode> {
+        self.push_user_message_with_media(text, Vec::new(), message_ids, wal, stderr_tracker)
+    }
+
+    fn push_user_message_with_media(
+        &mut self,
+        text: &str,
+        media: Vec<MediaAttachment>,
+        message_ids: Vec<String>,
+        wal: &mut WalStore,
+        stderr_tracker: &StderrTracker,
+    ) -> Result<(), ExitCode> {
         let tid = self.alloc_turn_id();
-        let msg = IrMessage::user(tid, text);
+        let valid_media: Vec<MediaAttachment> = media
+            .into_iter()
+            .filter(|m| ALLOWED_MEDIA_MIMES.contains(&m.mime.as_str()))
+            .collect();
+        let msg = IrMessage::User {
+            turn_id: tid,
+            text: text.to_owned(),
+            media: valid_media,
+            extra: BTreeMap::new(),
+        };
         self.push_message(msg, None, message_ids, wal, stderr_tracker)
     }
 
@@ -1193,6 +1229,7 @@ fn process_inbox_batch(
 ) -> Result<(ExitCode, String, bool), ExitCode> {
     let mut saw_compact_control = false;
     let mut body_sections: Vec<String> = Vec::new();
+    let mut attached_media: Vec<MediaAttachment> = Vec::new();
     let mut msg_ids: Vec<String> = Vec::with_capacity(msgs.len());
 
     for msg in msgs {
@@ -1222,13 +1259,17 @@ fn process_inbox_batch(
             state.pending_compact = true;
         }
 
+        if !msg.envelope.headers.media.is_empty() {
+            attached_media.extend(msg.envelope.headers.media.iter().cloned());
+        }
+
         if !msg.envelope.body.is_empty() {
             body_sections.push(msg.format_for_user_turn());
         }
     }
 
-    // Control-only batch (e.g. `anix send <inbox> --control compact` with no user text):
-    if body_sections.is_empty() && saw_compact_control {
+    // Control-only batch (e.g. `anix send <inbox> --control compact` with no user text or media):
+    if body_sections.is_empty() && attached_media.is_empty() && saw_compact_control {
         state.pending_compact = false;
         let current_msgs = state.messages_cloned();
         let outcome = compact::run_full_compaction(
@@ -1294,7 +1335,13 @@ fn process_inbox_batch(
         body_sections.join("\n\n")
     };
 
-    state.push_user_message(&combined_user_text, msg_ids, wal, stderr_tracker)?;
+    state.push_user_message_with_media(
+        &combined_user_text,
+        attached_media,
+        msg_ids,
+        wal,
+        stderr_tracker,
+    )?;
 
     let source_label = if msgs.len() == 1 {
         msgs[0].filename.clone()
@@ -1566,6 +1613,10 @@ fn run_inference_cycle(
             extra: BTreeMap::new(),
         };
 
+        // Capture the latest closed, fork-safe WAL leaf BEFORE appending an open assistant message
+        // with pending `tool_calls`, so shell commands can safely run `anix fork "$ANIX_WAL" --leaf "$ANIX_LEAF"`.
+        let fork_safe_leaf = state.current_parent_id();
+
         if let Err(code) = state.push_message(
             assistant_msg,
             response.usage,
@@ -1727,6 +1778,9 @@ fn run_inference_cycle(
             tracer.emit_event("tool_start", start_fields);
 
             let mount_anix_out = cfg.output == OutputMode::Explicit;
+            let wal_abs_path = wal
+                .path()
+                .map(|p| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf()));
             let shell_out = match fd::run_shell_command(
                 &shell_bin,
                 &cfg.shell_prefix_args,
@@ -1736,7 +1790,12 @@ fn run_inference_cycle(
                 &cfg.paths.cwd,
                 exec_timeout_sec,
                 exec_kill_on_timeout,
-                cfg.inbox.as_deref(),
+                fd::ShellRuntimeEnv {
+                    parent_inbox: cfg.inbox.as_deref(),
+                    wal_path: wal_abs_path.as_deref(),
+                    fork_leaf: fork_safe_leaf,
+                    agent_script: cfg.script_path.as_deref(),
+                },
                 mount_anix_out,
                 sandbox,
                 signals,
@@ -1857,6 +1916,15 @@ fn run_inference_cycle(
                             }
                             tracer.emit_event("hold_released", rf);
                         }
+                    }
+                    CtlFrame::Plan { steps } => {
+                        // Ephemeral live checklist broadcast strictly to `--trace-fd` (never persisted to WAL).
+                        let mut pf = Map::new();
+                        pf.insert(
+                            "steps".into(),
+                            serde_json::to_value(&steps).unwrap_or_else(|_| Value::Array(vec![])),
+                        );
+                        tracer.emit_event("plan_update", pf);
                     }
                 }
             }
@@ -2092,6 +2160,7 @@ fn run_inference_cycle(
                 Ok(mut steered) if !steered.is_empty() => {
                     let mut steered_ids = Vec::with_capacity(steered.len());
                     let mut body_sections = Vec::new();
+                    let mut steered_media = Vec::new();
                     for msg in &steered {
                         steered_ids.push(msg.message_id().to_owned());
                         if let Some(ref reply_id) = msg.envelope.headers.in_reply_to
@@ -2114,14 +2183,18 @@ fn run_inference_cycle(
                         {
                             state.pending_compact = true;
                         }
+                        if !msg.envelope.headers.media.is_empty() {
+                            steered_media.extend(msg.envelope.headers.media.iter().cloned());
+                        }
                         if !msg.envelope.body.is_empty() {
                             body_sections.push(msg.format_for_user_turn());
                         }
                     }
-                    if !body_sections.is_empty() {
+                    if !body_sections.is_empty() || !steered_media.is_empty() {
                         let combined = body_sections.join("\n\n");
-                        if let Err(code) = state.push_user_message(
+                        if let Err(code) = state.push_user_message_with_media(
                             &combined,
+                            steered_media,
                             steered_ids.clone(),
                             wal,
                             stderr_tracker,

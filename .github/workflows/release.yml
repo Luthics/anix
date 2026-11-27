@@ -57,7 +57,7 @@ jobs:
         if: matrix.musl
         run: |
           BIN_DIR="target/${{ matrix.target }}/release"
-          for bin in anix msh anix-approve anix-hook anix-provider aview aclr; do
+          for bin in anix msh anix-approve anix-hook anix-provider aview aclr aplan; do
             file "${BIN_DIR}/${bin}"
             if ldd "${BIN_DIR}/${bin}" 2>&1 | grep -q '=>'; then
               echo "ERROR: ${bin} is dynamically linked" >&2
@@ -86,6 +86,7 @@ jobs:
           ln -sf anix-provider "${STAGE}/libexec/anix/anix-provider-anthropic"
           install -m 0755 "${BIN_DIR}/aview" "${STAGE}/libexec/anix/tools/aview"
           install -m 0755 "${BIN_DIR}/aclr" "${STAGE}/libexec/anix/tools/aclr"
+          install -m 0755 "${BIN_DIR}/aplan" "${STAGE}/libexec/anix/tools/aplan"
           install -m 0755 examples/bash.agent "${STAGE}/examples/bash.agent"
           install -m 0644 LICENSE README.md "${STAGE}/"
 

@@ -1,7 +1,7 @@
 # Anix Runtime（Layer 2 参考发行包）说明文档
 
 **性质**：Informative（非 Core 规范，任何组件均可按 [RFC.md](RFC.md) 独立替换）  
-**适用范围**：`anix-runtime`（Layer 2）默认组合发行包——包含 `anix`（Core）、`msh`（含后台 reaper）、`anix-approve`（Shell 审批包装器）、`anix-provider`、`a*` 工具集（`aview`、`aclr`）、独立前置钩子脚本（`20-skills`、`30-tips`）以及跨平台安装与自检约定。  
+**适用范围**：`anix-runtime`（Layer 2）默认组合发行包——包含 `anix`（Core）、`msh`（含后台 reaper）、`anix-approve`（Shell 审批包装器）、`anix-provider`、`a*` 工具集（`aview`、`aclr`、`aplan`）、独立前置钩子脚本（`10-agents-md`、`15-memory`、`20-skills`、`30-tips`）以及跨平台安装与自检约定。  
 
 ---
 
@@ -24,7 +24,7 @@
 | **`msh`** | `~/.local/libexec/anix/msh` | 面向模型的非交互 Shell 包装器：防挂起环境、二进制熔断、ANSI 清洗、输出折叠、按需超时转后台 + reaper 自动通过 `anix send` 回流 `$ANIX_INBOX`。 |
 | **`anix-approve`** | `~/.local/libexec/anix/anix-approve` | 独立 Shell 审批包装器（如 `shell: anix-approve -- msh`）：支持 `safe_commands` 白名单、外部裁决器 `--decider`、`/dev/tty` `[y/n/a/e]` 交互审批与无 TTY Fail-Closed（退出 `75`）。 |
 | **`anix-provider`** | `~/.local/libexec/anix/anix-provider` | 统一多方言 HTTP/SSE Provider 二进制，通过同目录 BusyBox 软链 `anix-provider-{openai-responses,openai-compat,anthropic}` 自动分流方言。 |
-| **`aview`、`aclr`** | `~/.local/libexec/anix/tools/` | 模型侧显式工具（通过 `$ANIX_CTL` 与 `anix` 通信）；由 `anix` 运行时前置注入子进程 `$PATH`。 |
+| **`aview`、`aclr`、`aplan`** | `~/.local/libexec/anix/tools/` | 模型侧显式工具（通过 `$ANIX_CTL` 与 `anix` 通信）；由 `anix` 运行时前置注入子进程 `$PATH`。 |
 | **`20-skills`、`30-tips`** | `~/.config/anix/hooks/pre-context.d/` | 独立 `pre-context.d/` 可执行钩子脚本（与内置 `builtin-tips/` 一并安装），遵循 POSIX `StrictModes`。 |
 
 ---
@@ -63,11 +63,12 @@ shell: anix-approve --decider ~/.config/anix/my-policy -- msh
 
 ---
 
-## 5. 参考辅助工具集：`aview` 与 `aclr`
+## 5. 参考辅助工具集：`aview`、`aclr` 与 `aplan`
 
 * **`aview [--max-dim 1568] [--pages 1-3] <path>`**：将本地图片/PDF 转码压缩至 `/tmp/aview_<uuid>.png`（`0600`），向 `$ANIX_CTL` 写入 `media` 帧。
 * **`aclr -s`**：向 `$ANIX_CTL` 写入 `{"op":"compact"}`，触发全量压缩。
 * **`aclr -t <turn_id> ["<summary>"]`**：向 `$ANIX_CTL` 写入 `fold` 帧，执行手工或自动摘要尾部折叠（保留冻结前缀缓存）。
+* **`aplan`**：向 `$ANIX_CTL` 写入瞬态 `{"op":"plan","steps":[...]}` 帧，实时刷新 Layer 3 前端任务进度条而不写入 WAL、不破坏前缀缓存；支持标准输入 Markdown 清单（`- [x]` / `- [~]` / `- [ ]` / `- [-]` / `- [!]`）、标志参数（`-d`/`-i`/`-p`/`-s`/`-f`）及 `aplan clear`。
 
 ---
 
@@ -81,11 +82,13 @@ shell: anix-approve --decider ~/.config/anix/my-policy -- msh
 
 ---
 
-## 7. 独立前置钩子脚本（`20-skills` 与 `30-tips`）
+## 7. 独立前置钩子脚本（`10-agents-md`、`15-memory`、`20-skills` 与 `30-tips`）
 
-`20-skills` 与 `30-tips` 已从 `anix` 内核移除，改为标准 `pre-context.d/` 可执行脚本随 Layer 2 分发（权限 `0755`，受 Core POSIX `StrictModes` 保护）：
+`10-agents-md`、`15-memory`、`20-skills` 与 `30-tips` 均以标准 `pre-context.d/` 可执行脚本随 Layer 2 分发（权限 `0755`，受 Core POSIX `StrictModes` 保护，且仅在启用工具/Shell 时生效）：
 
-* **`20-skills`**：按优先级扫描 `./.anix/skills/` → `./.skills/` → `./.claude/skills/` → `~/.config/anix/skills/` → `~/.skills/` → `~/.claude/skills/`，向首条 `system` 追加 `<available_skills>` 索引。
+* **`10-agents-md`**：按广到窄顺序（`~/.config/anix/` → git root 沿途至 `cwd`）收集 `AGENTS.md`、`AGENTS.local.md`、`CLAUDE.md` 与 `CLAUDE.local.md`（路径与同内容自动去重，单文件 16 KiB / 总计 48 KiB 截断上限，遇不可读/非 UTF-8 文件 fail-open 跳过），以 `<project_instructions>` 包裹 `<agents_md>` / `<claude_md>` 块追加到首条 `system`（可设 `ANIX_AGENTS_MD=0` 或 mask 禁用）。
+* **`15-memory`**：按主 Git 仓库根（自动跨 worktree 共享）定位 `${XDG_DATA_HOME:-~/.local/share}/anix/memory/<project-key>/`，将 `MEMORY.md` 索引前 200 行 / 25 KiB 与精简写入契约以 `<auto_memory>` 块注入首条 `system`（可设 `ANIX_MEMORY=0` 或 mask 禁用）。
+* **`20-skills`**：按优先级扫描 `./.anix/skills/` → `./.agents/skills/` → `./.skills/` → `./.claude/skills/` → `~/.config/anix/skills/` → `~/.agents/skills/` → `~/.skills/` → `~/.claude/skills/`，向首条 `system` 追加 `<available_skills>` 索引。
 * **`30-tips`**：合并内置指南（`how-to-background.md`、`how-to-goal.md`、`how-to-loop.md`、`how-to-mcp.md`、`how-to-runtime.md`、`how-to-sub-agent.md`）、`~/.config/anix/tips/` 与 `./.anix/tips/`，输出 `<runtime_tips>` 索引。
 * 用户随时可用 0 字节文件或 `/dev/null` 软链屏蔽任意脚本，无需重新编译内核。
 

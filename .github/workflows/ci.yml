@@ -72,7 +72,7 @@ jobs:
       - name: Verify static linkage and smoke test
         run: |
           BIN_DIR="target/x86_64-unknown-linux-musl/release"
-          for bin in anix msh anix-provider aview aclr; do
+          for bin in anix msh anix-provider aview aclr aplan; do
             file "${BIN_DIR}/${bin}"
             if ldd "${BIN_DIR}/${bin}" 2>&1 | grep -q '=>'; then
               echo "ERROR: ${bin} is dynamically linked" >&2

@@ -8,8 +8,8 @@ set -euo pipefail
 #   ~/.local/libexec/anix/anix-hook
 #   ~/.local/libexec/anix/anix-provider
 #   ~/.local/libexec/anix/anix-provider-{openai-responses,openai-compat,anthropic} -> anix-provider
-#   ~/.local/libexec/anix/tools/{aview,aclr}
-#   ~/.config/anix/hooks/pre-context.d/{20-skills,30-tips} -> ~/.local/libexec/anix/anix-hook
+#   ~/.local/libexec/anix/tools/{aview,aclr,aplan}
+#   ~/.config/anix/hooks/pre-context.d/{10-agents-md,15-memory,20-skills,30-tips} -> ~/.local/libexec/anix/anix-hook
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROFILE="${1:-debug}"
@@ -38,10 +38,11 @@ ln -sf anix-provider "${PREFIX}/libexec/anix/anix-provider-openai-compat"
 ln -sf anix-provider "${PREFIX}/libexec/anix/anix-provider-anthropic"
 install -m 0755 "${BIN_DIR}/aview" "${PREFIX}/libexec/anix/tools/aview"
 install -m 0755 "${BIN_DIR}/aclr" "${PREFIX}/libexec/anix/tools/aclr"
+install -m 0755 "${BIN_DIR}/aplan" "${PREFIX}/libexec/anix/tools/aplan"
 
 # Install default Layer 2 pre-context.d hooks (StrictModes-clean 0755, without clobbering masks/overrides).
 install -d -m 0755 "${CONFIG_DIR}/hooks/pre-context.d"
-for hook_name in 20-skills 30-tips; do
+for hook_name in 10-agents-md 15-memory 20-skills 30-tips; do
   if [[ ! -e "${CONFIG_DIR}/hooks/pre-context.d/${hook_name}" && ! -L "${CONFIG_DIR}/hooks/pre-context.d/${hook_name}" ]]; then
     ln -s "${PREFIX}/libexec/anix/anix-hook" "${CONFIG_DIR}/hooks/pre-context.d/${hook_name}"
   fi
@@ -57,4 +58,5 @@ ls -lh "${PREFIX}/bin/anix" \
        "${PREFIX}/libexec/anix/anix-provider-openai-compat" \
        "${PREFIX}/libexec/anix/anix-provider-anthropic" \
        "${PREFIX}/libexec/anix/tools/aview" \
-       "${PREFIX}/libexec/anix/tools/aclr"
+       "${PREFIX}/libexec/anix/tools/aclr" \
+       "${PREFIX}/libexec/anix/tools/aplan"

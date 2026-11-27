@@ -5,6 +5,24 @@ use serde::{Deserialize, Serialize};
 /// Hard limit per JSONL control frame on `$ANIX_CTL` (64 KiB, Section 6.2).
 pub const MAX_CTL_FRAME_BYTES: usize = 64 * 1024;
 
+/// Lifecycle state for a single live task checklist step emitted via `aplan` / `CtlFrame::Plan`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanStepStatus {
+    Pending,
+    InProgress,
+    Done,
+    Skipped,
+    Failed,
+}
+
+/// Single step in an ephemeral live plan checklist broadcast to `--trace-fd` (never persisted to WAL).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanStep {
+    pub title: String,
+    pub status: PlanStepStatus,
+}
+
 /// Single JSONL control frame sent from child tools to `anix` over `$ANIX_CTL`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -35,6 +53,11 @@ pub enum CtlFrame {
     },
     /// Explicitly release a previously registered `Hold` lease.
     Release { id: String },
+    /// Broadcast an ephemeral live checklist update to `--trace-fd` (`aplan`); empty `steps` clears.
+    Plan {
+        #[serde(default)]
+        steps: Vec<PlanStep>,
+    },
 }
 
 #[cfg(test)]
@@ -66,6 +89,19 @@ mod tests {
             CtlFrame::Release {
                 id: "j_1234abcd".into(),
             },
+            CtlFrame::Plan {
+                steps: vec![
+                    PlanStep {
+                        title: "Inspect code".into(),
+                        status: PlanStepStatus::Done,
+                    },
+                    PlanStep {
+                        title: "Apply fix".into(),
+                        status: PlanStepStatus::InProgress,
+                    },
+                ],
+            },
+            CtlFrame::Plan { steps: Vec::new() },
         ];
 
         for frame in frames {

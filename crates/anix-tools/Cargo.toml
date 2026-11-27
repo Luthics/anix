@@ -17,6 +17,10 @@ name = "aclr"
 path = "src/bin/aclr.rs"
 
 [[bin]]
+name = "aplan"
+path = "src/bin/aplan.rs"
+
+[[bin]]
 name = "anix-approve"
 path = "src/bin/anix-approve.rs"
 

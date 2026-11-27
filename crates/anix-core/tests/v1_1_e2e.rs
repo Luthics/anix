@@ -1779,3 +1779,230 @@ exec /bin/sh "$@"
 
     let _ = fs::remove_dir_all(&root);
 }
+
+#[test]
+fn shell_exposes_self_fork_env_vars_and_mid_turn_fork_passes_fsck() {
+    let root = make_temp_env("self-fork-env");
+    let home = setup_fhs_home(&root);
+    let work = root.join("work");
+    mkdir_0755(&work);
+
+    let wal_path = root.join("main.wal.jsonl");
+    let forked_path = root.join("child-branch.wal.jsonl");
+    let probe_path = root.join("env-probe.txt");
+    let anix_exe = PathBuf::from(env!("CARGO_BIN_EXE_anix"));
+
+    let mock_prov = root.join("mock-fork-prov.py");
+    write_exec(
+        &mock_prov,
+        &format!(
+            r#"#!/usr/bin/env python3
+import json, sys
+
+for raw in sys.stdin:
+    line = raw.strip()
+    if not line:
+        continue
+    req = json.loads(line)
+    has_tool_res = any(m.get("role") == "tool" for m in req["messages"])
+    if not has_tool_res:
+        cmd = (
+            'printf "WAL=%s\nLEAF=%s\nAGENT=%s\n" "$ANIX_WAL" "$ANIX_LEAF" "$ANIX_AGENT" > '
+            + {probe_path:?}
+            + ' && '
+            + {anix_exe:?}
+            + ' fork "$ANIX_WAL" --leaf "$ANIX_LEAF" -o '
+            + {forked_path:?}
+            + ' && '
+            + {anix_exe:?}
+            + ' fsck '
+            + {forked_path:?}
+        )
+        print(json.dumps({{
+            "type": "tool_call",
+            "id": "tc_self_fork",
+            "name": "shell",
+            "arguments": {{"cmd": cmd}},
+        }}), flush=True)
+        print(json.dumps({{"type": "usage", "input_tokens": 20, "output_tokens": 10}}), flush=True)
+        print(json.dumps({{"type": "done", "finish_reason": "tool_calls"}}), flush=True)
+    else:
+        print(json.dumps({{"type": "text_delta", "text": "SELF_FORK_OK"}}), flush=True)
+        print(json.dumps({{"type": "usage", "input_tokens": 30, "output_tokens": 5}}), flush=True)
+        print(json.dumps({{"type": "done", "finish_reason": "stop"}}), flush=True)
+"#,
+            probe_path = probe_path.display().to_string(),
+            anix_exe = anix_exe.display().to_string(),
+            forked_path = forked_path.display().to_string(),
+        ),
+    );
+
+    let cfg_dir = home.join(".config/anix");
+    mkdir_0755(&cfg_dir);
+    fs::write(
+        cfg_dir.join("config.toml"),
+        format!(
+            "[defaults]\nprovider = \"mock\"\nmodel = \"m1\"\n\n[providers.mock]\nbin = \"{}\"\nmode = \"coprocess\"\napi_key_env = \"\"\n",
+            mock_prov.display()
+        ),
+    )
+    .unwrap();
+
+    let script = work.join("self-fork.agent");
+    write_exec(
+        &script,
+        "#!/usr/bin/env anix\n---\nname: self-fork\n---\nTest.\n",
+    );
+
+    let mut cmd = base_cmd(&home, &work);
+    cmd.args([
+        "-c",
+        &wal_path.display().to_string(),
+        &script.display().to_string(),
+        "Please self-fork mid-turn",
+    ])
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+    configure_child_fds(&mut cmd, None);
+    let out = cmd.output().expect("run self-fork");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "SELF_FORK_OK");
+
+    let probe = fs::read_to_string(&probe_path).expect("read env probe");
+    let canon_wal = fs::canonicalize(&wal_path).unwrap();
+    let canon_script = fs::canonicalize(&script).unwrap();
+    assert!(
+        probe.contains(&format!("WAL={}", canon_wal.display())),
+        "probe={probe}"
+    );
+    // Node 1=SessionInit, 2=System, 3=User (closed!); Node 4=open Assistant(tool_calls) must NOT be chosen!
+    assert!(
+        probe.contains("LEAF=3\n"),
+        "expected closed leaf=3, got: {probe}"
+    );
+    assert!(
+        probe.contains(&format!("AGENT={}", canon_script.display())),
+        "probe={probe}"
+    );
+    assert!(forked_path.is_file(), "forked WAL must exist and pass fsck");
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn ctl_plan_frame_emits_ephemeral_plan_update_without_wal_bloat() {
+    let root = make_temp_env("ctl-plan-frame");
+    let home = setup_fhs_home(&root);
+    let work = root.join("work");
+    mkdir_0755(&work);
+
+    let wal_path = root.join("plan.wal.jsonl");
+    let trace_path = root.join("plan.trace.jsonl");
+
+    let mock_prov = root.join("mock-plan-prov.py");
+    write_exec(
+        &mock_prov,
+        r#"#!/usr/bin/env python3
+import json, sys
+
+for raw in sys.stdin:
+    line = raw.strip()
+    if not line:
+        continue
+    req = json.loads(line)
+    has_tool_res = any(m.get("role") == "tool" for m in req["messages"])
+    if not has_tool_res:
+        cmd = (
+            'printf \'{"op":"plan","steps":[{"title":"Inspect","status":"done"},'
+            '{"title":"Patch","status":"in_progress"}]}\\n\' > "$ANIX_CTL" && echo PLAN_SENT'
+        )
+        print(json.dumps({
+            "type": "tool_call",
+            "id": "tc_plan",
+            "name": "shell",
+            "arguments": {"cmd": cmd},
+        }), flush=True)
+        print(json.dumps({"type": "usage", "input_tokens": 12, "output_tokens": 6}), flush=True)
+        print(json.dumps({"type": "done", "finish_reason": "tool_calls"}), flush=True)
+    else:
+        print(json.dumps({"type": "text_delta", "text": "PLAN_E2E_OK"}), flush=True)
+        print(json.dumps({"type": "usage", "input_tokens": 20, "output_tokens": 4}), flush=True)
+        print(json.dumps({"type": "done", "finish_reason": "stop"}), flush=True)
+"#,
+    );
+
+    let cfg_dir = home.join(".config/anix");
+    mkdir_0755(&cfg_dir);
+    fs::write(
+        cfg_dir.join("config.toml"),
+        format!(
+            "[defaults]\nprovider = \"mock\"\nmodel = \"m1\"\n\n[providers.mock]\nbin = \"{}\"\nmode = \"coprocess\"\napi_key_env = \"\"\n",
+            mock_prov.display()
+        ),
+    )
+    .unwrap();
+
+    let script = work.join("plan.agent");
+    write_exec(
+        &script,
+        "#!/usr/bin/env anix\n---\nname: plan-test\n---\nTest.\n",
+    );
+
+    let trace_file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&trace_path)
+        .unwrap();
+
+    let mut cmd = base_cmd(&home, &work);
+    cmd.args([
+        "--trace-fd",
+        "9",
+        "-c",
+        &wal_path.display().to_string(),
+        &script.display().to_string(),
+        "Run plan update",
+    ])
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+    configure_child_fds(&mut cmd, Some((&trace_file, 9)));
+    let out = cmd.output().expect("run plan test");
+    drop(trace_file);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "PLAN_E2E_OK");
+
+    let trace_raw = fs::read_to_string(&trace_path).expect("read trace");
+    let plan_line = trace_raw
+        .lines()
+        .find(|l| l.contains("\"type\":\"plan_update\""))
+        .unwrap_or_else(|| panic!("expected plan_update in trace, got:\n{trace_raw}"));
+    let parsed: Value = serde_json::from_str(plan_line).expect("parse plan_update JSON");
+    let steps = parsed["steps"].as_array().expect("steps array");
+    assert_eq!(steps.len(), 2);
+    assert_eq!(steps[0]["title"], "Inspect");
+    assert_eq!(steps[0]["status"], "done");
+    assert_eq!(steps[1]["title"], "Patch");
+    assert_eq!(steps[1]["status"], "in_progress");
+
+    // Verify ephemeral contract: WAL must NOT contain any `plan_update` record.
+    let wal_raw = fs::read_to_string(&wal_path).expect("read wal");
+    assert!(
+        !wal_raw.contains("\"type\":\"plan_update\""),
+        "plan_update must be ephemeral and never written to WAL"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}

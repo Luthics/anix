@@ -3,6 +3,8 @@
 //! Plain text files placed directly into `<MAILDIR>/new/` are accepted with zero framing;
 //! structured messages prepend `Anix-*:` header lines terminated by a blank line (`\n\n`).
 
+use crate::ir::MediaAttachment;
+
 /// Optional structured headers at the top of a Maildir message file.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MaildirHeaders {
@@ -18,6 +20,8 @@ pub struct MaildirHeaders {
     pub control: Option<String>,
     /// Process exit code carried on `--wait` replies and `--notify` callbacks (`Anix-Exit-Code`).
     pub exit_code: Option<i32>,
+    /// Optional local media attachments carried via repeatable `Anix-Media: <mime> <path>` headers.
+    pub media: Vec<MediaAttachment>,
 }
 
 impl MaildirHeaders {
@@ -28,6 +32,7 @@ impl MaildirHeaders {
             && self.from.is_none()
             && self.control.is_none()
             && self.exit_code.is_none()
+            && self.media.is_empty()
     }
 }
 
@@ -72,6 +77,13 @@ impl MaildirEnvelope {
         }
         if let Some(code) = self.headers.exit_code {
             out.push_str(&format!("Anix-Exit-Code: {code}\n"));
+        }
+        for m in &self.headers.media {
+            out.push_str("Anix-Media: ");
+            out.push_str(&sanitize_header_val(&m.mime));
+            out.push(' ');
+            out.push_str(&sanitize_header_val(&m.path));
+            out.push('\n');
         }
         out.push('\n');
         out.push_str(&self.body);
@@ -141,6 +153,18 @@ impl MaildirEnvelope {
                             headers.exit_code = Some(code);
                         }
                     }
+                    "anix-media" => {
+                        if let Some((mime, path)) = val.split_once(char::is_whitespace) {
+                            let mime = mime.trim();
+                            let path = path.trim();
+                            if !mime.is_empty() && !path.is_empty() {
+                                headers.media.push(MediaAttachment {
+                                    mime: mime.to_owned(),
+                                    path: path.to_owned(),
+                                });
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -198,6 +222,10 @@ mod tests {
                 from: Some("msh".into()),
                 control: Some("compact".into()),
                 exit_code: Some(0),
+                media: vec![MediaAttachment {
+                    mime: "image/png".into(),
+                    path: "/tmp/shot 1.png".into(),
+                }],
             },
             body: "Job done.\n\nDetails here.".into(),
         };

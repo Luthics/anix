@@ -82,7 +82,10 @@ fn main() -> StdExitCode {
         } => {
             println!("[aclr] scheduled auto-summary tail fold from turn {from_turn}")
         }
-        CtlFrame::Media { .. } | CtlFrame::Hold { .. } | CtlFrame::Release { .. } => {}
+        CtlFrame::Media { .. }
+        | CtlFrame::Hold { .. }
+        | CtlFrame::Release { .. }
+        | CtlFrame::Plan { .. } => {}
     }
 
     ExitCode::Success.into()

@@ -212,13 +212,22 @@ pub fn build_request_with_session(
                 }
             }
             "reasoning_effort" => {
+                // Normalize canonical `"off"` / `"disabled"` -> OpenAI Responses `"none"`,
+                // while passing all other levels (`none`, `minimal`, `low`, `medium`, `high`,
+                // `xhigh`, `max`, custom) verbatim for maximum endpoint compatibility.
+                let normalized = match val.as_str() {
+                    Some(s) if matches!(s.to_ascii_lowercase().as_str(), "off" | "disabled") => {
+                        Value::String("none".into())
+                    }
+                    _ => val.clone(),
+                };
                 let reasoning = body
                     .entry("reasoning")
                     .or_insert_with(|| Value::Object(Map::new()));
                 if let Some(obj) = reasoning.as_object_mut() {
-                    obj.insert("effort".into(), val.clone());
+                    obj.insert("effort".into(), normalized);
                 } else {
-                    body.insert("reasoning".into(), json!({ "effort": val }));
+                    body.insert("reasoning".into(), json!({ "effort": normalized }));
                 }
             }
             "temperature"

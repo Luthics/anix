@@ -216,11 +216,12 @@ pub fn build_request(stream: &IrStream, model: &str) -> Result<Value, TranslateE
                         "none" | "off" | "disabled" => {
                             body.insert("thinking".into(), json!({ "type": "disabled" }));
                         }
-                        "low" | "medium" | "high" | "max" => {
+                        "low" | "medium" | "high" | "xhigh" | "max" => {
                             let target_budget: u32 = match effort.to_ascii_lowercase().as_str() {
                                 "low" => 2048,
                                 "medium" => 8192,
-                                _ => 16384,
+                                "high" => 16384,
+                                _ => 32768,
                             };
                             // Anthropic requires `max_tokens > thinking.budget_tokens` and `budget_tokens >= 1024`.
                             let budget = if explicit_max_tokens.is_none() {

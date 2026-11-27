@@ -81,6 +81,7 @@ pub fn deliver_reply(
             from: Some(from.to_owned()),
             control: None,
             exit_code: Some(exit_code),
+            media: Vec::new(),
         },
         body: body.to_owned(),
     };
@@ -104,6 +105,7 @@ pub fn deliver_notify(
             from: Some(agent_name.to_owned()),
             control: None,
             exit_code: Some(exit_code),
+            media: Vec::new(),
         },
         body: body.to_owned(),
     };
@@ -189,6 +191,7 @@ pub fn run_send(
             from: from.map(str::to_owned),
             control: control.map(str::to_owned),
             exit_code: None,
+            media: Vec::new(),
         },
         body,
     };

@@ -164,9 +164,20 @@ pub struct ShellOutput {
     pub interrupted_by: Option<ExitCode>,
 }
 
+/// Read-only runtime context channels actively injected into shell children after clearing
+/// inherited `ANIX_*` environment variables (RFC §3.4: child `anix` processes NEVER read these
+/// implicitly as their own CLI/config settings).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ShellRuntimeEnv<'a> {
+    pub parent_inbox: Option<&'a Path>,
+    pub wal_path: Option<&'a Path>,
+    pub fork_leaf: Option<u64>,
+    pub agent_script: Option<&'a Path>,
+}
+
 /// Spawn `<shell_bin> <shell_prefix_args...> -c <cmd>` with anonymous pipe relays for
-/// `$ANIX_OUT` (when `mount_anix_out`), `$ANIX_ERR`, `$ANIX_CTL`, active `$ANIX_INBOX`
-/// injection (when running in `--inbox` mode), and pure event-driven wait (`pidfd`/`kqueue`).
+/// `$ANIX_OUT` (when `mount_anix_out`), `$ANIX_ERR`, `$ANIX_CTL`, active `$ANIX_INBOX` /
+/// `$ANIX_WAL` / `$ANIX_LEAF` / `$ANIX_AGENT` injection, and pure event-driven wait (`pidfd`/`kqueue`).
 #[allow(clippy::too_many_arguments)]
 pub fn run_shell_command(
     shell_bin: &Path,
@@ -177,7 +188,7 @@ pub fn run_shell_command(
     cwd: &Path,
     exec_timeout_sec: Option<u64>,
     exec_kill_on_timeout: Option<bool>,
-    parent_inbox: Option<&Path>,
+    runtime_env: ShellRuntimeEnv<'_>,
     mount_anix_out: bool,
     sandbox: Option<&PreparedSandbox>,
     signals: &SignalState,
@@ -310,8 +321,17 @@ pub fn run_shell_command(
     } else {
         command.env_remove("ANIX_OUT");
     }
-    if let Some(inbox_dir) = parent_inbox {
+    if let Some(inbox_dir) = runtime_env.parent_inbox {
         command.env("ANIX_INBOX", inbox_dir);
+    }
+    if let Some(wal_path) = runtime_env.wal_path {
+        command.env("ANIX_WAL", wal_path);
+    }
+    if let Some(leaf_id) = runtime_env.fork_leaf {
+        command.env("ANIX_LEAF", leaf_id.to_string());
+    }
+    if let Some(agent_script) = runtime_env.agent_script {
+        command.env("ANIX_AGENT", agent_script);
     }
     if let Some(t) = exec_timeout_sec {
         command.env("ANIX_EXEC_TIMEOUT_SEC", t.to_string());
